@@ -1,7 +1,6 @@
 import cv2
-import numpy as np
 
-from wildcamtools.lib import FrameHandler
+from wildcamtools.lib import Frame, FrameHandler
 from wildcamtools.lib.stats import VideoFileStats
 
 
@@ -30,13 +29,13 @@ class Rescaler(FrameHandler):
         self.source_frametime = stats.frame_duration
         self.target_frametime = 1000.0 / self.fps
 
-    def handle(self, frame: np.ndarray) -> np.ndarray | None:
+    def handle(self, frame: Frame) -> Frame | None:
         self.now += self.source_frametime
         if self.now >= self.target_frametime:
             # were going to return this frame, so rescale it
-            frame_rescaled = cv2.resize(frame, self.xy, interpolation=cv2.INTER_LINEAR)
+            frame_rescaled = cv2.resize(frame.raw, self.xy, interpolation=cv2.INTER_LINEAR)
             self.now -= self.target_frametime
-            return frame_rescaled
+            return Frame(raw=frame_rescaled, frame_no=frame.frame_no)
         else:
             # skip this frame
             return None

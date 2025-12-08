@@ -4,9 +4,9 @@ from typing import Annotated
 import typer
 
 from wildcamtools.lib.motion import MogMotion
-from wildcamtools.lib.stats import Colourspace, VideoFileStats, get_video_stats
+from wildcamtools.lib.stats import get_video_stats
 from wildcamtools.lib.timing import Timer
-from wildcamtools.lib.vidio import generate_frames_cv2, save_video
+from wildcamtools.lib.vidio import FrameSourceFFMPEG, FrameWriterFFMPEG
 
 app = typer.Typer()
 
@@ -22,29 +22,21 @@ def motion_mog(
     stats = get_video_stats(input_)
 
     if stats.frame_count - history < 0:
-        print("Must have input longer than history")
+        typer.secho("Must have input longer than history")
         raise typer.Exit(code=1)
-
-    output_stats = VideoFileStats(
-        fps=stats.fps,
-        frame_count=stats.frame_count - history,
-        x=stats.x,
-        y=stats.y,
-        colourspace=Colourspace.boolean,
-    )
 
     mog_motion = MogMotion(history=history, threshold=threshold, detect_shadows=False, kernel_size=kernel_size)
     timer = Timer()
 
-    with save_video(output, stats=output_stats) as video_writer:
+    with FrameWriterFFMPEG(output, fps=stats.fps) as video_writer:
         frame_out = None
-        for i, frame in generate_frames_cv2(input_):
+        for frame in FrameSourceFFMPEG(input_):
             with timer:
                 frame_out = mog_motion.handle(frame)
-            if i >= history:
+            if frame.frame_no >= history:
                 video_writer.write(frame_out)
 
-    print(f"Processed {timer.intervals:d} frames in {timer.elapsed:.2f} sec; {timer.per_second:.2f}FPS")
+    typer.secho(f"Processed {timer.intervals:d} frames in {timer.elapsed:.2f} sec; {timer.per_second:.2f}FPS")
 
 
 if __name__ == "__main__":

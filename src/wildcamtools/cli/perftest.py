@@ -1,5 +1,4 @@
 import contextlib
-import math
 
 import typer
 
@@ -8,14 +7,14 @@ from wildcamtools.lib.motion import MogMotion
 from wildcamtools.lib.rescale import Rescaler
 from wildcamtools.lib.stats import Colourspace, VideoFileStats, get_video_stats
 from wildcamtools.lib.timing import Timer
-from wildcamtools.lib.vidio import generate_frames_cv2, save_video
+from wildcamtools.lib.vidio import FrameSourceFFMPEG, FrameWriterFFMPEG
 
 app = typer.Typer()
 
 
-def convert(input_: str, output: str, output_stats: VideoFileStats, timer: Timer, handler: FrameHandler) -> None:
-    with save_video(output, stats=output_stats) as video_writer:
-        for _, frame in generate_frames_cv2(input_):
+def convert(input_: str, output: str, fps: float, timer: Timer, handler: FrameHandler) -> None:
+    with FrameWriterFFMPEG(output, fps=fps) as video_writer:
+        for frame in FrameSourceFFMPEG(input_):
             with timer:
                 frame_rescaled = handler.handle(frame)
             if frame_rescaled is not None:
@@ -40,10 +39,10 @@ def perftest(output: str = "-") -> None:
                 downscales[-1][1] // 2,
                 downscales[-1][2],
             ))
-        # add halving frame rates untill less than 10 fps
+        # add halving frame rates until less than 2 fps
         # do this at all resolution scales
         downscaled_resolutions = tuple(downscales)
-        while downscales[-1][2] > 10:
+        while downscales[-1][2] > 2:
             new_fps = downscales[-1][2] // 2
             downscales.extend((d[0], d[1], new_fps) for d in downscaled_resolutions)
 
@@ -51,20 +50,11 @@ def perftest(output: str = "-") -> None:
         downscaled_files: dict[tuple[int, int, float], str] = {}
         for x, y, fps in downscales:
             rescaler = Rescaler(stats=input_stats, x=x, y=y, fps=fps)
-            output_stats = VideoFileStats(
-                fps=fps,
-                frame_count=math.floor(
-                    (rescaler.source_frametime / rescaler.target_frametime) * input_stats.frame_count
-                ),
-                x=x,
-                y=y,
-                colourspace=input_stats.colourspace,
-            )
             output = f"{x}x{y}f{fps:.2f}.mp4"
-            print(output)
+            typer.secho(output)
             timer = Timer()
-            convert(input_, output, output_stats, timer, rescaler)
-            print(f"Processed {timer.intervals:d} frames in {timer.elapsed:.2f} sec; {timer.per_second:.2f}FPS")
+            convert(input_, output, fps, timer, rescaler)
+            typer.secho(f"Processed {timer.intervals:d} frames in {timer.elapsed:.2f} sec; {timer.per_second:.2f}FPS")
             downscaled_files[(x, y, fps)] = output
 
         # now do motion detection on each file that was downscaled
@@ -81,4 +71,4 @@ def perftest(output: str = "-") -> None:
             timer = Timer()
             convert(input_, "output.mp4", output_stats, timer, motion_detector)
             speed = input_stats.duration_in_sconds / timer.elapsed
-            print(f"Processed {x}x{y}@{fps:.2f} in {timer.elapsed:.2f} sec; {speed:.2f}x")
+            typer.secho(f"Processed {x}x{y}@{fps:.2f} in {timer.elapsed:.2f} sec; {speed:.2f}x")

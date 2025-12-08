@@ -65,7 +65,7 @@ class VideoFileStats:
     @property
     def duration_in_sconds(self) -> float:
         """
-        Return the total duration of the video in milliseconds
+        Return the total duration of the video in seconds
         """
         return self.frame_count / self.fps
 

@@ -16,9 +16,9 @@ classifiers = [
     "Topic :: Software Development :: Libraries :: Python Modules",
 ]
 dependencies = [
-    "ffmpeg-python>=0.2.0",
     "opencv-contrib-python-headless>=4.12.0.88",
     "psutil>=7.1.3",
+    "typed-ffmpeg>=3.8.1",
     "typer>=0.20.0",
     "types-psutil>=7.0.0.20251111",
 ]

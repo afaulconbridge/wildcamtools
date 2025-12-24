@@ -5,7 +5,7 @@ import typer
 from wildcamtools.lib import FrameHandler
 from wildcamtools.lib.motion import MogMotion
 from wildcamtools.lib.rescale import Rescaler
-from wildcamtools.lib.stats import Colourspace, VideoFileStats, get_video_stats
+from wildcamtools.lib.stats import Colourspace, VideoStats, get_video_stats
 from wildcamtools.lib.timing import Timer
 from wildcamtools.lib.vidio import FrameSourceFFMPEG, FrameWriterFFMPEG
 
@@ -60,7 +60,7 @@ def perftest(output: str = "-") -> None:
         # now do motion detection on each file that was downscaled
         for (x, y, fps), input_ in downscaled_files.items():
             input_stats = get_video_stats(input_)
-            output_stats = VideoFileStats(
+            output_stats = VideoStats(
                 fps=input_stats.fps,
                 frame_count=input_stats.frame_count,
                 x=input_stats.x,

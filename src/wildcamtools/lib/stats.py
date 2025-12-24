@@ -14,8 +14,8 @@ class Colourspace(Enum):
 
 
 @dataclass(frozen=True)
-class VideoFileStats:
-    """Contains metadata about a video file.
+class VideoStats:
+    """Contains metadata about a video source, typically a file.
 
     Attributes:
         fps (float): Frames per second of the video
@@ -70,7 +70,7 @@ class VideoFileStats:
         return self.frame_count / self.fps
 
 
-def get_video_stats(filename: str | Path) -> VideoFileStats:
+def get_video_stats(filename: str | Path) -> VideoStats:
     """Retrieves metadata about a video file.
 
     Args:
@@ -100,7 +100,7 @@ def get_video_stats(filename: str | Path) -> VideoFileStats:
         # this doesn't work, always read as colour
         colourspace = Colourspace.greyscale if frame.shape[2] == 1 else Colourspace.RGB
 
-        return VideoFileStats(
+        return VideoStats(
             fps=fps,
             frame_count=frame_count,
             x=x,

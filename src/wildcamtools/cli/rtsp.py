@@ -1,3 +1,4 @@
+from pathlib import Path
 from time import sleep
 
 import typer
@@ -8,8 +9,8 @@ app = typer.Typer()
 
 
 @app.command()
-def serve():
-    with BackgroundMediaMTX(), BackgroundFFMPEGBroadcast():
+def serve(path: Path):
+    with BackgroundMediaMTX(), BackgroundFFMPEGBroadcast(path):
         typer.secho("RTSP stream ready at rtsp://localhost:8554/stream")
         try:
             while True:

@@ -1,11 +1,11 @@
 import cv2
 
 from wildcamtools.lib import Frame, FrameHandler
-from wildcamtools.lib.stats import VideoFileStats
+from wildcamtools.lib.stats import VideoStats
 
 
 class Rescaler(FrameHandler):
-    stats: VideoFileStats
+    stats: VideoStats
     x: int
     y: int
     xy: tuple[int, int]
@@ -16,7 +16,7 @@ class Rescaler(FrameHandler):
 
     def __init__(
         self,
-        stats: VideoFileStats,
+        stats: VideoStats,
         x: int | None = None,
         y: int | None = None,
         fps: float | None = None,

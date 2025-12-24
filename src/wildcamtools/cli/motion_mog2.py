@@ -33,8 +33,11 @@ def motion_mog(
         for frame in FrameSourceFFMPEG(input_):
             with timer:
                 frame_out = mog_motion.handle(frame)
+                prop = mog_motion.get_motion_proportion(frame_out.raw)
+            if prop > 0.001:
+                typer.secho(f"{frame.frame_no:4d} {prop:0.3f}")
             if frame.frame_no >= history:
-                video_writer.write(frame_out)
+                video_writer.write(frame_out.raw)
 
     typer.secho(f"Processed {timer.intervals:d} frames in {timer.elapsed:.2f} sec; {timer.per_second:.2f}FPS")
 

@@ -49,6 +49,7 @@ class FrameSourceFFMPEG(FrameSource):
     reader: Popen | None = None
     width: int | None
     height: int | None
+    frame_no: int
     cumulative_time: int = 0
 
     def __init__(self, filename: str, width: int | None = None, height: int | None = None):
@@ -56,6 +57,7 @@ class FrameSourceFFMPEG(FrameSource):
         self.filename = filename
         self.width = width
         self.height = height
+        self.frame_no = 0
 
     def _detect_width_height(self) -> None:
         probe = ffmpeg.probe(self.filename)
@@ -146,25 +148,24 @@ class FrameWriterFFMPEG:
                     preset=self.preset,
                 ),
             )
+            .overwrite_output()
             .run_async(pipe_stdin=True)
         )
         self._started = True
 
-    def write(self, frame: Frame) -> None:
+    def write(self, frame: np.ndarray) -> None:
         """
         Write a single Frame to the output. Starts the ffmpeg process on the
         first call by inferring width/height from frame.raw.
         """
-        if frame.raw is None:
-            return
 
-        raw = frame.raw
-        if raw.ndim != 3 or raw.shape[2] not in (3, 4):
-            raise ValueError("Frame.raw must be HxWx3 (RGB) or HxWx4 (RGBA) numpy array")
+        # Handle boolean mask input HxW (single channel)
+        if frame.ndim == 2:
+            frame = np.stack((frame,) * 3, axis=-1)  # HxWx3 uint8
 
-        h, w, ch = raw.shape
+        h, w, ch = frame.shape
         if ch == 4:
-            raw = raw[:, :, :3]
+            frame = frame[:, :, :3]
 
         if not self._started:
             self._width = w
@@ -172,11 +173,11 @@ class FrameWriterFFMPEG:
             self._start_process()
 
         # resize if needed (all frames must match initial dims)
-        if raw.shape[0] != self._height or raw.shape[1] != self._width:
-            raw = cv2.resize(raw, (self._width, self._height), interpolation=cv2.INTER_AREA)
+        if frame.shape[0] != self._height or frame.shape[1] != self._width:
+            frame = cv2.resize(frame, (self._width, self._height), interpolation=cv2.INTER_AREA)
 
         try:
-            self._proc.stdin.write(raw.astype(np.uint8).tobytes())
+            self._proc.stdin.write(frame.astype(np.uint8).tobytes())
         except BrokenPipeError:
             # allow ffmpeg to fail silently or raise a clearer error
             raise RuntimeError("FFmpeg process pipe is closed")

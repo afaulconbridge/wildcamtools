@@ -11,7 +11,6 @@ class MogMotion(FrameHandler):
     kernel_size: int
     background_subtractor: cv2.BackgroundSubtractorMOG2
     kernel: np.ndarray
-    last_frame: np.ndarray | None = None
 
     def __init__(
         self,
@@ -38,17 +37,13 @@ class MogMotion(FrameHandler):
         if self.kernel_size:
             frame_out = cv2.morphologyEx(frame_out, cv2.MORPH_OPEN, self.kernel)
             frame_out = cv2.morphologyEx(frame_out, cv2.MORPH_CLOSE, self.kernel)
-        # TODO only set this if we've gone through history
-        # TODO move to parent class
-        self.last_frame = frame_out
-        return Frame(raw=frame_out, frame_no=frame.frame_no)
+        # only set if we've gone through history
+        proportion = self.get_motion_proportion(frame_out) if frame.frame_no > self.history else -1.0
+        return Frame(raw=frame_out, frame_no=frame.frame_no, motion_proportion=proportion)
 
-    def get_motion_proportion(self) -> float:
-        if self.last_frame is None:
-            raise RuntimeError("Cannot get motion proportion before processing frames")
-
-        contours, _ = cv2.findContours(self.last_frame, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    def get_motion_proportion(self, frame: Frame) -> float:
+        contours, _ = cv2.findContours(frame, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         areas = (cv2.contourArea(cnt) for cnt in contours)
         area_total = sum(areas)
-        area_propotion = area_total / (float(self.last_frame.shape[0]) * float(self.last_frame.shape[1]))
+        area_propotion = area_total / (float(frame.shape[0]) * float(frame.shape[1]))
         return area_propotion

@@ -1,3 +1,4 @@
+import logging
 import os
 from collections.abc import Generator
 from pathlib import Path
@@ -7,6 +8,11 @@ import pytest
 from wildcamtools.lib import Frame
 from wildcamtools.lib.rtsp import BackgroundFFMPEGBroadcast, BackgroundMediaMTX
 from wildcamtools.lib.vidio import FrameSourceFFMPEG
+
+
+@pytest.fixture(name="logging", scope="session", autouse=True)
+def fixture_logging() -> None:
+    logging.basicConfig(level=logging.DEBUG, force=True)
 
 
 @pytest.fixture(name="data_directory", scope="session")
@@ -37,5 +43,5 @@ def fixture_video_frame_generator(video_path: Path) -> Generator[Generator[Frame
 
 @pytest.fixture(name="rtsp_server", scope="session")
 def fixture_rtsp_server(video_path: Path) -> Generator[str]:
-    with BackgroundMediaMTX(), BackgroundFFMPEGBroadcast():
-        yield "rstp://localhost:8554/stream"
+    with BackgroundMediaMTX(), BackgroundFFMPEGBroadcast("tests/data/test.mp4"):
+        yield "rtsp://localhost:8554/stream"

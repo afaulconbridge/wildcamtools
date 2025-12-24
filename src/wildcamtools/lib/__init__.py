@@ -8,6 +8,7 @@ import cv2.typing
 class Frame:
     raw: cv2.typing.MatLike
     frame_no: int
+    motion_proportion: float = -1.0
 
     @property
     def width(self) -> float:

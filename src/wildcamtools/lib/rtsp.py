@@ -46,8 +46,13 @@ class BackgroundFFMPEGBroadcast(BackgroundProcess):
         ).output(
             filename="rtsp://localhost:8554/stream",
             f="rtsp",
+            # codec="libx264",
             # see https://trac.ffmpeg.org/wiki/Encode/H.264
-            encoder_options=ffmpeg.codecs.encoders.libx264(tune="fastdecode"),
+            encoder_options=ffmpeg.codecs.encoders.libx264(
+                tune="fastdecode",
+                crf=23.0,
+                preset="ultrafast",
+            ),
         )
         logger.debug(ffmpeg_cmd.compile_line())
         self.process = ffmpeg_cmd.run_async()

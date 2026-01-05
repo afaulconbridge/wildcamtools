@@ -1,11 +1,11 @@
-from dataclasses import dataclass
-from enum import Enum
+from enum import StrEnum
 from pathlib import Path
 
 import cv2
+from pydantic import BaseModel
 
 
-class Colourspace(Enum):
+class Colourspace(StrEnum):
     """Enum representing different color spaces."""
 
     RGB = "rgb"
@@ -13,8 +13,7 @@ class Colourspace(Enum):
     boolean = "boolean"  # mask
 
 
-@dataclass(frozen=True)
-class VideoStats:
+class VideoStats(BaseModel):
     """Contains metadata about a video source, typically a file.
 
     Attributes:
@@ -29,6 +28,10 @@ class VideoStats:
         nbytes (int): Total bytes required to store one frame
         frame_duration (int): Duration of a single frame in milliseconds
     """
+
+    # special pydantic configs
+    class Config:
+        use_enum_values = True
 
     fps: float
     frame_count: int

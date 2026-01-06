@@ -28,9 +28,9 @@ def motion_mog(
     mog_motion = MogMotion(history=history, threshold=threshold, detect_shadows=False, kernel_size=kernel_size)
     timer = Timer()
 
-    with FrameWriterFFMPEG(output, fps=stats.fps) as video_writer:
+    with FrameWriterFFMPEG(output, fps=stats.fps) as video_writer, FrameSourceFFMPEG(input_) as video_input:
         frame_out = None
-        for frame in FrameSourceFFMPEG(input_):
+        for frame in video_input:
             with timer:
                 frame_out = mog_motion.handle(frame)
                 prop = mog_motion.get_motion_proportion(frame_out.raw)

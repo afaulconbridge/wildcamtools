@@ -1,11 +1,19 @@
+import logging
+import os
+import tempfile
 import time
+from io import BufferedReader
+from pathlib import Path
 from subprocess import Popen
+from typing import Any, Self
 
 import cv2
 import numpy as np
 
 import ffmpeg
 from wildcamtools.lib import Frame
+
+logger = logging.getLogger(__name__)
 
 
 class FrameSource:
@@ -20,6 +28,12 @@ class FrameSource:
     def __next__(self) -> Frame:
         raise NotImplementedError
 
+    def __enter__(self) -> Self:
+        return self
+
+    def __exit__(self, exc_type: type | None, exc_val: BaseException | None, exc_tb: Any | None) -> bool:
+        return False
+
 
 class FileFrameSourceCV2(FrameSource):
     filename: str
@@ -29,9 +43,17 @@ class FileFrameSourceCV2(FrameSource):
         super()
         self.filename = filename
 
+    def __enter__(self) -> Self:
+        self.cap = cv2.VideoCapture(self.filename)
+
+    def __exit__(self, exc_type: type | None, exc_val: BaseException | None, exc_tb: Any | None) -> bool:
+        self.cap.release()
+        self.cap = None
+        return False
+
     def __next__(self) -> Frame:
         if not self.cap:
-            self.cap = cv2.VideoCapture(self.filename)
+            raise RuntimeError("Must be used in context")
 
         ret, frame = self.cap.read()
         if ret:
@@ -39,8 +61,6 @@ class FileFrameSourceCV2(FrameSource):
             self.frame_no += 1
             return frame
         else:
-            self.cap.release()
-            self.cap = None
             raise StopIteration
 
 
@@ -51,6 +71,9 @@ class FrameSourceFFMPEG(FrameSource):
     height: int | None
     frame_no: int
     cumulative_time: int = 0
+    _named_pipe: Path | None = None
+    _named_pipe_reader: BufferedReader | None = None
+    _temporary_dir: Path | None = None
 
     def __init__(self, filename: str, width: int | None = None, height: int | None = None):
         super()
@@ -68,21 +91,62 @@ class FrameSourceFFMPEG(FrameSource):
         self.width = int(video_stream["width"])
         self.height = int(video_stream["height"])
 
+    def _create_ffmpeg_proc(self) -> Popen:
+        if not self._named_pipe:
+            raise RuntimeError("Must be used in context")
+        # using stdout from ffmpeg is unstable
+        # use a named pipe (FIFO) instead - with a context manager
+        return (
+            ffmpeg.input(self.filename)
+            .output(
+                filename=self._named_pipe,
+                f="rawvideo",
+                pix_fmt="rgb24",
+            )
+            .global_args(hide_banner=True)
+            .overwrite_output()
+            .run_async(pipe_stdout=True, quiet=True)
+        )
+
+    def __enter__(self) -> Self:
+        self._temporary_dir = Path(tempfile.mkdtemp(prefix="wildcamtools_"))
+        self._named_pipe = self._temporary_dir / "pipe.mp4"
+        logger.debug(f"Creating pipe {self._named_pipe}")
+        os.mkfifo(self._named_pipe)
+        logger.debug(f"Created pipe {self._named_pipe}")
+
+        return self
+
+    def __exit__(self, exc_type: type | None, exc_val: BaseException | None, exc_tb: Any | None) -> bool:
+        self._named_pipe_reader.close()
+        self._named_pipe_reader = None
+
+        os.unlink(self._named_pipe)
+        self._named_pipe = None
+
+        os.rmdir(self._temporary_dir)
+        self._temporary_dir = None
+        return False
+
     def __next__(self) -> Frame:
         start = time.time()
 
         if not self.reader:
             if not self.width or not self.height:
                 self._detect_width_height()
-            self.reader = (
-                ffmpeg.input(self.filename)
-                .output(filename="pipe:", f="rawvideo", pix_fmt="rgb24")
-                .run_async(pipe_stdout=True, quiet=True)
-            )
+            self.reader = self._create_ffmpeg_proc()
 
         if self.reader.poll() is not None:
             raise StopIteration
-        in_bytes = self.reader.stdout.read(self.width * self.height * 3)
+
+        if not self._named_pipe_reader:
+            logger.debug(f"Opening pipe {self._named_pipe}")
+            # have to open the pipe _after_ ffmpeg has started writing into the pipe
+            # otherwise it hangs
+            self._named_pipe_reader = open(self._named_pipe, "rb")
+            logger.debug(f"Opened pipe {self._named_pipe}")
+
+        in_bytes = self._named_pipe_reader.read(self.width * self.height * 3)
 
         if not in_bytes:
             self.reader.wait()
@@ -99,6 +163,38 @@ class FrameSourceFFMPEG(FrameSource):
         self.cumulative_time += end - start
 
         return frame
+
+
+class FrameSourceFFMPEGSegmenter(FrameSource):
+    segment_dir: str | Path
+
+    def __init__(self, filename: str, segment_dir: str | Path, width: int | None = None, height: int | None = None):
+        self.segment_dir = segment_dir
+        super().__init__(filename=filename, width=width, height=height)
+
+    def _create_ffmpeg_proc(self) -> Popen:
+        input_split: ffmpeg.VideoStream = ffmpeg.input(self.filename).split(outputs=2)
+        input_0: ffmpeg.VideoStream = input_split.video(0)
+        input_1: ffmpeg.VideoStream = input_split.video(1)
+        output_0 = input_0.output(
+            codec="copy",
+            f="segment",
+            muxer_options=ffmpeg.formats.muxers.segment(
+                segment_time=15,  # every N seconds
+                segment_format="mp4",
+                segment_format_options="movflags=+faststart",
+                reset_timestamps=1,
+                strftime=1,
+            ),
+            filename="ffmpeg/out/out_%Y_%m_%d__%H_%M_%S.mp4",
+        )
+        output_1 = input_1.output(filename="pipe:", f="rawvideo", pix_fmt="rgb24")
+        return (
+            ffmpeg.merge_outputs(output_0, output_1)
+            .global_args(hide_banner=True)
+            .overwrite_output()
+            .run_async(pipe_stdout=True, quiet=True)
+        )
 
 
 class FrameWriterFFMPEG:

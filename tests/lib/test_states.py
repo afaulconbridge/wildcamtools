@@ -17,11 +17,12 @@ def test_states(rtsp_server: str):
         ),
     )
     visited_states = {watcher.state}
-    for frame in FrameSourceFFMPEG(rtsp_server, 3840, 2160):
-        if frame.frame_no > 150:
-            break
-        watcher.handle(frame)
-        visited_states.add(watcher.state)
+    with FrameSourceFFMPEG(rtsp_server, 3840, 2160) as frame_source:
+        for frame in frame_source:
+            if frame.frame_no > 150:
+                break
+            watcher.handle(frame)
+            visited_states.add(watcher.state)
 
     assert WatcherStateEnum.PREPARING in visited_states
     assert WatcherStateEnum.GREEN in visited_states

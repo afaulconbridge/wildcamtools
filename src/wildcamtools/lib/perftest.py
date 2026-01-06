@@ -1,14 +1,13 @@
 import time
 from collections.abc import Iterable
-from dataclasses import dataclass
 
 import psutil
+from pydantic import BaseModel
 
 
-@dataclass
-class PerformanceMetrics:
+class PerformanceMetrics(BaseModel):
     """
-    Dataclass to store performance metrics of a program execution.
+    To store performance metrics of a program execution.
     """
 
     # Execution wall time in seconds (float)

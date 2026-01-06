@@ -36,7 +36,8 @@ def fixture_video_path(data_directory: Path) -> Path:
 def fixture_video_frame_generator(video_path: Path) -> Generator[Generator[Frame]]:
 
     def internal_generator() -> Generator[Frame]:
-        yield from FrameSourceFFMPEG(video_path)
+        with FrameSourceFFMPEG(video_path) as video_source:
+            yield from video_source
 
     yield internal_generator
 

@@ -13,8 +13,8 @@ app = typer.Typer()
 
 
 def convert(input_: str, output: str, fps: float, timer: Timer, handler: FrameHandler) -> None:
-    with FrameWriterFFMPEG(output, fps=fps) as video_writer:
-        for frame in FrameSourceFFMPEG(input_):
+    with FrameWriterFFMPEG(output, fps=fps) as video_writer, FrameSourceFFMPEG(input_) as video_input:
+        for frame in video_input:
             with timer:
                 frame_rescaled = handler.handle(frame)
             if frame_rescaled is not None:

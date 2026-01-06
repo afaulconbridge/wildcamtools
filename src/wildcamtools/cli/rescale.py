@@ -24,8 +24,8 @@ def rescale(
     rescaler = Rescaler(stats=stats, x=x, y=y, fps=fps)
     timer = Timer()
 
-    with FrameWriterFFMPEG(output, fps=rescaler.fps) as video_writer:
-        for frame in FrameSourceFFMPEG(input_):
+    with FrameWriterFFMPEG(output, fps=rescaler.fps) as video_writer, FrameSourceFFMPEG(input_) as video_input:
+        for frame in video_input:
             with timer:
                 frame_rescaled = rescaler.handle(frame)
             if frame_rescaled is not None:

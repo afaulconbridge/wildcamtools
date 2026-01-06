@@ -30,28 +30,29 @@ class FileResult(BaseModel):
 def _find_motion_times(source: str, stats: VideoStats, watcher: Watcher) -> Generator[MotionWindow]:
     start_frame: int | None = None
     start_time: datetime | None = None
-    for frame in FrameSourceFFMPEG(source, stats.x, stats.y):
-        frame = watcher.handle(frame)
-        if start_frame is None and watcher.state == WatcherStateEnum.RED:
-            start_frame = frame.frame_no
-            start_time = datetime.now(UTC)
-            yield MotionWindow(
-                start_frame=start_frame,
-                start_time=start_time,
-                end_frame=None,
-                end_time=None,
-            )
-        elif start_frame is not None and watcher.state == WatcherStateEnum.GREEN:
-            end_frame = frame.frame_no
-            end_time = datetime.now(UTC)
-            yield MotionWindow(
-                start_frame=start_frame,
-                start_time=start_time,
-                end_frame=end_frame,
-                end_time=end_time,
-            )
-            start_frame = None
-            start_time = None
+    with FrameSourceFFMPEG(source, stats.x, stats.y) as video_input:
+        for frame in video_input:
+            frame = watcher.handle(frame)
+            if start_frame is None and watcher.state == WatcherStateEnum.RED:
+                start_frame = frame.frame_no
+                start_time = datetime.now(UTC)
+                yield MotionWindow(
+                    start_frame=start_frame,
+                    start_time=start_time,
+                    end_frame=None,
+                    end_time=None,
+                )
+            elif start_frame is not None and watcher.state == WatcherStateEnum.GREEN:
+                end_frame = frame.frame_no
+                end_time = datetime.now(UTC)
+                yield MotionWindow(
+                    start_frame=start_frame,
+                    start_time=start_time,
+                    end_frame=end_frame,
+                    end_time=end_time,
+                )
+                start_frame = None
+                start_time = None
 
 
 @app.command()

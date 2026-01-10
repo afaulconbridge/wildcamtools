@@ -1,4 +1,5 @@
 import logging
+from datetime import datetime
 from enum import StrEnum
 
 from pydantic import BaseModel
@@ -103,3 +104,10 @@ class Watcher(FrameHandler):
             case WatcherStateEnum.DISABLED:
                 pass
         return self.state
+
+
+class MotionWindow(BaseModel):
+    start_frame: int
+    start_time: datetime
+    end_frame: int | None
+    end_time: datetime | None

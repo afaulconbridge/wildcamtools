@@ -32,7 +32,7 @@ def segment(
         ),
         filename=f"{output}/seg_%Y_%m_%d__%H_%M_%S.mp4",
     )
-    f.global_args(hide_banner=True).overwrite_output().run()
+    f.global_args(hide_banner=True, loglevel="error").overwrite_output().run()
 
 
 if __name__ == "__main__":

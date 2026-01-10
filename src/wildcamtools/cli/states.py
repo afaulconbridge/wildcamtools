@@ -5,26 +5,13 @@ from datetime import UTC, datetime
 from typing import Annotated
 
 import typer
-from pydantic import BaseModel
 
 from wildcamtools.lib.motion import MogMotion
-from wildcamtools.lib.states import Watcher, WatcherStateEnum, WatcherTransitionMetrics
+from wildcamtools.lib.states import MotionWindow, Watcher, WatcherStateEnum, WatcherTransitionMetrics
 from wildcamtools.lib.stats import VideoStats, get_video_stats
 from wildcamtools.lib.vidio import FrameSourceFFMPEG
 
 app = typer.Typer()
-
-
-class MotionWindow(BaseModel):
-    start_frame: int
-    start_time: datetime
-    end_frame: int | None
-    end_time: datetime | None
-
-
-class FileResult(BaseModel):
-    metadata: VideoStats
-    motion: list[MotionWindow]
 
 
 def _find_motion_times(source: str, stats: VideoStats, watcher: Watcher) -> Generator[MotionWindow]:

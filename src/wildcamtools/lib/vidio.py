@@ -103,7 +103,7 @@ class FrameSourceFFMPEG(FrameSource):
                 f="rawvideo",
                 pix_fmt="rgb24",
             )
-            .global_args(hide_banner=True)
+            .global_args(hide_banner=True, loglevel="error")
             .overwrite_output()
             .run_async(pipe_stdout=True, quiet=True)
         )
@@ -191,7 +191,7 @@ class FrameSourceFFMPEGSegmenter(FrameSource):
         output_1 = input_1.output(filename="pipe:", f="rawvideo", pix_fmt="rgb24")
         return (
             ffmpeg.merge_outputs(output_0, output_1)
-            .global_args(hide_banner=True)
+            .global_args(hide_banner=True, loglevel="error")
             .overwrite_output()
             .run_async(pipe_stdout=True, quiet=True)
         )

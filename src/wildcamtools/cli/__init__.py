@@ -1,5 +1,10 @@
 import logging
 
+# have to setup logging _before_ imports
+# generally, imports have a high level logger object
+# those loggers need to have config created _before_ they exist
+logging.basicConfig(level=logging.INFO, force=False)
+
 import typer
 
 from wildcamtools.cli.motion_mog2 import app as motion_mog2_app
@@ -21,4 +26,4 @@ app.add_typer(storage_watcher_app)
 
 
 if __name__ == "__main__":
-    logging.basicConfig(level=logging.INFO, force=True)
+    pass

@@ -32,18 +32,18 @@ architecture-beta
     service mediamtx[MediaMTX] in server
     service segmenter(simple-icons:ffmpeg)[FFMPEG Segmenter] in server
     service storage-segment(disk)[local segment storage] in server
-    service storage-clip(disk)[local segment storage] in server
-    service storage-watcher(simple-icons:python)[Storage Watcher] in server
-    service motion(simple-icons:python)[Motion] in server
-    service mqtt[MQTT] in server
+    service storage-clip(disk)[local clip storage] in server
+
+    group python(simple-icons:python)[python] in server
+    service storage-watcher(simple-icons:python)[Storage Watcher] in python
+    service motion(simple-icons:python)[Motion] in python
 
     ffmpeg-camera:L --> R:camera
     ffmpeg-camera:R --> L:mediamtx
     segmenter:B --> T:mediamtx
     segmenter:R --> L:storage-segment
     motion:L --> R:mediamtx
-    motion:R --> L:mqtt
-    storage-watcher:B --> T:mqtt
+    motion:T --> B:storage-watcher
     storage-watcher:L --> R:storage-segment
     storage-watcher:T --> B:storage-clip
 ```

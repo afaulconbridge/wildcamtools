@@ -1,7 +1,8 @@
+name: "PyTest"
+
 on:
   push:
 
-name: "PyTest"
 permissions: {}
 
 jobs:

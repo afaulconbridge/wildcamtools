@@ -24,8 +24,8 @@ class BackgroundMediaMTX(BackgroundProcess):
     def __init__(self):
         super().__init__(
             [
-                "/home/adam/vscode/wildcamtools/tests/bin/mediamtx",
-                "/home/adam/vscode/wildcamtools/tests/bin/mediamtx.yml",
+                "./tests/bin/mediamtx",
+                "./tests/bin/mediamtx.yml",
             ],
         )
 

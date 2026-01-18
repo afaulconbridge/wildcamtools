@@ -40,17 +40,13 @@ wait_for_rtsp_stream() {
 }
 
 
-
-pipe_name=named_pipe
-mkfifo "$pipe_name"
-
 segment_dir=ffmpeg/seg/
 output_dir=ffmpeg/out/
 
-uv run wildcamtools serve tests/data/04-51-08.mp4 2>&1 >/dev/null &
+uv run wildcamtools serve tests/data/04-51-08.mp4 >/dev/null 2>&1 &
 pid_serve=$!
 
-if wait_for_rtsp_stream "rtsp://localhost:8554/stream" 20 1; then
+if wait_for_rtsp_stream "rtsp://localhost:8554/stream" 30 1; then
   echo "Stream ready"
 else
   echo "Stream not available"
@@ -59,11 +55,8 @@ else
   exit 1
 fi
 
-uv run wildcamtools segment rtsp://localhost:8554/stream "$segment_dir" 2>&1 >/dev/null &
+uv run wildcamtools segment rtsp://localhost:8554/stream "$segment_dir" >/dev/null 2>&1 &
 pid_segment=$!
-
-uv run wildcamtools states rtsp://localhost:8554/stream --output "$pipe_name" 2>&1 >/dev/null &
-pid_states=$!
 
 # Cleanup function
 # one trap for each event
@@ -71,14 +64,11 @@ cleanup() {
   # avoid set -e exiting the trap early
   set +e
   echo "Cleaning up..."
-  kill "$pid_states" 2>/dev/null || true
   kill "$pid_segment" 2>/dev/null || true
   kill "$pid_serve" 2>/dev/null || true
-  wait "$pid_states" 2>/dev/null || true
   wait "$pid_segment" 2>/dev/null || true
   wait "$pid_serve" 2>/dev/null || true
-  rm -f "$pipe_name"
 }
 trap cleanup EXIT INT TERM
 
-uv run wildcamtools watch "$pipe_name" "$segment_dir" "$output_dir"
+uv run wildcamtools watch "rtsp://localhost:8554/stream" "$segment_dir" "$output_dir"

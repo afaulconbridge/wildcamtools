@@ -15,9 +15,10 @@ jobs:
         with:
           enable-cache: true
       - name: Install package dependencies
-        run: |
-          sudo apt-get update
-          sudo apt install -y ffmpeg
+        uses: awalsh128/cache-apt-pkgs-action@latest
+        with:
+          packages: ffmpeg
+          version: 1.0
       - name: Install project and python dependencies
         run: uv sync --locked --all-extras --dev
       - name: Run tests

@@ -1,0 +1,12 @@
+[Unit]
+Description=WildCamTools Streamer
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/streamer.sh
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

@@ -12,6 +12,7 @@ from time import sleep
 from typing import Annotated
 
 import typer
+from typer_config import use_yaml_config
 
 from wildcamtools.lib.concat import concat_ffmpeg
 from wildcamtools.lib.motion import MogMotion
@@ -64,7 +65,6 @@ def find_segments_for_timespan(start_time: datetime, end_time: datetime, segment
 
     # build a list of files in segment directory
     segments_files = tuple(sorted(segments_dir.iterdir()))
-    logger.info(" ".join(str(s) for s in segments_files))
 
     # turn the time into a path to a non-existant file
     ftime_string = "seg_%Y_%m_%d__%H_%M_%S.mp4"
@@ -75,7 +75,7 @@ def find_segments_for_timespan(start_time: datetime, end_time: datetime, segment
     # work out where in the list the start and end filenames would be inserted
     start_position = bisect.bisect_left(segments_files, start_time_path)
     end_position = bisect.bisect_right(segments_files, end_time_path)
-    logger.info(f"{start_position} - {end_position}")
+    logger.info(f"Segment positions from {start_position} to {end_position}")
 
     if end_position == len(segments_files):
         # if we would cover the last file, beware
@@ -89,7 +89,7 @@ def find_segments_for_timespan(start_time: datetime, end_time: datetime, segment
         return segments_files[max(start_position - 1, 0) : end_position]
 
 
-def motion_states(rtsp_stream: str, queue: Queue) -> None:
+def motion_states(rtsp_stream: str, queue: Queue, history: int) -> None:
     def _find_motion_times(source: str, stats: VideoStats, watcher: Watcher) -> Generator[MotionWindow]:
         start_frame: int | None = None
         start_time: datetime | None = None
@@ -117,7 +117,6 @@ def motion_states(rtsp_stream: str, queue: Queue) -> None:
                     start_frame = None
                     start_time = None
 
-    history = 10
     transition_metrics = WatcherTransitionMetrics(
         preparing_duration=history,
         green_to_amber_motion_min=0.01,
@@ -134,11 +133,15 @@ def motion_states(rtsp_stream: str, queue: Queue) -> None:
 
 
 @app.command()
+@use_yaml_config()
 def watch(
-    rtsp_stream: Annotated[str, typer.Argument(metavar="RTSP")],
-    segments: Annotated[Path, typer.Argument(metavar="SEGMENTS")],
-    output: Annotated[Path, typer.Argument(metavar="OUTPUT")],
-    keep_count: int = 4,
+    rtsp_stream: Annotated[str, typer.Argument(metavar="RTSP_URL", envvar="WCT_RTSP")],
+    segments: Annotated[Path, typer.Argument(metavar="PATH", envvar="WCT_SEGMENTS")],
+    output: Annotated[Path, typer.Argument(metavar="PATH", envvar="WCT_OUTPUT")],
+    keep_count: Annotated[int, typer.Option(metavar="INT", envvar="WCT_KEEP")] = 4,
+    offset_start: Annotated[float, typer.Option(metavar="FLOAT", envvar="WCT_OFFSET_START")] = 10.0,
+    offset_end: Annotated[float, typer.Option(metavar="FLOAT", envvar="WCT_OFFSET_END")] = 10.0,
+    history: Annotated[int, typer.Option(metavar="INT", envvar="WTC_HISTORY")] = 10,
 ) -> None:
 
     segments = segments.resolve()
@@ -150,11 +153,8 @@ def watch(
         raise ValueError("output must be an existing directory")
 
     msg_queue = Queue()
-    motion_process = Process(target=motion_states, args=(rtsp_stream, msg_queue), daemon=True)
+    motion_process = Process(target=motion_states, args=(rtsp_stream, msg_queue, history), daemon=True)
     motion_process.start()
-
-    start_offset = timedelta(seconds=10)
-    end_offset = timedelta(seconds=10)
 
     state = StorageWatcherStateEnum.WAITING
     while True:
@@ -166,8 +166,8 @@ def watch(
                 state = StorageWatcherStateEnum.RECORDING
                 logger.info("Starting recording")
             else:
-                start_time = msg.start_time - start_offset
-                end_time = msg.end_time + end_offset
+                start_time = msg.start_time - timedelta(seconds=offset_start)
+                end_time = msg.end_time + timedelta(seconds=offset_end)
                 while (to_merge := find_segments_for_timespan(start_time, end_time, segments)) is None:
                     sleep(1)
                 output_file = output / start_time.strftime("out_%Y_%m_%d__%H_%M_%S.mp4")

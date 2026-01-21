@@ -48,6 +48,16 @@ architecture-beta
     storage-watcher:T --> B:storage-clip
 ```
 
+## Media MTX
+
+This is probably the component to have up and running first, since it has no dependences on other components. Only one MediaMTX
+
+Rather than repeat information, follow [Media MTX installation instructions](https://mediamtx.org/docs/kickoff/install) and in particular [how to enable start-on-boot](https://mediamtx.org/docs/usage/start-on-boot).
+
+## Camera
+
+See deployment/readme.md#camera
+
 # Hardware
 
 ## Camera hardware

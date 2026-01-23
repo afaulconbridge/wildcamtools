@@ -21,6 +21,7 @@ dependencies = [
     "pydantic>=2.12.5",
     "typed-ffmpeg>=3.8.1",
     "typer>=0.20.0",
+    "typer-config>=1.4.3",
     "types-psutil>=7.0.0.20251111",
 ]
 [dependency-groups]

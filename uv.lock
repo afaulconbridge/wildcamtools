@@ -461,6 +461,18 @@ wheels = [
 ]
 
 [[package]]
+name = "typer-config"
+version = "1.4.3"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "typer" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/19/77/b8a2c0cdbd3d264ee545daa4e232d2257a9ee590923fb953e6e676a12d0f/typer_config-1.4.3.tar.gz", hash = "sha256:597412a73486ca10966e8673e592bf073bc61c47f482c91c3b4256df547f27fb", size = 9120, upload-time = "2025-10-27T17:13:09.82Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/b5/ab/0f9ea68a9b0b9b12d97565312d9ca02ff51f1c25fd270ff43977f5697c66/typer_config-1.4.3-py3-none-any.whl", hash = "sha256:d135fc96e3115150759d5abb907aba3afcb0cb81e102d84616858cf5de2f0614", size = 11943, upload-time = "2025-10-27T17:13:08.202Z" },
+]
+
+[[package]]
 name = "types-psutil"
 version = "7.0.0.20251111"
 source = { registry = "https://pypi.org/simple" }
@@ -514,6 +526,7 @@ dependencies = [
     { name = "pydantic" },
     { name = "typed-ffmpeg" },
     { name = "typer" },
+    { name = "typer-config" },
     { name = "types-psutil" },
 ]
 
@@ -533,6 +546,7 @@ requires-dist = [
     { name = "pydantic", specifier = ">=2.12.5" },
     { name = "typed-ffmpeg", specifier = ">=3.8.1" },
     { name = "typer", specifier = ">=0.20.0" },
+    { name = "typer-config", specifier = ">=1.4.3" },
     { name = "types-psutil", specifier = ">=7.0.0.20251111" },
 ]
 

@@ -24,28 +24,6 @@ app = typer.Typer()
 logger = logging.getLogger(__name__)
 
 
-class StorageWatcherStateEnum(StrEnum):
-    WAITING = "WAITING"
-    RECORDING = "RECORDING"
-
-
-def enqueue_motion_windows(msgs: Path, queue: Queue) -> None:
-    with open(msgs) as msg_input:
-        for line in msg_input.readline():
-            # NOTE assumes no new line characters inside the json object
-            motion_window = MotionWindow.model_validate_json(line)
-            queue.put(motion_window)
-
-
-def get_message(queue: Queue, process: Process) -> MotionWindow | None:
-    if not process.is_alive():
-        raise RuntimeError("Process is dead")
-    msg = None
-    with contextlib.suppress(Empty):
-        msg = queue.get_nowait()
-    return msg
-
-
 def cleanup_old_segments(path: Path, max_file_count: int) -> None:
     # list files in directory
     files = os.listdir(path)
@@ -89,11 +67,24 @@ def find_segments_for_timespan(start_time: datetime, end_time: datetime, segment
         return segments_files[max(start_position - 1, 0) : end_position]
 
 
-def motion_states(rtsp_stream: str, queue: Queue, history: int) -> None:
+def motion_states(
+    rtsp_stream: str,
+    queue: Queue,
+    history: int = 30,
+    threshold: int = 16,
+    kernel_size: int = 3,
+    scale: float = 0.25,
+    green_to_amber_motion_min: float = 0.01,
+    amber_to_green_proportion_max: float = 0.0075,
+    amber_to_red_duration: int = 5,
+    red_to_red_amber_proportion_max: float = 0.0075,
+    red_amber_to_red_proportion_min: float = 0.01,
+    red_amber_to_green_duration: int = 5,
+) -> None:
     def _find_motion_times(source: str, stats: VideoStats, watcher: Watcher) -> Generator[MotionWindow]:
         start_frame: int | None = None
         start_time: datetime | None = None
-        with FrameSourceFFMPEG(source, stats.x, stats.y) as video_input:
+        with FrameSourceFFMPEG(source, width=stats.x, height=stats.y, scale=scale) as video_input:
             for frame in video_input:
                 frame = watcher.handle(frame)
                 if start_frame is None and watcher.state == WatcherStateEnum.RED:
@@ -119,17 +110,161 @@ def motion_states(rtsp_stream: str, queue: Queue, history: int) -> None:
 
     transition_metrics = WatcherTransitionMetrics(
         preparing_duration=history,
-        green_to_amber_motion_min=0.01,
-        amber_to_green_proportion_max=0.0075,
-        amber_to_red_duration=5,
-        red_to_red_amber_proportion_max=0.0075,
-        red_amber_to_red_proportion_min=0.01,
-        red_amber_to_green_duration=5,
+        green_to_amber_motion_min=green_to_amber_motion_min,
+        amber_to_green_proportion_max=amber_to_green_proportion_max,
+        amber_to_red_duration=amber_to_red_duration,
+        red_to_red_amber_proportion_max=red_to_red_amber_proportion_max,
+        red_amber_to_red_proportion_min=red_amber_to_red_proportion_min,
+        red_amber_to_green_duration=red_amber_to_green_duration,
     )
-    watcher = Watcher(motion=MogMotion(history=history), transition_metrics=transition_metrics)
+    watcher = Watcher(
+        motion=MogMotion(
+            history=history,
+            threshold=threshold,
+            detect_shadows=False,
+            kernel_size=kernel_size,
+        ),
+        transition_metrics=transition_metrics,
+    )
     stats = get_video_stats(rtsp_stream)
     for motion in _find_motion_times(rtsp_stream, stats, watcher):
         queue.put(motion)
+
+
+class WatcherManagerStateEnum(StrEnum):
+    WAITING = "WAITING"
+    RECORDING = "RECORDING"
+
+
+class WatcherManager:
+    rtsp_stream: str
+    segments_dir: Path
+    output_dir: Path
+    keep_count: int
+    offset_start: float
+    offset_end: float
+    history: int
+    threshold: int
+    kernel_size: int
+    scale: float
+    green_to_amber_motion_min: float
+    amber_to_green_proportion_max: float
+    amber_to_red_duration: int
+    red_to_red_amber_proportion_max: float
+    red_amber_to_red_proportion_min: float
+    red_amber_to_green_duration: int
+
+    msg_queue: Queue
+    stat: WatcherManagerStateEnum
+    motion_process: Process | None = None
+
+    def __init__(
+        self,
+        rtsp_stream: str,
+        segments_dir: Path,
+        output_dir: Path,
+        keep_count: int,
+        offset_start: float,
+        offset_end: float,
+        history: int,
+        threshold: int,
+        kernel_size: int,
+        scale: float,
+        green_to_amber_motion_min: float,
+        amber_to_green_proportion_max: float,
+        amber_to_red_duration: int,
+        red_to_red_amber_proportion_max: float,
+        red_amber_to_red_proportion_min: float,
+        red_amber_to_green_duration: int,
+    ) -> None:
+        self.rtsp_stream = rtsp_stream
+        self.segments_dir = segments_dir
+        self.output_dir = output_dir
+        self.keep_count = keep_count
+        self.offset_start = offset_start
+        self.offset_end = offset_end
+        self.history = history
+        self.threshold = threshold
+        self.kernel_size = kernel_size
+        self.scale = scale
+        self.green_to_amber_motion_min = green_to_amber_motion_min
+        self.amber_to_green_proportion_max = amber_to_green_proportion_max
+        self.amber_to_red_duration = amber_to_red_duration
+        self.red_to_red_amber_proportion_max = red_to_red_amber_proportion_max
+        self.red_amber_to_red_proportion_min = red_amber_to_red_proportion_min
+        self.red_amber_to_green_duration = red_amber_to_green_duration
+
+        self.msg_queue = Queue()
+        self.state = WatcherManagerStateEnum.WAITING
+
+    def create_motion_process(self) -> None:
+        self.motion_process = Process(
+            target=motion_states,
+            kwargs={
+                "rtsp_stream": self.rtsp_stream,
+                "queue": self.msg_queue,
+                "history": self.history,
+                "threshold": self.threshold,
+                "kernel_size": self.kernel_size,
+                "scale": self.scale,
+                "green_to_amber_motion_min": self.green_to_amber_motion_min,
+                "amber_to_green_proportion_max": self.amber_to_green_proportion_max,
+                "amber_to_red_duration": self.amber_to_red_duration,
+                "red_to_red_amber_proportion_max": self.red_to_red_amber_proportion_max,
+                "red_amber_to_red_proportion_min": self.red_amber_to_red_proportion_min,
+                "red_amber_to_green_duration": self.red_amber_to_green_duration,
+            },
+            daemon=True,
+        )
+        self.motion_process.start()
+
+    def get_message(self) -> MotionWindow | None:
+        if not self.motion_process:
+            self.create_motion_process()
+            return None
+
+        if not self.motion_process.is_alive():
+            logger.warning("Motion Process is dead, recreating")
+            self.create_motion_process()
+            return None
+
+        msg = None
+        with contextlib.suppress(Empty):
+            msg = self.msg_queue.get_nowait()
+        return msg
+
+    def run(self) -> None:
+        self.create_motion_process()
+
+        # TODO start segment_process
+
+        while True:
+            # TODO check segment_process is alive
+            # check queue for a message
+            msg = None
+            msg = self.get_message()
+            if msg:
+                if msg.end_time is None:
+                    self.state = WatcherManagerStateEnum.RECORDING
+                    logger.info("Starting recording")
+                else:
+                    start_time = msg.start_time - timedelta(seconds=self.offset_start)
+                    end_time = msg.end_time + timedelta(seconds=self.offset_end)
+                    while (to_merge := find_segments_for_timespan(start_time, end_time, self.segments_dir)) is None:
+                        sleep(1)
+                    output_file = self.output_dir / start_time.strftime("out_%Y_%m_%d__%H_%M_%S.mp4")
+                    logger.info(f"Joining {len(to_merge)} segments into {output_file}")
+                    concat_ffmpeg(to_merge, output_file)
+                    self.state = WatcherManagerStateEnum.WAITING
+            elif self.state == WatcherManagerStateEnum.WAITING:
+                # waiting to record, cleanup old files
+                cleanup_old_segments(
+                    path=self.segments_dir,
+                    max_file_count=self.keep_count,
+                )
+            else:
+                # nothing to do, sleep
+                sleep(1)
 
 
 @app.command()
@@ -141,42 +276,52 @@ def watch(
     keep_count: Annotated[int, typer.Option(metavar="INT", envvar="WCT_KEEP")] = 4,
     offset_start: Annotated[float, typer.Option(metavar="FLOAT", envvar="WCT_OFFSET_START")] = 10.0,
     offset_end: Annotated[float, typer.Option(metavar="FLOAT", envvar="WCT_OFFSET_END")] = 10.0,
-    history: Annotated[int, typer.Option(metavar="INT", envvar="WTC_HISTORY")] = 10,
+    history: Annotated[int, typer.Option(metavar="INT", envvar="WTC_HISTORY")] = 30,
+    threshold: Annotated[int, typer.Option(metavar="INT", envvar="WTC_THRESHOLD")] = 16,
+    kernel_size: Annotated[int, typer.Option(metavar="INT", envvar="WTC_KERNEL_SIZE")] = 3,
+    scale: Annotated[float, typer.Option(metavar="FLOAT", envvar="WTC_SCALE")] = 0.25,
+    green_to_amber_motion_min: Annotated[float, typer.Option(metavar="FLOAT", envvar="WTC_GREEN_2_AMBER_MIN")] = 0.01,
+    amber_to_green_proportion_max: Annotated[
+        float, typer.Option(metavar="FLOAT", envvar="WTC_AMBER_2_GREEN_MAX")
+    ] = 0.0075,
+    amber_to_red_duration: Annotated[int, typer.Option(metavar="INT", envvar="WTC_AMBER_2_RED_DURATION")] = 5,
+    red_to_red_amber_proportion_max: Annotated[
+        float, typer.Option(metavar="FLOAT", envvar="WTC_RED_2_RED_AMBER_MAX")
+    ] = 0.0075,
+    red_amber_to_red_proportion_min: Annotated[
+        float, typer.Option(metavar="FLOAT", envvar="WTC_RED_AMBER_2_RED_MIN")
+    ] = 0.01,
+    red_amber_to_green_duration: Annotated[
+        int, typer.Option(metavar="INT", envvar="WTC_RED_AMBER_2_GREEN_DURATION")
+    ] = 5,
 ) -> None:
+
+    # TODO validate rtsp_stream is a rtsp url
 
     segments = segments.resolve()
     if not segments.is_dir() or not segments.exists():
-        raise ValueError("segments must be an existing directory")
+        raise typer.BadParameter("segments must be an existing directory")  # noqa: TRY003
 
     output = output.resolve()
     if not output.is_dir() or not output.exists():
-        raise ValueError("output must be an existing directory")
+        raise typer.BadParameter("output must be an existing directory")  # noqa: TRY003
 
-    msg_queue = Queue()
-    motion_process = Process(target=motion_states, args=(rtsp_stream, msg_queue, history), daemon=True)
-    motion_process.start()
-
-    state = StorageWatcherStateEnum.WAITING
-    while True:
-        # check queue for a message
-        msg = None
-        msg = get_message(msg_queue, motion_process)
-        if msg:
-            if msg.end_time is None:
-                state = StorageWatcherStateEnum.RECORDING
-                logger.info("Starting recording")
-            else:
-                start_time = msg.start_time - timedelta(seconds=offset_start)
-                end_time = msg.end_time + timedelta(seconds=offset_end)
-                while (to_merge := find_segments_for_timespan(start_time, end_time, segments)) is None:
-                    sleep(1)
-                output_file = output / start_time.strftime("out_%Y_%m_%d__%H_%M_%S.mp4")
-                logger.info(f"Joining {len(to_merge)} segments into {output_file}")
-                concat_ffmpeg(to_merge, output_file)
-                state = StorageWatcherStateEnum.WAITING
-        elif state == StorageWatcherStateEnum.WAITING:
-            # waiting to record, cleanup old files
-            cleanup_old_segments(segments, keep_count)
-        else:
-            # nothing to do, sleep
-            sleep(1)
+    watcher = WatcherManager(
+        rtsp_stream=rtsp_stream,
+        segments_dir=segments,
+        output_dir=output,
+        keep_count=keep_count,
+        offset_start=offset_start,
+        offset_end=offset_end,
+        history=history,
+        threshold=threshold,
+        kernel_size=kernel_size,
+        scale=scale,
+        green_to_amber_motion_min=green_to_amber_motion_min,
+        amber_to_green_proportion_max=amber_to_green_proportion_max,
+        amber_to_red_duration=amber_to_red_duration,
+        red_to_red_amber_proportion_max=red_to_red_amber_proportion_max,
+        red_amber_to_red_proportion_min=red_amber_to_red_proportion_min,
+        red_amber_to_green_duration=red_amber_to_green_duration,
+    )
+    watcher.run()

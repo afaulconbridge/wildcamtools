@@ -69,17 +69,19 @@ class FrameSourceFFMPEG(FrameSource):
     reader: Popen | None = None
     width: int | None
     height: int | None
+    scale: float
     frame_no: int
     cumulative_time: int = 0
     _named_pipe: Path | None = None
     _named_pipe_reader: BufferedReader | None = None
     _temporary_dir: Path | None = None
 
-    def __init__(self, filename: str, width: int | None = None, height: int | None = None):
+    def __init__(self, filename: str, width: int | None = None, height: int | None = None, scale: float = 1.0):
         super()
         self.filename = filename
         self.width = width
         self.height = height
+        self.scale = scale
         self.frame_no = 0
 
     def _detect_width_height(self) -> None:
@@ -88,22 +90,29 @@ class FrameSourceFFMPEG(FrameSource):
             (stream for stream in probe["streams"] if stream["codec_type"] == "video"),
             None,
         )
-        self.width = int(video_stream["width"])
-        self.height = int(video_stream["height"])
+        self.width = int(video_stream["width"] * self.scale)
+        self.height = int(video_stream["height"] * self.scale)
 
-    def _create_ffmpeg_proc(self) -> Popen:
+    def _create_ffmpeg_proc(self) -> Popen[bytes]:
         if not self._named_pipe:
             raise RuntimeError("Must be used in context")
+        f_in = ffmpeg.input(
+            self.filename,
+        )
+        # apply scaling if appropriate
+        if self.scale != 1.0:
+            # iw = input width, ih=input height
+            f_in = f_in.scale(w=f"{self.scale:f}*iw", h=f"{self.scale:f}*ih")
+
         # using stdout from ffmpeg is unstable
         # use a named pipe (FIFO) instead - with a context manager
+        f_out = f_in.output(
+            filename=self._named_pipe,
+            f="rawvideo",
+            pix_fmt="rgb24",
+        )
         return (
-            ffmpeg.input(self.filename)
-            .output(
-                filename=self._named_pipe,
-                f="rawvideo",
-                pix_fmt="rgb24",
-            )
-            .global_args(hide_banner=True, loglevel="error")
+            f_out.global_args(hide_banner=True, loglevel="error")
             .overwrite_output()
             .run_async(pipe_stdout=True, quiet=True)
         )

@@ -2,12 +2,12 @@ import bisect
 import contextlib
 import logging
 import os
-from collections.abc import Generator
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta
 from enum import StrEnum
 from multiprocessing import Process, Queue
 from pathlib import Path
 from queue import Empty
+from subprocess import Popen
 from time import sleep
 from typing import Annotated
 
@@ -15,26 +15,15 @@ import typer
 from typer_config import use_yaml_config
 
 from wildcamtools.lib.concat import concat_ffmpeg
-from wildcamtools.lib.motion import MogMotion
-from wildcamtools.lib.states import MotionWindow, Watcher, WatcherStateEnum, WatcherTransitionMetrics
-from wildcamtools.lib.stats import VideoStats, get_video_stats
-from wildcamtools.lib.vidio import FrameSourceFFMPEG
+from wildcamtools.lib.segment import create_segment_process
+from wildcamtools.lib.states import (
+    MotionWindow,
+    WatcherTransitionMetrics,
+    create_motion_process,
+)
 
 app = typer.Typer()
 logger = logging.getLogger(__name__)
-
-
-def cleanup_old_segments(path: Path, max_file_count: int) -> None:
-    # list files in directory
-    files = os.listdir(path)
-    if len(files) > max_file_count:
-        # sort in order
-        files = sorted(files, reverse=True)
-        # identify the oldest ones
-        files_to_remove = files[max_file_count:]
-        for file_to_remove in files_to_remove:
-            logger.debug(f"removing {path / file_to_remove}")
-            os.unlink(path / file_to_remove)
 
 
 def find_segments_for_timespan(start_time: datetime, end_time: datetime, segments_dir: Path) -> tuple[Path, ...] | None:
@@ -67,70 +56,6 @@ def find_segments_for_timespan(start_time: datetime, end_time: datetime, segment
         return segments_files[max(start_position - 1, 0) : end_position]
 
 
-def motion_states(
-    rtsp_stream: str,
-    queue: Queue,
-    history: int = 30,
-    threshold: int = 16,
-    kernel_size: int = 3,
-    scale: float = 0.25,
-    green_to_amber_motion_min: float = 0.01,
-    amber_to_green_proportion_max: float = 0.0075,
-    amber_to_red_duration: int = 5,
-    red_to_red_amber_proportion_max: float = 0.0075,
-    red_amber_to_red_proportion_min: float = 0.01,
-    red_amber_to_green_duration: int = 5,
-) -> None:
-    def _find_motion_times(source: str, stats: VideoStats, watcher: Watcher) -> Generator[MotionWindow]:
-        start_frame: int | None = None
-        start_time: datetime | None = None
-        with FrameSourceFFMPEG(source, width=stats.x, height=stats.y, scale=scale) as video_input:
-            for frame in video_input:
-                frame = watcher.handle(frame)
-                if start_frame is None and watcher.state == WatcherStateEnum.RED:
-                    start_frame = frame.frame_no
-                    start_time = datetime.now(UTC)
-                    yield MotionWindow(
-                        start_frame=start_frame,
-                        start_time=start_time,
-                        end_frame=None,
-                        end_time=None,
-                    )
-                elif start_frame is not None and watcher.state == WatcherStateEnum.GREEN:
-                    end_frame = frame.frame_no
-                    end_time = datetime.now(UTC)
-                    yield MotionWindow(
-                        start_frame=start_frame,
-                        start_time=start_time,
-                        end_frame=end_frame,
-                        end_time=end_time,
-                    )
-                    start_frame = None
-                    start_time = None
-
-    transition_metrics = WatcherTransitionMetrics(
-        preparing_duration=history,
-        green_to_amber_motion_min=green_to_amber_motion_min,
-        amber_to_green_proportion_max=amber_to_green_proportion_max,
-        amber_to_red_duration=amber_to_red_duration,
-        red_to_red_amber_proportion_max=red_to_red_amber_proportion_max,
-        red_amber_to_red_proportion_min=red_amber_to_red_proportion_min,
-        red_amber_to_green_duration=red_amber_to_green_duration,
-    )
-    watcher = Watcher(
-        motion=MogMotion(
-            history=history,
-            threshold=threshold,
-            detect_shadows=False,
-            kernel_size=kernel_size,
-        ),
-        transition_metrics=transition_metrics,
-    )
-    stats = get_video_stats(rtsp_stream)
-    for motion in _find_motion_times(rtsp_stream, stats, watcher):
-        queue.put(motion)
-
-
 class WatcherManagerStateEnum(StrEnum):
     WAITING = "WAITING"
     RECORDING = "RECORDING"
@@ -147,16 +72,13 @@ class WatcherManager:
     threshold: int
     kernel_size: int
     scale: float
-    green_to_amber_motion_min: float
-    amber_to_green_proportion_max: float
-    amber_to_red_duration: int
-    red_to_red_amber_proportion_max: float
-    red_amber_to_red_proportion_min: float
-    red_amber_to_green_duration: int
+    segment_duration: int
+    transition_metrics: WatcherTransitionMetrics
 
     msg_queue: Queue
     stat: WatcherManagerStateEnum
     motion_process: Process | None = None
+    segment_process: Popen | None = None
 
     def __init__(
         self,
@@ -170,12 +92,8 @@ class WatcherManager:
         threshold: int,
         kernel_size: int,
         scale: float,
-        green_to_amber_motion_min: float,
-        amber_to_green_proportion_max: float,
-        amber_to_red_duration: int,
-        red_to_red_amber_proportion_max: float,
-        red_amber_to_red_proportion_min: float,
-        red_amber_to_green_duration: int,
+        segment_duration: int,
+        transition_metrics: WatcherTransitionMetrics,
     ) -> None:
         self.rtsp_stream = rtsp_stream
         self.segments_dir = segments_dir
@@ -187,60 +105,72 @@ class WatcherManager:
         self.threshold = threshold
         self.kernel_size = kernel_size
         self.scale = scale
-        self.green_to_amber_motion_min = green_to_amber_motion_min
-        self.amber_to_green_proportion_max = amber_to_green_proportion_max
-        self.amber_to_red_duration = amber_to_red_duration
-        self.red_to_red_amber_proportion_max = red_to_red_amber_proportion_max
-        self.red_amber_to_red_proportion_min = red_amber_to_red_proportion_min
-        self.red_amber_to_green_duration = red_amber_to_green_duration
+        self.segment_duration = segment_duration
+        self.transition_metrics = transition_metrics
 
         self.msg_queue = Queue()
         self.state = WatcherManagerStateEnum.WAITING
 
-    def create_motion_process(self) -> None:
-        self.motion_process = Process(
-            target=motion_states,
-            kwargs={
-                "rtsp_stream": self.rtsp_stream,
-                "queue": self.msg_queue,
-                "history": self.history,
-                "threshold": self.threshold,
-                "kernel_size": self.kernel_size,
-                "scale": self.scale,
-                "green_to_amber_motion_min": self.green_to_amber_motion_min,
-                "amber_to_green_proportion_max": self.amber_to_green_proportion_max,
-                "amber_to_red_duration": self.amber_to_red_duration,
-                "red_to_red_amber_proportion_max": self.red_to_red_amber_proportion_max,
-                "red_amber_to_red_proportion_min": self.red_amber_to_red_proportion_min,
-                "red_amber_to_green_duration": self.red_amber_to_green_duration,
-            },
-            daemon=True,
-        )
-        self.motion_process.start()
+    def check_and_start_processes(self):
+
+        # check and create motion process
+        if self.motion_process and not self.motion_process.is_alive():
+            logger.warning("Motion Process is dead")
+            self.motion_process = None
+        if not self.motion_process:
+            logger.info("Creating Motion process...")
+            self.motion_process = create_motion_process(
+                self.rtsp_stream,
+                self.msg_queue,
+                self.threshold,
+                self.kernel_size,
+                self.scale,
+                self.transition_metrics,
+            )
+
+        # check and create segment process
+        if self.segment_process and self.segment_process.poll() is not None:
+            logger.warning("Segmentation process is dead")
+            self.segment_process = None
+        if not self.segment_process:
+            logger.info("Creating Segmentation process...")
+            self.segment_process = create_segment_process(
+                input_=self.rtsp_stream, output=self.segments_dir, duration=self.segment_duration
+            )
 
     def get_message(self) -> MotionWindow | None:
-        if not self.motion_process:
-            self.create_motion_process()
-            return None
-
-        if not self.motion_process.is_alive():
-            logger.warning("Motion Process is dead, recreating")
-            self.create_motion_process()
-            return None
-
+        self.check_and_start_processes()
         msg = None
         with contextlib.suppress(Empty):
             msg = self.msg_queue.get_nowait()
         return msg
 
+    def combine_segments(self, motion_window: MotionWindow) -> None:
+        start_time = (motion_window.start_time - timedelta(seconds=self.offset_start),)
+        end_time = (motion_window.end_time + timedelta(seconds=self.offset_end),)
+        while (to_merge := find_segments_for_timespan(start_time, end_time, self.segments_dir)) is None:
+            # inner loop waiting for enough segments to be made
+            self.check_and_start_processes()
+            sleep(self.segment_duration)
+        output_file = self.output_dir / start_time.strftime("out_%Y_%m_%d__%H_%M_%S.mp4")
+        logger.info(f"Joining {len(to_merge)} segments into {output_file}")
+        concat_ffmpeg(to_merge, output_file)
+
+    def cleanup_old_segments(self) -> None:
+        # list files in directory
+        files = os.listdir(self.segments_dir)
+        if len(files) > self.keep_count:
+            # sort in order
+            files = sorted(files, reverse=True)
+            # identify the oldest ones
+            files_to_remove = files[self.keep_count :]
+            for file_to_remove in files_to_remove:
+                logger.debug(f"removing {self.segments_dir / file_to_remove}")
+                os.unlink(self.segments_dir / file_to_remove)
+
     def run(self) -> None:
-        self.create_motion_process()
-
-        # TODO start segment_process
-
         while True:
-            # TODO check segment_process is alive
-            # check queue for a message
+            # check subprocesses while checking queue for a message
             msg = None
             msg = self.get_message()
             if msg:
@@ -248,20 +178,11 @@ class WatcherManager:
                     self.state = WatcherManagerStateEnum.RECORDING
                     logger.info("Starting recording")
                 else:
-                    start_time = msg.start_time - timedelta(seconds=self.offset_start)
-                    end_time = msg.end_time + timedelta(seconds=self.offset_end)
-                    while (to_merge := find_segments_for_timespan(start_time, end_time, self.segments_dir)) is None:
-                        sleep(1)
-                    output_file = self.output_dir / start_time.strftime("out_%Y_%m_%d__%H_%M_%S.mp4")
-                    logger.info(f"Joining {len(to_merge)} segments into {output_file}")
-                    concat_ffmpeg(to_merge, output_file)
+                    self.combine_segments(msg)
                     self.state = WatcherManagerStateEnum.WAITING
             elif self.state == WatcherManagerStateEnum.WAITING:
                 # waiting to record, cleanup old files
-                cleanup_old_segments(
-                    path=self.segments_dir,
-                    max_file_count=self.keep_count,
-                )
+                self.cleanup_old_segments()
             else:
                 # nothing to do, sleep
                 sleep(1)
@@ -271,15 +192,18 @@ class WatcherManager:
 @use_yaml_config()
 def watch(
     rtsp_stream: Annotated[str, typer.Argument(metavar="RTSP_URL", envvar="WCT_RTSP")],
-    segments: Annotated[Path, typer.Argument(metavar="PATH", envvar="WCT_SEGMENTS")],
-    output: Annotated[Path, typer.Argument(metavar="PATH", envvar="WCT_OUTPUT")],
-    keep_count: Annotated[int, typer.Option(metavar="INT", envvar="WCT_KEEP")] = 4,
-    offset_start: Annotated[float, typer.Option(metavar="FLOAT", envvar="WCT_OFFSET_START")] = 10.0,
-    offset_end: Annotated[float, typer.Option(metavar="FLOAT", envvar="WCT_OFFSET_END")] = 10.0,
-    history: Annotated[int, typer.Option(metavar="INT", envvar="WTC_HISTORY")] = 30,
-    threshold: Annotated[int, typer.Option(metavar="INT", envvar="WTC_THRESHOLD")] = 16,
-    kernel_size: Annotated[int, typer.Option(metavar="INT", envvar="WTC_KERNEL_SIZE")] = 3,
-    scale: Annotated[float, typer.Option(metavar="FLOAT", envvar="WTC_SCALE")] = 0.25,
+    segments: Annotated[Path, typer.Argument(metavar="PATH", envvar="WCT_SEGMENTS")],  # existing directory
+    output: Annotated[Path, typer.Argument(metavar="PATH", envvar="WCT_OUTPUT")],  # existing directory
+    keep_count: Annotated[
+        int, typer.Option(metavar="INT", envvar="WCT_KEEP")
+    ] = 4,  # no. segments # TODO calculate from offset_start and segment_duration
+    offset_start: Annotated[float, typer.Option(metavar="FLOAT", envvar="WCT_OFFSET_START")] = 10.0,  # seconds
+    offset_end: Annotated[float, typer.Option(metavar="FLOAT", envvar="WCT_OFFSET_END")] = 10.0,  # seconds
+    history: Annotated[int, typer.Option(metavar="INT", envvar="WTC_HISTORY")] = 30,  # frames
+    threshold: Annotated[int, typer.Option(metavar="INT", envvar="WTC_THRESHOLD")] = 16,  # < 128?
+    kernel_size: Annotated[int, typer.Option(metavar="INT", envvar="WTC_KERNEL_SIZE")] = 3,  # pixels
+    scale: Annotated[float, typer.Option(metavar="FLOAT", envvar="WTC_SCALE")] = 0.25,  # <1.0
+    segment_duration: Annotated[int, typer.Option(metavar="INT", envvar="WTC_SEG_DURATION")] = 15,  # seconds
     green_to_amber_motion_min: Annotated[float, typer.Option(metavar="FLOAT", envvar="WTC_GREEN_2_AMBER_MIN")] = 0.01,
     amber_to_green_proportion_max: Annotated[
         float, typer.Option(metavar="FLOAT", envvar="WTC_AMBER_2_GREEN_MAX")
@@ -305,7 +229,15 @@ def watch(
     output = output.resolve()
     if not output.is_dir() or not output.exists():
         raise typer.BadParameter("output must be an existing directory")  # noqa: TRY003
-
+    transition_metrics = WatcherTransitionMetrics(
+        preparing_duration=history,
+        green_to_amber_motion_min=green_to_amber_motion_min,
+        amber_to_green_proportion_max=amber_to_green_proportion_max,
+        amber_to_red_duration=amber_to_red_duration,
+        red_to_red_amber_proportion_max=red_to_red_amber_proportion_max,
+        red_amber_to_red_proportion_min=red_amber_to_red_proportion_min,
+        red_amber_to_green_duration=red_amber_to_green_duration,
+    )
     watcher = WatcherManager(
         rtsp_stream=rtsp_stream,
         segments_dir=segments,
@@ -317,11 +249,7 @@ def watch(
         threshold=threshold,
         kernel_size=kernel_size,
         scale=scale,
-        green_to_amber_motion_min=green_to_amber_motion_min,
-        amber_to_green_proportion_max=amber_to_green_proportion_max,
-        amber_to_red_duration=amber_to_red_duration,
-        red_to_red_amber_proportion_max=red_to_red_amber_proportion_max,
-        red_amber_to_red_proportion_min=red_amber_to_red_proportion_min,
-        red_amber_to_green_duration=red_amber_to_green_duration,
+        segment_duration=segment_duration,
+        transition_metrics=transition_metrics,
     )
     watcher.run()

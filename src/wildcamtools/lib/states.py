@@ -1,11 +1,15 @@
 import logging
-from datetime import datetime
+from collections.abc import Generator
+from datetime import UTC, datetime
 from enum import StrEnum
+from multiprocessing import Process, Queue
 
 from pydantic import BaseModel
 
 from wildcamtools.lib import Frame, FrameHandler
 from wildcamtools.lib.motion import MogMotion
+from wildcamtools.lib.stats import VideoStats, get_video_stats
+from wildcamtools.lib.vidio import FrameSourceFFMPEG
 
 logger = logging.getLogger(__name__)
 
@@ -111,3 +115,79 @@ class MotionWindow(BaseModel):
     start_time: datetime
     end_frame: int | None
     end_time: datetime | None
+
+
+def enqueue_motion_windows(
+    rtsp_stream: str,
+    queue: Queue,
+    history: int,
+    threshold: int,
+    kernel_size: int,
+    scale: float,
+    transition_metrics: WatcherTransitionMetrics,
+) -> None:
+    def _find_motion_times(source: str, stats: VideoStats, watcher: Watcher) -> Generator[MotionWindow]:
+        start_frame: int | None = None
+        start_time: datetime | None = None
+        with FrameSourceFFMPEG(source, width=stats.x, height=stats.y, scale=scale) as video_input:
+            for frame in video_input:
+                frame = watcher.handle(frame)
+                if start_frame is None and watcher.state == WatcherStateEnum.RED:
+                    start_frame = frame.frame_no
+                    start_time = datetime.now(UTC)
+                    yield MotionWindow(
+                        start_frame=start_frame,
+                        start_time=start_time,
+                        end_frame=None,
+                        end_time=None,
+                    )
+                elif start_frame is not None and watcher.state == WatcherStateEnum.GREEN:
+                    end_frame = frame.frame_no
+                    end_time = datetime.now(UTC)
+                    yield MotionWindow(
+                        start_frame=start_frame,
+                        start_time=start_time,
+                        end_frame=end_frame,
+                        end_time=end_time,
+                    )
+                    start_frame = None
+                    start_time = None
+
+    watcher = Watcher(
+        motion=MogMotion(
+            history=history,
+            threshold=threshold,
+            detect_shadows=False,
+            kernel_size=kernel_size,
+        ),
+        transition_metrics=transition_metrics,
+    )
+    stats = get_video_stats(rtsp_stream)
+    for motion in _find_motion_times(rtsp_stream, stats, watcher):
+        queue.put(motion)
+
+
+def create_motion_process(
+    rtsp_stream: str,
+    msg_queue: Queue,
+    threshold: float,
+    kernel_size: int,
+    scale: float,
+    transition_metrics: WatcherTransitionMetrics,
+) -> Process:
+    motion_process = Process(
+        target=enqueue_motion_windows,
+        kwargs={
+            "rtsp_stream": rtsp_stream,
+            "queue": msg_queue,
+            "history": transition_metrics.preparing_duration,
+            "threshold": threshold,
+            "kernel_size": kernel_size,
+            "scale": scale,
+            "transition_metrics": transition_metrics,
+        },
+        daemon=True,
+    )
+    motion_process.start()
+
+    return motion_process

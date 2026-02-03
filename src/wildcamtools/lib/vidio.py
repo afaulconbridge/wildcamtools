@@ -71,17 +71,27 @@ class FrameSourceFFMPEG(FrameSource):
     height: int | None
     scale: float
     frame_no: int
+    hwaccel: str | None
     cumulative_time: int = 0
+
     _named_pipe: Path | None = None
     _named_pipe_reader: BufferedReader | None = None
     _temporary_dir: Path | None = None
 
-    def __init__(self, filename: str, width: int | None = None, height: int | None = None, scale: float = 1.0):
+    def __init__(
+        self,
+        filename: str,
+        width: int | None = None,
+        height: int | None = None,
+        scale: float = 1.0,
+        hwaccel: str | None = None,
+    ):
         super()
         self.filename = filename
         self.width = width
         self.height = height
         self.scale = scale
+        self.hwaccel = hwaccel
         self.frame_no = 0
 
     def _detect_width_height(self) -> None:
@@ -98,6 +108,7 @@ class FrameSourceFFMPEG(FrameSource):
             raise RuntimeError("Must be used in context")
         f_in = ffmpeg.input(
             self.filename,
+            hwaccel=self.hwaccel,  # see https://trac.ffmpeg.org/wiki/HWAccelIntro
         )
         # apply scaling if appropriate
         if self.scale != 1.0:

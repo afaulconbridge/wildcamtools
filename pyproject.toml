@@ -17,6 +17,7 @@ classifiers = [
 ]
 dependencies = [
     "opencv-contrib-python-headless>=4.12.0.88",
+    "pillow>=12.1.0",
     "psutil>=7.1.3",
     "pydantic>=2.12.5",
     "typed-ffmpeg>=3.8.1",

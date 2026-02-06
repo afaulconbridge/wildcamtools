@@ -65,7 +65,7 @@ class FileFrameSourceCV2(FrameSource):
 
 
 class FrameSourceFFMPEG(FrameSource):
-    filename: str
+    filename: Path | str
     reader: Popen | None = None
     width: int | None
     height: int | None
@@ -80,7 +80,7 @@ class FrameSourceFFMPEG(FrameSource):
 
     def __init__(
         self,
-        filename: str,
+        filename: Path | str,
         width: int | None = None,
         height: int | None = None,
         scale: float = 1.0,
@@ -188,7 +188,13 @@ class FrameSourceFFMPEG(FrameSource):
 class FrameSourceFFMPEGSegmenter(FrameSource):
     segment_dir: str | Path
 
-    def __init__(self, filename: str, segment_dir: str | Path, width: int | None = None, height: int | None = None):
+    def __init__(
+        self,
+        filename: Path | str,
+        segment_dir: str | Path,
+        width: int | None = None,
+        height: int | None = None,
+    ):
         self.segment_dir = segment_dir
         super().__init__(filename=filename, width=width, height=height)
 
@@ -227,7 +233,7 @@ class FrameWriterFFMPEG:
 
     def __init__(
         self,
-        out_filename: str,
+        out_filename: Path | str,
         fps: float,
         pix_fmt: str = "rgb24",
         crf: int = 23,
@@ -290,7 +296,7 @@ class FrameWriterFFMPEG:
 
         # resize if needed (all frames must match initial dims)
         if frame.shape[0] != self._height or frame.shape[1] != self._width:
-            frame = cv2.resize(frame, (self._width, self._height), interpolation=cv2.INTER_AREA)
+            frame = cv2.resize(frame, (int(self._width), int(self._height)), interpolation=cv2.INTER_AREA)
 
         try:
             self._proc.stdin.write(frame.astype(np.uint8).tobytes())
@@ -308,8 +314,8 @@ class FrameWriterFFMPEG:
             self._width = None
             self._height = None
 
-    def __enter__(self):
+    def __enter__(self) -> Self:
         return self
 
-    def __exit__(self, exc_type, exc_val, exc_tb):
+    def __exit__(self, exc_type: type | None, exc_val: BaseException | None, exc_tb: Any | None) -> bool:
         self.close()

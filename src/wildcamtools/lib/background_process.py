@@ -2,6 +2,7 @@ import contextlib
 import subprocess
 import time
 from collections.abc import Callable, Iterable
+from typing import Any, Self
 
 
 class BackgroundProcess:
@@ -11,6 +12,15 @@ class BackgroundProcess:
             # process is running here
             do_work()
     """
+
+    cmd: list[str]
+    cwd: str | None
+    env: dict | None
+    start_wait: float
+    ready_check: Callable[[], bool] | None
+    ready_timeout: float
+    terminate_timeout: float
+    process: subprocess.Popen | None = None
 
     def __init__(
         self,
@@ -34,9 +44,8 @@ class BackgroundProcess:
         self.ready_check = ready_check
         self.ready_timeout = ready_timeout
         self.terminate_timeout = terminate_timeout
-        self.process: subprocess.Popen | None = None
 
-    def _create_process(self):
+    def _create_process(self) -> None:
         self.process = subprocess.Popen(
             self.cmd,
             cwd=self.cwd,
@@ -46,7 +55,9 @@ class BackgroundProcess:
             text=True,
         )
 
-    def _check_till_ready(self):
+    def _check_till_ready(self) -> None:
+        if not self.process:
+            raise ValueError("Process must exist to be checked")
         if self.ready_check:
             deadline = time.time() + self.ready_timeout
             while time.time() < deadline:
@@ -61,7 +72,7 @@ class BackgroundProcess:
                 self._terminate_process()
                 raise TimeoutError("Process did not become ready within timeout")
 
-    def __enter__(self):
+    def __enter__(self) -> Self:
         # Start process
         self._create_process()
 
@@ -73,12 +84,12 @@ class BackgroundProcess:
 
         return self
 
-    def __exit__(self, exc_type, exc, tb):
+    def __exit__(self, exc_type: type | None, exc_val: BaseException | None, exc_tb: Any | None) -> bool:  # type: ignore
         self._terminate_process()
         # Do not suppress exceptions
         return False
 
-    def _terminate_process(self):
+    def _terminate_process(self) -> None:
         if not self.process:
             return
         if self.process.poll() is not None:

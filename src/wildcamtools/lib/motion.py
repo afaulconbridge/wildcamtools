@@ -1,5 +1,6 @@
 import cv2
 import numpy as np
+from cv2.typing import MatLike
 
 from wildcamtools.lib import Frame, FrameHandler
 
@@ -41,7 +42,7 @@ class MogMotion(FrameHandler):
         proportion = self.get_motion_proportion(frame_out) if frame.frame_no > self.history else -1.0
         return Frame(raw=frame_out, frame_no=frame.frame_no, motion_proportion=proportion)
 
-    def get_motion_proportion(self, frame: Frame) -> float:
+    def get_motion_proportion(self, frame: MatLike) -> float:
         contours, _ = cv2.findContours(frame, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         areas = (cv2.contourArea(cnt) for cnt in contours)
         area_total = sum(areas)

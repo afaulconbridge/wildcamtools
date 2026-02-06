@@ -12,11 +12,11 @@ class Frame:
 
     @property
     def width(self) -> float:
-        return self.raw.shape[1]
+        return float(self.raw.shape[1])
 
     @property
     def height(self) -> float:
-        return self.raw.shape[0]
+        return float(self.raw.shape[0])
 
 
 class FrameHandler(abc.ABC):

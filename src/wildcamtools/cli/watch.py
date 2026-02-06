@@ -111,7 +111,7 @@ class WatcherManager:
         self.msg_queue = Queue()
         self.state = WatcherManagerStateEnum.WAITING
 
-    def check_and_start_processes(self):
+    def check_and_start_processes(self) -> None:
 
         # check and create motion process
         if self.motion_process and not self.motion_process.is_alive():
@@ -146,8 +146,11 @@ class WatcherManager:
         return msg
 
     def combine_segments(self, motion_window: MotionWindow) -> None:
-        start_time = (motion_window.start_time - timedelta(seconds=self.offset_start),)
-        end_time = (motion_window.end_time + timedelta(seconds=self.offset_end),)
+        start_time = motion_window.start_time - timedelta(seconds=self.offset_start)
+        if motion_window.end_time is None:
+            raise ValueError("Cannot combine open window")
+        end_time = motion_window.end_time + timedelta(seconds=self.offset_end)
+
         while (to_merge := find_segments_for_timespan(start_time, end_time, self.segments_dir)) is None:
             # inner loop waiting for enough segments to be made
             self.check_and_start_processes()
@@ -155,6 +158,10 @@ class WatcherManager:
         output_file = self.output_dir / start_time.strftime("out_%Y_%m_%d__%H_%M_%S.mp4")
         logger.info(f"Joining {len(to_merge)} segments into {output_file}")
         concat_ffmpeg(to_merge, output_file)
+
+        # also output a JSON summary
+        with open(self.output_dir / start_time.strftime("out_%Y_%m_%d__%H_%M_%S.json"), "w") as json_out:
+            json_out.write(motion_window.model_dump_json())
 
     def cleanup_old_segments(self) -> None:
         # list files in directory
@@ -169,23 +176,32 @@ class WatcherManager:
                 os.unlink(self.segments_dir / file_to_remove)
 
     def run(self) -> None:
-        while True:
-            # check subprocesses while checking queue for a message
-            msg = None
-            msg = self.get_message()
-            if msg:
-                if msg.end_time is None:
-                    self.state = WatcherManagerStateEnum.RECORDING
-                    logger.info("Starting recording")
+        try:
+            while True:
+                # check subprocesses while checking queue for a message
+                msg = None
+                msg = self.get_message()
+                if msg:
+                    if msg.end_time is None:
+                        self.state = WatcherManagerStateEnum.RECORDING
+                        logger.info("Starting recording")
+                    else:
+                        self.combine_segments(msg)
+                        self.state = WatcherManagerStateEnum.WAITING
+                elif self.state == WatcherManagerStateEnum.WAITING:
+                    # waiting to record, cleanup old files
+                    self.cleanup_old_segments()
                 else:
-                    self.combine_segments(msg)
-                    self.state = WatcherManagerStateEnum.WAITING
-            elif self.state == WatcherManagerStateEnum.WAITING:
-                # waiting to record, cleanup old files
-                self.cleanup_old_segments()
-            else:
-                # nothing to do, sleep
-                sleep(1)
+                    # nothing to do, sleep
+                    sleep(1)
+        finally:
+            # cleanup any lingering processes
+            if self.motion_process and self.motion_process.is_alive():
+                self.motion_process.kill()
+                self.motion_process = None
+            if self.segment_process and self.segment_process.poll() == None:
+                self.segment_process.kill()
+                self.segment_process = None
 
 
 @app.command()

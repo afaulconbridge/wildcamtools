@@ -3,6 +3,7 @@ from collections.abc import Generator
 from datetime import UTC, datetime
 from enum import StrEnum
 from multiprocessing import Process, Queue
+from typing import Self
 
 from pydantic import BaseModel
 
@@ -33,6 +34,29 @@ class WatcherTransitionMetrics(BaseModel):
     red_amber_to_green_duration: int = 1
 
 
+class StateTransitionWindowMetrics(BaseModel):
+    minimum: float
+    maximum: float
+    mean: float
+    count: int
+
+    def update(self, value: float) -> Self:
+        self.count += 1
+        self.mean = self.mean + ((value - self.mean) / self.count)
+        self.minimum = min(self.minimum, value)
+        self.maximum = max(self.maximum, value)
+        return self
+
+
+class MotionWindow(BaseModel):
+    start_frame: int
+    start_time: datetime
+    end_frame: int | None
+    end_time: datetime | None
+    transition_metrics: WatcherTransitionMetrics
+    transition_window_metrics: dict[WatcherStateEnum, StateTransitionWindowMetrics]
+
+
 class Watcher(FrameHandler):
     """
     ```mermaid
@@ -54,18 +78,32 @@ class Watcher(FrameHandler):
     motion: MogMotion
     state: WatcherStateEnum
     transition_metrics: WatcherTransitionMetrics
+    transition_window_metrics: dict[WatcherStateEnum, StateTransitionWindowMetrics]
 
     def __init__(self, motion: MogMotion, transition_metrics: WatcherTransitionMetrics) -> None:
         self.motion = motion
         self.state = WatcherStateEnum.PREPARING
         self.transition_metrics = transition_metrics
+        self.transition_window_metrics = {}
 
     def handle(self, frame: Frame) -> Frame:
         output = self.motion.handle(frame)
 
         self.state = self._get_next_state(output)
+        self._update_state_transition_window_metrics(output)
 
         return output
+
+    def _update_state_transition_window_metrics(self, frame: Frame) -> None:
+        if self.state not in self.transition_window_metrics:
+            self.transition_window_metrics[self.state] = StateTransitionWindowMetrics(
+                minimum=frame.motion_proportion,
+                maximum=frame.motion_proportion,
+                mean=frame.motion_proportion,
+                count=1,
+            )
+        else:
+            self.transition_window_metrics[self.state].update(frame.motion_proportion)
 
     def _get_next_state(self, frame: Frame) -> WatcherStateEnum:
         logger.debug(f"Frame no: {frame.frame_no}")
@@ -110,13 +148,6 @@ class Watcher(FrameHandler):
         return self.state
 
 
-class MotionWindow(BaseModel):
-    start_frame: int
-    start_time: datetime
-    end_frame: int | None
-    end_time: datetime | None
-
-
 def enqueue_motion_windows(
     rtsp_stream: str,
     queue: Queue,
@@ -140,6 +171,8 @@ def enqueue_motion_windows(
                         start_time=start_time,
                         end_frame=None,
                         end_time=None,
+                        transition_metrics=watcher.transition_metrics,
+                        transition_window_metrics=watcher.transition_window_metrics,
                     )
                 elif start_frame is not None and watcher.state == WatcherStateEnum.GREEN:
                     end_frame = frame.frame_no
@@ -149,6 +182,8 @@ def enqueue_motion_windows(
                         start_time=start_time,
                         end_frame=end_frame,
                         end_time=end_time,
+                        transition_metrics=watcher.transition_metrics,
+                        transition_window_metrics=watcher.transition_window_metrics,
                     )
                     start_frame = None
                     start_time = None

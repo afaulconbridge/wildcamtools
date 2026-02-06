@@ -29,7 +29,7 @@ def rescale(
             with timer:
                 frame_rescaled = rescaler.handle(frame)
             if frame_rescaled is not None:
-                video_writer.write(frame_rescaled)
+                video_writer.write(frame_rescaled.raw)
 
     typer.secho(f"Processed {timer.intervals:d} frames in {timer.elapsed:.2f} sec; {timer.per_second:.2f}FPS")
 

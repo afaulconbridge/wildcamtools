@@ -163,19 +163,23 @@ class WatcherManager:
         with open(self.output_dir / start_time.strftime("out_%Y_%m_%d__%H_%M_%S.json"), "w") as json_out:
             json_out.write(motion_window.model_dump_json())
 
-    def cleanup_old_segments(self) -> None:
+    def cleanup_old_segments(self, *, keep_override: int = -1) -> None:
+        keep = keep_override if keep_override >= 0 else self.keep_count
         # list files in directory
         files = os.listdir(self.segments_dir)
-        if len(files) > self.keep_count:
+        if len(files) > keep:
             # sort in order
             files = sorted(files, reverse=True)
             # identify the oldest ones
-            files_to_remove = files[self.keep_count :]
+            files_to_remove = files[keep:]
             for file_to_remove in files_to_remove:
                 logger.debug(f"removing {self.segments_dir / file_to_remove}")
                 os.unlink(self.segments_dir / file_to_remove)
 
     def run(self) -> None:
+        # initially remove any old segments
+        self.cleanup_old_segments(keep_override=0)
+
         try:
             while True:
                 # check subprocesses while checking queue for a message

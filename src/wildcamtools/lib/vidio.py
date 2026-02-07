@@ -22,7 +22,7 @@ class FrameSource:
     def __init__(self):
         self.frame_no = 0
 
-    def __iter__(self):
+    def __iter__(self) -> Self:
         return self
 
     def __next__(self) -> Frame:
@@ -45,6 +45,7 @@ class FileFrameSourceCV2(FrameSource):
 
     def __enter__(self) -> Self:
         self.cap = cv2.VideoCapture(self.filename)
+        return self
 
     def __exit__(self, exc_type: type | None, exc_val: BaseException | None, exc_tb: Any | None) -> bool:
         self.cap.release()
@@ -55,9 +56,9 @@ class FileFrameSourceCV2(FrameSource):
         if not self.cap:
             raise RuntimeError("Must be used in context")
 
-        ret, frame = self.cap.read()
+        ret, raw = self.cap.read()
         if ret:
-            frame = Frame(raw=frame, frame_no=self.frame_no)
+            frame = Frame(raw=raw, frame_no=self.frame_no)
             self.frame_no += 1
             return frame
         else:
@@ -70,9 +71,10 @@ class FrameSourceFFMPEG(FrameSource):
     width: int | None
     height: int | None
     scale: float
+    fps: float
     frame_no: int
     hwaccel: str | None
-    cumulative_time: int = 0
+    cumulative_time: float = 0.0
 
     _named_pipe: Path | None = None
     _named_pipe_reader: BufferedReader | None = None
@@ -84,6 +86,7 @@ class FrameSourceFFMPEG(FrameSource):
         width: int | None = None,
         height: int | None = None,
         scale: float = 1.0,
+        fps: float = -1.0,
         hwaccel: str | None = None,
     ):
         super()
@@ -91,6 +94,7 @@ class FrameSourceFFMPEG(FrameSource):
         self.width = width
         self.height = height
         self.scale = scale
+        self.fps = fps
         self.hwaccel = hwaccel
         self.frame_no = 0
 
@@ -106,14 +110,22 @@ class FrameSourceFFMPEG(FrameSource):
     def _create_ffmpeg_proc(self) -> Popen[bytes]:
         if not self._named_pipe:
             raise RuntimeError("Must be used in context")
-        f_in = ffmpeg.input(
+        f_in: ffmpeg.AVStream | ffmpeg.VideoStream = ffmpeg.input(
             self.filename,
             hwaccel=self.hwaccel,  # see https://trac.ffmpeg.org/wiki/HWAccelIntro
         )
+        # change fps if appropriate
+        # change fps first to save rescaling frames that will be dropped
+        if self.fps > 0.0:
+            f_in = f_in.fps(fps=f"{self.fps}")
+
         # apply scaling if appropriate
         if self.scale != 1.0:
             # iw = input width, ih=input height
-            f_in = f_in.scale(w=f"{self.scale:f}*iw", h=f"{self.scale:f}*ih")
+            f_in = f_in.scale(
+                w=f"{self.scale:f}*iw",
+                h=f"{self.scale:f}*ih",
+            )
 
         # using stdout from ffmpeg is unstable
         # use a named pipe (FIFO) instead - with a context manager
@@ -296,7 +308,7 @@ class FrameWriterFFMPEG:
 
         # resize if needed (all frames must match initial dims)
         if frame.shape[0] != self._height or frame.shape[1] != self._width:
-            frame = cv2.resize(frame, (int(self._width), int(self._height)), interpolation=cv2.INTER_AREA)
+            frame = cv2.resize(frame, (int(self._width), int(self._height)), interpolation=cv2.INTER_LINEAR)
 
         try:
             self._proc.stdin.write(frame.astype(np.uint8).tobytes())
@@ -319,3 +331,4 @@ class FrameWriterFFMPEG:
 
     def __exit__(self, exc_type: type | None, exc_val: BaseException | None, exc_tb: Any | None) -> bool:
         self.close()
+        return False

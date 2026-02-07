@@ -72,6 +72,7 @@ class WatcherManager:
     threshold: int
     kernel_size: int
     scale: float
+    fps: float
     segment_duration: int
     transition_metrics: WatcherTransitionMetrics
 
@@ -92,6 +93,7 @@ class WatcherManager:
         threshold: int,
         kernel_size: int,
         scale: float,
+        fps: float,
         segment_duration: int,
         transition_metrics: WatcherTransitionMetrics,
     ) -> None:
@@ -105,6 +107,7 @@ class WatcherManager:
         self.threshold = threshold
         self.kernel_size = kernel_size
         self.scale = scale
+        self.fps = fps
         self.segment_duration = segment_duration
         self.transition_metrics = transition_metrics
 
@@ -120,12 +123,13 @@ class WatcherManager:
         if not self.motion_process:
             logger.info("Creating Motion process...")
             self.motion_process = create_motion_process(
-                self.rtsp_stream,
-                self.msg_queue,
-                self.threshold,
-                self.kernel_size,
-                self.scale,
-                self.transition_metrics,
+                rtsp_stream=self.rtsp_stream,
+                msg_queue=self.msg_queue,
+                threshold=self.threshold,
+                kernel_size=self.kernel_size,
+                scale=self.scale,
+                fps=self.fps,
+                transition_metrics=self.transition_metrics,
             )
 
         # check and create segment process
@@ -223,12 +227,13 @@ def watch(
     threshold: Annotated[int, typer.Option(metavar="INT", envvar="WTC_THRESHOLD")] = 16,  # < 128?
     kernel_size: Annotated[int, typer.Option(metavar="INT", envvar="WTC_KERNEL_SIZE")] = 3,  # pixels
     scale: Annotated[float, typer.Option(metavar="FLOAT", envvar="WTC_SCALE")] = 0.25,  # <1.0
+    fps: Annotated[float, typer.Option(metavar="FLOAT", envvar="WTC_FPS")] = 5.0,  # >=1.0
     segment_duration: Annotated[int, typer.Option(metavar="INT", envvar="WTC_SEG_DURATION")] = 15,  # seconds
     green_to_amber_motion_min: Annotated[float, typer.Option(metavar="FLOAT", envvar="WTC_GREEN_2_AMBER_MIN")] = 0.01,
     amber_to_green_proportion_max: Annotated[
         float, typer.Option(metavar="FLOAT", envvar="WTC_AMBER_2_GREEN_MAX")
     ] = 0.0075,
-    amber_to_red_duration: Annotated[int, typer.Option(metavar="INT", envvar="WTC_AMBER_2_RED_DURATION")] = 5,
+    amber_to_red_duration: Annotated[int, typer.Option(metavar="INT", envvar="WTC_AMBER_2_RED_DURATION")] = 5,  # frames
     red_to_red_amber_proportion_max: Annotated[
         float, typer.Option(metavar="FLOAT", envvar="WTC_RED_2_RED_AMBER_MAX")
     ] = 0.0075,
@@ -237,7 +242,7 @@ def watch(
     ] = 0.01,
     red_amber_to_green_duration: Annotated[
         int, typer.Option(metavar="INT", envvar="WTC_RED_AMBER_2_GREEN_DURATION")
-    ] = 5,
+    ] = 5,  # frames
 ) -> None:
 
     # TODO validate rtsp_stream is a rtsp url
@@ -269,6 +274,7 @@ def watch(
         threshold=threshold,
         kernel_size=kernel_size,
         scale=scale,
+        fps=fps,
         segment_duration=segment_duration,
         transition_metrics=transition_metrics,
     )

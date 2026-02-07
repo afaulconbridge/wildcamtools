@@ -155,14 +155,22 @@ def enqueue_motion_windows(
     threshold: int,
     kernel_size: int,
     scale: float,
+    fps: float,
     transition_metrics: WatcherTransitionMetrics,
 ) -> None:
     def _find_motion_times(source: str, stats: VideoStats, watcher: Watcher) -> Generator[MotionWindow]:
         start_frame: int | None = None
         start_time: datetime | None = None
-        with FrameSourceFFMPEG(source, width=stats.x, height=stats.y, scale=scale) as video_input:
+        with FrameSourceFFMPEG(
+            source,
+            width=stats.x,
+            height=stats.y,
+            scale=scale,
+            fps=fps,
+        ) as video_input:
             for frame in video_input:
                 frame = watcher.handle(frame)
+                # TODO include both amber and red-amber states in window
                 if start_frame is None and watcher.state == WatcherStateEnum.RED:
                     start_frame = frame.frame_no
                     start_time = datetime.now(UTC)
@@ -208,6 +216,7 @@ def create_motion_process(
     threshold: float,
     kernel_size: int,
     scale: float,
+    fps: float,
     transition_metrics: WatcherTransitionMetrics,
 ) -> Process:
     motion_process = Process(
@@ -219,6 +228,7 @@ def create_motion_process(
             "threshold": threshold,
             "kernel_size": kernel_size,
             "scale": scale,
+            "fps": fps,
             "transition_metrics": transition_metrics,
         },
         daemon=True,

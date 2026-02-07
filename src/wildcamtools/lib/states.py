@@ -156,6 +156,7 @@ def enqueue_motion_windows(
     kernel_size: int,
     scale: float,
     fps: float,
+    hwaccel: str,
     transition_metrics: WatcherTransitionMetrics,
 ) -> None:
     def _find_motion_times(source: str, stats: VideoStats, watcher: Watcher) -> Generator[MotionWindow]:
@@ -167,6 +168,7 @@ def enqueue_motion_windows(
             height=stats.y,
             scale=scale,
             fps=fps,
+            hwaccel=hwaccel if hwaccel else None,
         ) as video_input:
             for frame in video_input:
                 frame = watcher.handle(frame)
@@ -217,6 +219,7 @@ def create_motion_process(
     kernel_size: int,
     scale: float,
     fps: float,
+    hwaccel: str,
     transition_metrics: WatcherTransitionMetrics,
 ) -> Process:
     motion_process = Process(
@@ -229,6 +232,7 @@ def create_motion_process(
             "kernel_size": kernel_size,
             "scale": scale,
             "fps": fps,
+            "hwaccel": hwaccel,
             "transition_metrics": transition_metrics,
         },
         daemon=True,

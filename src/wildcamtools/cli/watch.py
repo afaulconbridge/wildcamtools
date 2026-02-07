@@ -73,6 +73,7 @@ class WatcherManager:
     kernel_size: int
     scale: float
     fps: float
+    hwaccel: str
     segment_duration: int
     transition_metrics: WatcherTransitionMetrics
 
@@ -94,6 +95,7 @@ class WatcherManager:
         kernel_size: int,
         scale: float,
         fps: float,
+        hwaccel: str,
         segment_duration: int,
         transition_metrics: WatcherTransitionMetrics,
     ) -> None:
@@ -108,6 +110,7 @@ class WatcherManager:
         self.kernel_size = kernel_size
         self.scale = scale
         self.fps = fps
+        self.hwaccel = hwaccel
         self.segment_duration = segment_duration
         self.transition_metrics = transition_metrics
 
@@ -129,6 +132,7 @@ class WatcherManager:
                 kernel_size=self.kernel_size,
                 scale=self.scale,
                 fps=self.fps,
+                hwaccel=self.hwaccel,
                 transition_metrics=self.transition_metrics,
             )
 
@@ -139,7 +143,9 @@ class WatcherManager:
         if not self.segment_process:
             logger.info("Creating Segmentation process...")
             self.segment_process = create_segment_process(
-                input_=self.rtsp_stream, output=self.segments_dir, duration=self.segment_duration
+                input_=self.rtsp_stream,
+                output=self.segments_dir,
+                duration=self.segment_duration,
             )
 
     def get_message(self) -> MotionWindow | None:
@@ -228,6 +234,9 @@ def watch(
     kernel_size: Annotated[int, typer.Option(metavar="INT", envvar="WTC_KERNEL_SIZE")] = 3,  # pixels
     scale: Annotated[float, typer.Option(metavar="FLOAT", envvar="WTC_SCALE")] = 0.25,  # <1.0
     fps: Annotated[float, typer.Option(metavar="FLOAT", envvar="WTC_FPS")] = 5.0,  # >=1.0
+    hwaccel: Annotated[
+        str, typer.Option(metavar="STR", envvar="WTC_AWACCEL")
+    ] = "",  # see https://trac.ffmpeg.org/wiki/HWAccelIntro
     segment_duration: Annotated[int, typer.Option(metavar="INT", envvar="WTC_SEG_DURATION")] = 15,  # seconds
     green_to_amber_motion_min: Annotated[float, typer.Option(metavar="FLOAT", envvar="WTC_GREEN_2_AMBER_MIN")] = 0.01,
     amber_to_green_proportion_max: Annotated[
@@ -275,7 +284,12 @@ def watch(
         kernel_size=kernel_size,
         scale=scale,
         fps=fps,
+        hwaccel=hwaccel,
         segment_duration=segment_duration,
         transition_metrics=transition_metrics,
     )
     watcher.run()
+
+
+if __name__ == "__main__":
+    app()

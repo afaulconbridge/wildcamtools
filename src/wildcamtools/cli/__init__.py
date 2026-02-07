@@ -24,4 +24,4 @@ app.add_typer(watch_app)
 
 
 if __name__ == "__main__":
-    pass
+    app()

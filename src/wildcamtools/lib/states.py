@@ -89,21 +89,22 @@ class Watcher(FrameHandler):
     def handle(self, frame: Frame) -> Frame:
         output = self.motion.handle(frame)
 
-        self.state = self._get_next_state(output)
-        self._update_state_transition_window_metrics(output)
+        next_state = self._get_next_state(output)
+        self._update_state_transition_window_metrics(frame=frame, next_state=next_state)
 
+        self.state = next_state
         return output
 
-    def _update_state_transition_window_metrics(self, frame: Frame) -> None:
-        if self.state not in self.transition_window_metrics:
-            self.transition_window_metrics[self.state] = StateTransitionWindowMetrics(
+    def _update_state_transition_window_metrics(self, frame: Frame, next_state: WatcherStateEnum) -> None:
+        if next_state != self.state:
+            self.transition_window_metrics[next_state] = StateTransitionWindowMetrics(
                 minimum=frame.motion_proportion,
                 maximum=frame.motion_proportion,
                 mean=frame.motion_proportion,
                 count=1,
             )
         else:
-            self.transition_window_metrics[self.state].update(frame.motion_proportion)
+            self.transition_window_metrics[next_state].update(frame.motion_proportion)
 
     def _get_next_state(self, frame: Frame) -> WatcherStateEnum:
         logger.debug(f"Frame no: {frame.frame_no}")

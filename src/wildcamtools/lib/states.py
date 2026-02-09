@@ -96,7 +96,7 @@ class Watcher(FrameHandler):
         return output
 
     def _update_state_transition_window_metrics(self, frame: Frame, next_state: WatcherStateEnum) -> None:
-        if next_state != self.state:
+        if next_state != self.state or next_state not in self.transition_window_metrics:
             self.transition_window_metrics[next_state] = StateTransitionWindowMetrics(
                 minimum=frame.motion_proportion,
                 maximum=frame.motion_proportion,

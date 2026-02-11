@@ -90,7 +90,7 @@ class Watcher(FrameHandler):
         output = self.motion.handle(frame)
 
         next_state = self._get_next_state(output)
-        self._update_state_transition_window_metrics(frame=frame, next_state=next_state)
+        self._update_state_transition_window_metrics(frame=output, next_state=next_state)
 
         self.state = next_state
         return output
@@ -174,7 +174,7 @@ def enqueue_motion_windows(
             for frame in video_input:
                 frame = watcher.handle(frame)
                 # TODO include both amber and red-amber states in window
-                if start_frame is None and watcher.state == WatcherStateEnum.RED:
+                if start_frame is None and start_time is None and watcher.state == WatcherStateEnum.RED:
                     start_frame = frame.frame_no
                     start_time = datetime.now(UTC)
                     yield MotionWindow(
@@ -185,7 +185,7 @@ def enqueue_motion_windows(
                         transition_metrics=watcher.transition_metrics,
                         transition_window_metrics=watcher.transition_window_metrics,
                     )
-                elif start_frame is not None and watcher.state == WatcherStateEnum.GREEN:
+                elif start_frame is not None and start_time is not None and watcher.state == WatcherStateEnum.GREEN:
                     end_frame = frame.frame_no
                     end_time = datetime.now(UTC)
                     yield MotionWindow(

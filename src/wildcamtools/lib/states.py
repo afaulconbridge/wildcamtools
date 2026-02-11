@@ -237,6 +237,7 @@ def create_motion_process(
             "transition_metrics": transition_metrics,
         },
         daemon=True,
+        name="wildcamtools-motion",
     )
     motion_process.start()
 

@@ -16,7 +16,7 @@ from wildcamtools.cli.watch import app as watch_app
 
 app = typer.Typer()
 app.add_typer(rescale_app)
-app.add_typer(motion_mog2_app)
+app.add_typer(motion_mog2_app, name="motion")
 app.add_typer(perftest_app)
 app.add_typer(rtsp_app)
 app.add_typer(segment_app)

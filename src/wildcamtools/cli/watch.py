@@ -205,6 +205,8 @@ class WatcherManager:
                 elif self.state == WatcherManagerStateEnum.WAITING:
                     # waiting to record, cleanup old files
                     self.cleanup_old_segments()
+                    # sleep till there's something else to do
+                    sleep(1)
                 else:
                     # nothing to do, sleep
                     sleep(1)

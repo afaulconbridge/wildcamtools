@@ -2,6 +2,8 @@ name: docker
 
 on:
   push:
+    branches:
+    - main
 
 permissions: {}
 
@@ -21,5 +23,5 @@ jobs:
       - name: Build but dont push
         uses: docker/build-push-action@v6
         with:
-          push: false
+          push: true
           tags: afaulconbridge/wildcamtools:latest

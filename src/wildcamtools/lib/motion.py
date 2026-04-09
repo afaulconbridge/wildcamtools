@@ -17,10 +17,13 @@ class MotionHandler(FrameHandler):
         self,
         history: int,
         kernel_size: int = 3,
+        motion_mask: np.ndarray | None = None,
     ):
         self.history = history
         self.kernel_size = kernel_size
         self.kernel = np.ones((self.kernel_size, self.kernel_size), np.uint8)
+        self.motion_mask = motion_mask
+
 
     def handle(self, frame: Frame) -> Frame:
         frame_out = self.update_background(frame.raw)
@@ -37,8 +40,53 @@ class MotionHandler(FrameHandler):
             return cv2.countNonZero(frame) / (float(frame.shape[0]) * float(frame.shape[1]))
         else:
             contours, _ = cv2.findContours(frame, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-            # TODO filter contours remove those whose lowest point is in the masked areas
-            areas = (cv2.contourArea(cnt) for cnt in contours)
+
+            # Filter out contours whose lowest point (max Y coordinate) is within a masked area.
+            # If a contour has multiple points with the same maximum Y coordinate,
+            # we consider it masked if ANY of those points are in a masked area.
+            # This prevents motion in specifically excluded regions (like moving foliage at the top)
+            # from triggering a motion detection.
+            filtered_contours = []
+            for cnt in contours:
+                # Find the maximum Y coordinate among all points in the contour
+                # cnt shape is (N, 1, 2)
+                max_y = np.max(cnt[:, 0, 1])
+
+                # Find all points that have this maximum Y coordinate
+                lowest_points = cnt[cnt[:, 0, 1] == max_y]
+
+                # The contour is removed if ANY of its lowest points are in a masked area
+                is_masked = False
+                if self.motion_mask is not None:
+                    mh, mw = self.motion_mask.shape
+                    # Extract coordinates of points at the lowest Y level
+                    pts = [ (int(p[0, 0]), int(p[0, 1])) for p in lowest_points ]
+
+                    # Check the points themselves
+                    for x, y in pts:
+                        if 0 <= y < mh and 0 <= x < mw:
+                            if self.motion_mask[y, x] != 0:
+                                is_masked = True
+                                break
+
+                    # For CHAIN_APPROX_SIMPLE, a straight bottom edge is represented by only its endpoints.
+                    # We check the segment between the leftmost and rightmost points at max_y.
+                    if not is_masked and len(pts) >= 2:
+                        # Sort by X coordinate
+                        pts.sort()
+                        x_start, y_start = pts[0]
+                        x_end, y_end = pts[-1]
+                        # Scan along the horizontal segment at max_y
+                        for x_sample in range(x_start, x_end + 1):
+                            if 0 <= y_start < mh and 0 <= x_sample < mw:
+                                if self.motion_mask[y_start, x_sample] != 0:
+                                    is_masked = True
+                                    break
+
+                if not is_masked:
+                    filtered_contours.append(cnt)
+
+            areas = (cv2.contourArea(cnt) for cnt in filtered_contours)
             area_total = sum(areas)
             area_propotion = area_total / (float(frame.shape[0]) * float(frame.shape[1]))
             return area_propotion
@@ -59,8 +107,9 @@ class MogMotion(MotionHandler):
         threshold: int = 16,
         detect_shadows: bool = False,
         kernel_size: int = 3,
+        motion_mask: np.ndarray | None = None,
     ):
-        super().__init__(history=history, kernel_size=kernel_size)
+        super().__init__(history=history, kernel_size=kernel_size, motion_mask=motion_mask)
         self.threshold = threshold
         self.detect_shadows = detect_shadows
 
@@ -85,8 +134,9 @@ class AvgMotion(MotionHandler):
         history: int = 500,
         threshold: int = 16,
         kernel_size: int = 3,
+        motion_mask: np.ndarray | None = None,
     ):
-        super().__init__(history=history, kernel_size=kernel_size)
+        super().__init__(history=history, kernel_size=kernel_size, motion_mask=motion_mask)
         self.threshold = threshold
 
     def update_background(self, frame: MatLike) -> MatLike:

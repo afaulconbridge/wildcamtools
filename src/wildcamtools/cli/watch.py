@@ -76,7 +76,7 @@ class WatcherManager:
     hwaccel: str
     segment_duration: int
     transition_metrics: WatcherTransitionMetrics
-
+    motion_mask: Path | None
     msg_queue: Queue
     stat: WatcherManagerStateEnum
     motion_process: Process | None = None
@@ -98,6 +98,7 @@ class WatcherManager:
         hwaccel: str,
         segment_duration: int,
         transition_metrics: WatcherTransitionMetrics,
+        motion_mask: Path | None = None,
     ) -> None:
         self.rtsp_stream = rtsp_stream
         self.segments_dir = segments_dir
@@ -113,6 +114,7 @@ class WatcherManager:
         self.hwaccel = hwaccel
         self.segment_duration = segment_duration
         self.transition_metrics = transition_metrics
+        self.motion_mask = motion_mask
 
         self.msg_queue = Queue()
         self.state = WatcherManagerStateEnum.WAITING
@@ -134,7 +136,9 @@ class WatcherManager:
                 fps=self.fps,
                 hwaccel=self.hwaccel,
                 transition_metrics=self.transition_metrics,
+                motion_mask=self.motion_mask,
             )
+
 
         # check and create segment process
         if self.segment_process and self.segment_process.poll() is not None:
@@ -254,9 +258,20 @@ def watch(
     red_amber_to_green_duration: Annotated[
         int, typer.Option(metavar="INT", envvar="WTC_RED_AMBER_2_GREEN_DURATION")
     ] = 5,  # frames
+    motion_mask: Annotated[Path | None, typer.Option(metavar="PATH", envvar="WTC_MOTION_MASK")] = None,
 ) -> None:
 
+    if motion_mask:
+        motion_mask = motion_mask.resolve()
+        if not motion_mask.exists():
+            raise typer.BadParameter(f"motion_mask file does not exist: {motion_mask}")
+        if not motion_mask.is_file():
+            raise typer.BadParameter(f"motion_mask path is not a file: {motion_mask}")
+        if not os.access(motion_mask, os.R_OK):
+            raise typer.BadParameter(f"motion_mask file is not readable: {motion_mask}")
+
     # TODO validate rtsp_stream is a rtsp url
+
 
     segments = segments.resolve()
     if not segments.is_dir() or not segments.exists():
@@ -289,6 +304,7 @@ def watch(
         hwaccel=hwaccel,
         segment_duration=segment_duration,
         transition_metrics=transition_metrics,
+        motion_mask=motion_mask,
     )
     watcher.run()
 

@@ -11,6 +11,7 @@ class MotionHandler(FrameHandler):
     history: int
     kernel_size: int
     background_subtractor: cv2.BackgroundSubtractor
+    motion_mask: np.ndarray | None = None
 
     def __init__(
         self,
@@ -32,7 +33,15 @@ class MotionHandler(FrameHandler):
         return Frame(raw=frame_out, frame_no=frame.frame_no, motion_proportion=proportion)
 
     def get_motion_proportion(self, frame: MatLike) -> float:
-        return cv2.countNonZero(frame) / (float(frame.shape[0]) * float(frame.shape[1]))
+        if self.motion_mask is None:
+            return cv2.countNonZero(frame) / (float(frame.shape[0]) * float(frame.shape[1]))
+        else:
+            contours, _ = cv2.findContours(frame, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+            # TODO filter contours remove those whose lowest point is in the masked areas
+            areas = (cv2.contourArea(cnt) for cnt in contours)
+            area_total = sum(areas)
+            area_propotion = area_total / (float(frame.shape[0]) * float(frame.shape[1]))
+            return area_propotion
 
     @abstractmethod
     def update_background(self, frame: MatLike) -> MatLike:

@@ -1,6 +1,12 @@
+import functools
 import time
+from collections.abc import Callable
 from types import TracebackType
-from typing import Self
+from typing import ParamSpec, Self, TypeVar
+
+# used for typing the timer as a decorator
+P = ParamSpec("P")
+R = TypeVar("R")
 
 
 class Timer:
@@ -20,6 +26,17 @@ class Timer:
     ) -> None:
         self.elapsed += time.perf_counter() - self._start
         self.intervals += 1
+
+    def __call__(
+        self,
+        func: Callable[P, R],
+    ) -> Callable[P, R]:
+        @functools.wraps(func)
+        def wrapper(*args: P.args, **kwargs: P.kwargs) -> R:
+            with self:
+                return func(*args, **kwargs)
+
+        return wrapper
 
     def reset(self) -> float:
         old = self.elapsed

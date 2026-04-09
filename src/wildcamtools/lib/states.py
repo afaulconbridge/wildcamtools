@@ -3,8 +3,11 @@ from collections.abc import Generator
 from datetime import UTC, datetime
 from enum import StrEnum
 from multiprocessing import Process, Queue
+from pathlib import Path
 from typing import Self
 
+import cv2
+import numpy as np
 from pydantic import BaseModel
 
 from wildcamtools.lib import Frame, FrameHandler
@@ -149,6 +152,36 @@ class Watcher(FrameHandler):
         return self.state
 
 
+def _load_and_resize_mask(mask_path: Path, width: int, height: int, scale: float) -> np.ndarray | None:
+    if mask_path is None:
+        return None
+
+    mask = cv2.imread(str(mask_path), cv2.IMREAD_GRAYSCALE)
+    if mask is None:
+        logger.error(f"Failed to load motion mask from {mask_path}. "
+                     f"The file may be corrupted or in an unsupported image format.")
+        return None
+
+    # Target size is the scaled dimensions of the frame
+    target_width = int(width * scale)
+    target_height = int(height * scale)
+
+    # Aspect ratio check
+    mask_h, mask_w = mask.shape[:2]
+    stream_aspect = width / height
+    mask_aspect = mask_w / mask_h
+
+    if abs(stream_aspect - mask_aspect) > 0.05:
+        logger.warning(f"Motion mask aspect ratio ({mask_aspect:.2f}) differs significantly "
+                       f"from stream aspect ratio ({stream_aspect:.2f}). "
+                       f"The mask will be stretched to fit.")
+
+    # Resize using nearest neighbor to keep binary mask properties
+    mask = cv2.resize(mask, (target_width, target_height), interpolation=cv2.INTER_NEAREST)
+    return mask
+
+
+
 def enqueue_motion_windows(
     rtsp_stream: str,
     queue: Queue,
@@ -159,6 +192,7 @@ def enqueue_motion_windows(
     fps: float,
     hwaccel: str,
     transition_metrics: WatcherTransitionMetrics,
+    motion_mask: Path | None = None,
 ) -> None:
     def _find_motion_times(source: str, stats: VideoStats, watcher: Watcher) -> Generator[MotionWindow]:
         start_frame: int | None = None
@@ -199,16 +233,24 @@ def enqueue_motion_windows(
                     start_frame = None
                     start_time = None
 
+    stats = get_video_stats(rtsp_stream)
+    processed_mask = _load_and_resize_mask(
+        mask_path=motion_mask,
+        width=stats.x,
+        height=stats.y,
+        scale=scale,
+    )
+
     watcher = Watcher(
         motion=MogMotion(
             history=history,
             threshold=threshold,
             detect_shadows=False,
             kernel_size=kernel_size,
+            motion_mask=processed_mask,
         ),
         transition_metrics=transition_metrics,
     )
-    stats = get_video_stats(rtsp_stream)
     for motion in _find_motion_times(rtsp_stream, stats, watcher):
         queue.put(motion)
 
@@ -222,6 +264,7 @@ def create_motion_process(
     fps: float,
     hwaccel: str,
     transition_metrics: WatcherTransitionMetrics,
+    motion_mask: Path | None = None,
 ) -> Process:
     motion_process = Process(
         target=enqueue_motion_windows,
@@ -235,6 +278,7 @@ def create_motion_process(
             "fps": fps,
             "hwaccel": hwaccel,
             "transition_metrics": transition_metrics,
+            "motion_mask": motion_mask,
         },
         daemon=True,
         name="wildcamtools-motion",

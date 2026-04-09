@@ -34,3 +34,4 @@ def concat_ffmpeg(inputs: Iterable[Path], output: Path) -> None:
         )
         logger.debug(ff.compile_line())
         ff.run()
+        # TODO use ffmpeg to create a temporary filename, then atomically rename into final

@@ -9,6 +9,7 @@ In general commands are:
 ```sh
 systemctl daemon-reload
 systemctl status streamer
+systemctl enable streamer
 systemctl start streamer
 systemctl stop streamer
 journald -b -u streamer

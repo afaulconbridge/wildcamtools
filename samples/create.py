@@ -15,7 +15,7 @@ def create_circle_frames(
     area_proportion: float,
     grey: float,
     padding_count: int = 0,
-):
+) -> None:
 
     # have to convert circle_area_proportion -> radius
     circle_area = width * height * area_proportion
@@ -59,7 +59,7 @@ def create_video_from_frames(path_wildcard: Path, output: Path | str, fps: int =
         path_wildcard,
         demuxer_options=ffmpeg.formats.demuxers.image2(
             pattern_type="glob",
-            framerate=fps,
+            framerate=str(fps),
         ),
     ).output(
         codec="libx264",

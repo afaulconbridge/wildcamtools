@@ -34,7 +34,6 @@ def fixture_video_path(data_directory: Path) -> Path:
 
 @pytest.fixture(name="video_frame_generator")
 def fixture_video_frame_generator(video_path: Path) -> Generator[Generator[Frame]]:
-
     def internal_generator() -> Generator[Frame]:
         with FrameSourceFFMPEG(video_path) as video_source:
             yield from video_source

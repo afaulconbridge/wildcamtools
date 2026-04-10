@@ -1,9 +1,9 @@
 from pathlib import Path
 from typing import Annotated
 
-import click
 import typer
 
+from wildcamtools.lib.errors import OutputNotDirectoryError
 from wildcamtools.lib.segment import create_segment_process
 
 app = typer.Typer()
@@ -17,7 +17,7 @@ def segment(
 ) -> None:
     output = output.resolve()
     if output.exists() and not output.is_dir():
-        raise click.BadArgumentUsage("Output must be a directory that can be created")
+        raise OutputNotDirectoryError()
     output.mkdir(parents=True, exist_ok=True)
 
     p = create_segment_process(

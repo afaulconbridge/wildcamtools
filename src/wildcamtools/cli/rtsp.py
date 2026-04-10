@@ -9,7 +9,7 @@ app = typer.Typer()
 
 
 @app.command()
-def serve(path: Path):
+def serve(path: Path) -> None:
     with BackgroundMediaMTX(), BackgroundFFMPEGBroadcast(path):
         typer.secho("RTSP stream ready at rtsp://localhost:8554/stream")
         try:

@@ -2,6 +2,9 @@ from pathlib import Path
 from subprocess import Popen
 
 import ffmpeg
+import ffmpeg.formats.muxers
+
+from wildcamtools.lib.errors import ProcessTypeMismatchError
 
 
 def create_segment_process(*, input_: str | Path, output: str | Path, duration: float) -> Popen:
@@ -15,10 +18,13 @@ def create_segment_process(*, input_: str | Path, output: str | Path, duration: 
             segment_time=str(duration),  # seconds
             segment_format="mp4",
             segment_format_options="movflags=+faststart",
-            segment_atclocktime=1,
-            reset_timestamps=1,
-            strftime=1,
+            segment_atclocktime=True,
+            reset_timestamps=True,
+            strftime=True,
         ),
         filename=f"{output}/seg_%Y_%m_%d__%H_%M_%S.mp4",
     )
-    return f.global_args(hide_banner=True, loglevel="error").overwrite_output().run_async()
+    res = f.global_args(hide_banner=True, loglevel="error").overwrite_output().run_async()
+    if not isinstance(res, Popen):
+        raise ProcessTypeMismatchError()
+    return res

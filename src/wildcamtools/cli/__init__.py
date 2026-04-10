@@ -1,10 +1,5 @@
 import logging
 
-# have to setup logging _before_ imports
-# generally, imports have a high level logger object
-# those loggers need to have config created _before_ they exist
-logging.basicConfig(level=logging.INFO, force=False)
-
 import typer
 
 from wildcamtools.cli.motion_mog2 import app as motion_mog2_app
@@ -13,6 +8,11 @@ from wildcamtools.cli.rescale import app as rescale_app
 from wildcamtools.cli.rtsp import app as rtsp_app
 from wildcamtools.cli.segment import app as segment_app
 from wildcamtools.cli.watch import app as watch_app
+
+# generally, imports have a high level logger object
+# those loggers need to be re-configured as they already exist
+# TODO make log level configurable via CLI
+logging.basicConfig(level=logging.DEBUG, force=True)
 
 app = typer.Typer()
 app.add_typer(rescale_app)

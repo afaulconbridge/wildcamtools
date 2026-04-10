@@ -5,7 +5,7 @@ import typer
 from wildcamtools.lib import FrameHandler
 from wildcamtools.lib.motion import MogMotion
 from wildcamtools.lib.rescale import Rescaler
-from wildcamtools.lib.stats import Colourspace, VideoStats, get_video_stats
+from wildcamtools.lib.stats import get_video_stats
 from wildcamtools.lib.timing import Timer
 from wildcamtools.lib.vidio import FrameSourceFFMPEG, FrameWriterFFMPEG
 
@@ -57,18 +57,11 @@ def perftest(output: str = "-") -> None:
             typer.secho(f"Processed {timer.intervals:d} frames in {timer.elapsed:.2f} sec; {timer.per_second:.2f}FPS")
             downscaled_files[(x, y, fps)] = output
 
-        # now do motion detection on each file that was downscaled
-        for (x, y, fps), input_ in downscaled_files.items():
-            input_stats = get_video_stats(input_)
-            output_stats = VideoStats(
-                fps=input_stats.fps,
-                frame_count=input_stats.frame_count,
-                x=input_stats.x,
-                y=input_stats.y,
-                colourspace=Colourspace.boolean,
-            )
-            motion_detector = MogMotion()  # TODO vary parameters?
-            timer = Timer()
-            convert(input_, "output.mp4", output_stats, timer, motion_detector)
-            speed = input_stats.duration_in_sconds / timer.elapsed
-            typer.secho(f"Processed {x}x{y}@{fps:.2f} in {timer.elapsed:.2f} sec; {speed:.2f}x")
+            # now do motion detection on each file that was downscaled
+            for (x, y, fps), input_ in downscaled_files.items():
+                input_stats = get_video_stats(input_)
+                timer = Timer()
+                motion_detector = MogMotion()  # TODO vary parameters?
+                convert(input_, "output.mp4", input_stats.fps, timer, motion_detector)
+                speed = input_stats.duration_in_sconds / timer.elapsed
+                typer.secho(f"Processed {x}x{y}@{fps:.2f} in {timer.elapsed:.2f} sec; {speed:.2f}x")

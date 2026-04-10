@@ -15,6 +15,12 @@ import typer
 from typer_config import use_yaml_config
 
 from wildcamtools.lib.concat import concat_ffmpeg
+from wildcamtools.lib.errors import (
+    CannotCombineOpenWindowError,
+    MotionMaskNotExistsError,
+    MotionMaskNotFileError,
+    MotionMaskNotReadableError,
+)
 from wildcamtools.lib.segment import create_segment_process
 from wildcamtools.lib.states import (
     MotionWindow,
@@ -120,7 +126,6 @@ class WatcherManager:
         self.state = WatcherManagerStateEnum.WAITING
 
     def check_and_start_processes(self) -> None:
-
         # check and create motion process
         if self.motion_process and not self.motion_process.is_alive():
             logger.warning("Motion Process is dead")
@@ -138,7 +143,6 @@ class WatcherManager:
                 transition_metrics=self.transition_metrics,
                 motion_mask=self.motion_mask,
             )
-
 
         # check and create segment process
         if self.segment_process and self.segment_process.poll() is not None:
@@ -162,7 +166,7 @@ class WatcherManager:
     def combine_segments(self, motion_window: MotionWindow) -> None:
         start_time = motion_window.start_time - timedelta(seconds=self.offset_start)
         if motion_window.end_time is None:
-            raise ValueError("Cannot combine open window")
+            raise CannotCombineOpenWindowError()
         end_time = motion_window.end_time + timedelta(seconds=self.offset_end)
 
         while (to_merge := find_segments_for_timespan(start_time, end_time, self.segments_dir)) is None:
@@ -219,7 +223,7 @@ class WatcherManager:
             if self.motion_process and self.motion_process.is_alive():
                 self.motion_process.kill()
                 self.motion_process = None
-            if self.segment_process and self.segment_process.poll() == None:
+            if self.segment_process and self.segment_process.poll() is None:
                 self.segment_process.kill()
                 self.segment_process = None
 
@@ -260,18 +264,16 @@ def watch(
     ] = 5,  # frames
     motion_mask: Annotated[Path | None, typer.Option(metavar="PATH", envvar="WTC_MOTION_MASK")] = None,
 ) -> None:
-
     if motion_mask:
         motion_mask = motion_mask.resolve()
         if not motion_mask.exists():
-            raise typer.BadParameter(f"motion_mask file does not exist: {motion_mask}")
+            raise MotionMaskNotExistsError(str(motion_mask))
         if not motion_mask.is_file():
-            raise typer.BadParameter(f"motion_mask path is not a file: {motion_mask}")
+            raise MotionMaskNotFileError(str(motion_mask))
         if not os.access(motion_mask, os.R_OK):
-            raise typer.BadParameter(f"motion_mask file is not readable: {motion_mask}")
+            raise MotionMaskNotReadableError(str(motion_mask))
 
     # TODO validate rtsp_stream is a rtsp url
-
 
     segments = segments.resolve()
     if not segments.is_dir() or not segments.exists():

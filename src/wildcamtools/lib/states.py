@@ -109,7 +109,7 @@ class Watcher(FrameHandler):
         else:
             self.transition_window_metrics[next_state].update(frame.motion_proportion)
 
-    def _get_next_state(self, frame: Frame) -> WatcherStateEnum:
+    def _get_next_state(self, frame: Frame) -> WatcherStateEnum:  # noqa: C901
         logger.debug(f"Frame no: {frame.frame_no}")
         logger.debug(f"Motion proportion: {frame.motion_proportion}")
         match self.state:
@@ -152,14 +152,15 @@ class Watcher(FrameHandler):
         return self.state
 
 
-def _load_and_resize_mask(mask_path: Path, width: int, height: int, scale: float) -> np.ndarray | None:
+def _load_and_resize_mask(mask_path: Path | None, width: int, height: int, scale: float) -> np.ndarray | None:
     if mask_path is None:
         return None
 
     mask = cv2.imread(str(mask_path), cv2.IMREAD_GRAYSCALE)
     if mask is None:
-        logger.error(f"Failed to load motion mask from {mask_path}. "
-                     f"The file may be corrupted or in an unsupported image format.")
+        logger.error(
+            f"Failed to load motion mask from {mask_path}. The file may be corrupted or in an unsupported image format."
+        )
         return None
 
     # Target size is the scaled dimensions of the frame
@@ -172,14 +173,15 @@ def _load_and_resize_mask(mask_path: Path, width: int, height: int, scale: float
     mask_aspect = mask_w / mask_h
 
     if abs(stream_aspect - mask_aspect) > 0.05:
-        logger.warning(f"Motion mask aspect ratio ({mask_aspect:.2f}) differs significantly "
-                       f"from stream aspect ratio ({stream_aspect:.2f}). "
-                       f"The mask will be stretched to fit.")
+        logger.warning(
+            f"Motion mask aspect ratio ({mask_aspect:.2f}) differs significantly "
+            f"from stream aspect ratio ({stream_aspect:.2f}). "
+            f"The mask will be stretched to fit."
+        )
 
     # Resize using nearest neighbor to keep binary mask properties
     mask = cv2.resize(mask, (target_width, target_height), interpolation=cv2.INTER_NEAREST)
     return mask
-
 
 
 def enqueue_motion_windows(

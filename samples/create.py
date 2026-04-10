@@ -2,9 +2,8 @@ import tempfile
 from math import pi, sqrt
 from pathlib import Path
 
-from PIL import Image, ImageDraw
-
 import ffmpeg
+from PIL import Image, ImageDraw
 
 
 def create_circle_frames(
@@ -16,7 +15,6 @@ def create_circle_frames(
     grey: float,
     padding_count: int = 0,
 ) -> None:
-
     # have to convert circle_area_proportion -> radius
     circle_area = width * height * area_proportion
     # area = 2*pi*r*r

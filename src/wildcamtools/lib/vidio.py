@@ -5,13 +5,21 @@ import time
 from io import BufferedReader
 from pathlib import Path
 from subprocess import Popen
-from typing import Any, Self
+from typing import Any, Literal, Self
 
 import cv2
+import ffmpeg
+import ffmpeg.codecs.encoders
 import numpy as np
 
-import ffmpeg
 from wildcamtools.lib import Frame
+from wildcamtools.lib.errors import (
+    FFmpegPipeClosedError,
+    ProcessTypeMismatchError,
+    VideoNotInContextError,
+    VideoProbeError,
+    VideoSizeNotSetError,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -19,7 +27,7 @@ logger = logging.getLogger(__name__)
 class FrameSource:
     frame_no: int
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.frame_no = 0
 
     def __iter__(self) -> Self:
@@ -31,7 +39,7 @@ class FrameSource:
     def __enter__(self) -> Self:
         return self
 
-    def __exit__(self, exc_type: type | None, exc_val: BaseException | None, exc_tb: Any | None) -> bool:
+    def __exit__(self, exc_type: type | None, exc_val: BaseException | None, exc_tb: Any | None) -> Literal[False]:
         return False
 
 
@@ -47,14 +55,15 @@ class FileFrameSourceCV2(FrameSource):
         self.cap = cv2.VideoCapture(self.filename)
         return self
 
-    def __exit__(self, exc_type: type | None, exc_val: BaseException | None, exc_tb: Any | None) -> bool:
-        self.cap.release()
+    def __exit__(self, exc_type: type | None, exc_val: BaseException | None, exc_tb: Any | None) -> Literal[False]:
+        if self.cap:
+            self.cap.release()
         self.cap = None
         return False
 
     def __next__(self) -> Frame:
         if not self.cap:
-            raise RuntimeError("Must be used in context")
+            raise VideoNotInContextError()
 
         ret, raw = self.cap.read()
         if ret:
@@ -104,12 +113,14 @@ class FrameSourceFFMPEG(FrameSource):
             (stream for stream in probe["streams"] if stream["codec_type"] == "video"),
             None,
         )
+        if video_stream is None:
+            raise VideoProbeError()
         self.width = int(video_stream["width"] * self.scale)
         self.height = int(video_stream["height"] * self.scale)
 
     def _create_ffmpeg_proc(self) -> Popen[bytes]:
         if not self._named_pipe:
-            raise RuntimeError("Must be used in context")
+            raise VideoNotInContextError()
         f_in: ffmpeg.AVStream | ffmpeg.VideoStream = ffmpeg.input(
             self.filename,
             hwaccel=self.hwaccel,  # see https://trac.ffmpeg.org/wiki/HWAccelIntro
@@ -134,11 +145,14 @@ class FrameSourceFFMPEG(FrameSource):
             f="rawvideo",
             pix_fmt="rgb24",
         )
-        return (
+        res = (
             f_out.global_args(hide_banner=True, loglevel="error")
             .overwrite_output()
             .run_async(pipe_stdout=True, quiet=True)
         )
+        if not isinstance(res, Popen):
+            raise ProcessTypeMismatchError()
+        return res
 
     def __enter__(self) -> Self:
         self._temporary_dir = Path(tempfile.mkdtemp(prefix="wildcamtools_"))
@@ -149,14 +163,17 @@ class FrameSourceFFMPEG(FrameSource):
 
         return self
 
-    def __exit__(self, exc_type: type | None, exc_val: BaseException | None, exc_tb: Any | None) -> bool:
-        self._named_pipe_reader.close()
+    def __exit__(self, exc_type: type | None, exc_val: BaseException | None, exc_tb: Any | None) -> Literal[False]:
+        if self._named_pipe_reader:
+            self._named_pipe_reader.close()
         self._named_pipe_reader = None
 
-        os.unlink(self._named_pipe)
+        if self._named_pipe:
+            os.unlink(self._named_pipe)
         self._named_pipe = None
 
-        os.rmdir(self._temporary_dir)
+        if self._temporary_dir:
+            os.rmdir(self._temporary_dir)
         self._temporary_dir = None
         return False
 
@@ -175,10 +192,16 @@ class FrameSourceFFMPEG(FrameSource):
             logger.debug(f"Opening pipe {self._named_pipe}")
             # have to open the pipe _after_ ffmpeg has started writing into the pipe
             # otherwise it hangs
-            self._named_pipe_reader = open(self._named_pipe, "rb")
+            if self._named_pipe:
+                with open(self._named_pipe, "rb") as pipe:
+                    self._named_pipe_reader = pipe
             logger.debug(f"Opened pipe {self._named_pipe}")
 
-        in_bytes = self._named_pipe_reader.read(self.width * self.height * 3)
+        in_bytes = (
+            self._named_pipe_reader.read(self.width * self.height * 3)
+            if self._named_pipe_reader and self.width and self.height
+            else b""
+        )
 
         if not in_bytes:
             self.reader.wait()
@@ -187,7 +210,7 @@ class FrameSourceFFMPEG(FrameSource):
             self.height = None
             raise StopIteration
 
-        in_frame = np.frombuffer(in_bytes, np.uint8).reshape([self.height, self.width, 3])
+        in_frame = np.frombuffer(in_bytes, np.uint8).reshape([self.height or 0, self.width or 0, 3])
         frame = Frame(raw=in_frame, frame_no=self.frame_no)
         self.frame_no += 1
 
@@ -206,23 +229,26 @@ class FrameSourceFFMPEGSegmenter(FrameSource):
         segment_dir: str | Path,
         width: int | None = None,
         height: int | None = None,
-    ):
+    ) -> None:
         self.segment_dir = segment_dir
-        super().__init__(filename=filename, width=width, height=height)
+        super().__init__()
+        self.filename = filename
+        self.width = width
+        self.height = height
 
     def _create_ffmpeg_proc(self) -> Popen:
-        input_split: ffmpeg.VideoStream = ffmpeg.input(self.filename).split(outputs=2)
+        input_split = ffmpeg.input(self.filename).split(outputs=2)
         input_0: ffmpeg.VideoStream = input_split.video(0)
         input_1: ffmpeg.VideoStream = input_split.video(1)
         output_0 = input_0.output(
             codec="copy",
             f="segment",
             muxer_options=ffmpeg.formats.muxers.segment(
-                segment_time=15,  # every N seconds
+                segment_time=str(15),  # every N seconds
                 segment_format="mp4",
                 segment_format_options="movflags=+faststart",
-                reset_timestamps=1,
-                strftime=1,
+                reset_timestamps=True,
+                strftime=True,
             ),
             filename="ffmpeg/out/out_%Y_%m_%d__%H_%M_%S.mp4",
         )
@@ -257,14 +283,14 @@ class FrameWriterFFMPEG:
         self.crf = crf
         self.preset = preset
 
-        self._proc = None
+        self._proc: Popen[bytes] | None = None
         self._width: int | None = None
         self._height: int | None = None
         self._started = False
 
     def _start_process(self) -> None:
         if self._width is None or self._height is None:
-            raise ValueError("must have size")
+            raise VideoSizeNotSetError()
         self._proc = (
             ffmpeg.input(
                 "pipe:",
@@ -307,18 +333,19 @@ class FrameWriterFFMPEG:
             self._start_process()
 
         # resize if needed (all frames must match initial dims)
-        if frame.shape[0] != self._height or frame.shape[1] != self._width:
-            frame = cv2.resize(frame, (int(self._width), int(self._height)), interpolation=cv2.INTER_LINEAR)
+        if frame.shape[0] != (self._height or 0) or frame.shape[1] != (self._width or 0):
+            frame = cv2.resize(frame, (int(self._width or 0), int(self._height or 0)), interpolation=cv2.INTER_LINEAR)
 
         try:
-            self._proc.stdin.write(frame.astype(np.uint8).tobytes())
-        except BrokenPipeError:
+            if self._proc and self._proc.stdin:
+                self._proc.stdin.write(frame.astype(np.uint8).tobytes())
+        except BrokenPipeError as err:
             # allow ffmpeg to fail silently or raise a clearer error
-            raise RuntimeError("FFmpeg process pipe is closed")
+            raise FFmpegPipeClosedError() from err
 
     def close(self) -> None:
         """Finish writing and close the ffmpeg process."""
-        if self._proc:
+        if self._proc and self._proc.stdin:
             self._proc.stdin.close()
             self._proc.wait()
             self._proc = None
@@ -329,6 +356,6 @@ class FrameWriterFFMPEG:
     def __enter__(self) -> Self:
         return self
 
-    def __exit__(self, exc_type: type | None, exc_val: BaseException | None, exc_tb: Any | None) -> bool:
+    def __exit__(self, exc_type: type | None, exc_val: BaseException | None, exc_tb: Any | None) -> Literal[False]:
         self.close()
         return False

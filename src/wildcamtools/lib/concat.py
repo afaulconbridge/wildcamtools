@@ -9,7 +9,6 @@ logger = logging.getLogger(__name__)
 
 
 def concat_ffmpeg(inputs: Iterable[Path], output: Path) -> None:
-
     # https://stackoverflow.com/questions/7333232/how-to-concatenate-two-mp4-files-using-ffmpeg
     # see https://ffmpeg.org/ffmpeg-formats.html#concat-1
 

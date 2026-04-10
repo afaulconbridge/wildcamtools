@@ -2,7 +2,13 @@ import contextlib
 import subprocess
 import time
 from collections.abc import Callable, Iterable
-from typing import Any, Self
+from typing import Any, Literal, Self
+
+from wildcamtools.lib.errors import (
+    ProcessExitedPrematurelyError,
+    ProcessNotInitializedError,
+    ProcessReadyTimeoutError,
+)
 
 
 class BackgroundProcess:
@@ -28,8 +34,8 @@ class BackgroundProcess:
         *,
         cwd: str | None = None,
         env: dict | None = None,
-        stdout=None,
-        stderr=None,
+        stdout: Any = None,
+        stderr: Any = None,
         start_wait: float = 15.0,
         ready_check: Callable[[], bool] | None = None,
         ready_timeout: float = 10.0,
@@ -46,7 +52,7 @@ class BackgroundProcess:
         self.terminate_timeout = terminate_timeout
 
     def _create_process(self) -> None:
-        self.process = subprocess.Popen(
+        self.process = subprocess.Popen(  # noqa: S603
             self.cmd,
             cwd=self.cwd,
             env=self.env,
@@ -57,20 +63,20 @@ class BackgroundProcess:
 
     def _check_till_ready(self) -> None:
         if not self.process:
-            raise ValueError("Process must exist to be checked")
+            raise ProcessNotInitializedError()
         if self.ready_check:
             deadline = time.time() + self.ready_timeout
             while time.time() < deadline:
                 if self.process.poll() is not None:
                     # process exited early
-                    raise RuntimeError(f"Process exited prematurely with code {self.process.returncode}")
+                    raise ProcessExitedPrematurelyError(self.process.returncode)
                 if self.ready_check():
                     break
                 time.sleep(self.start_wait)
             else:
                 # timeout
                 self._terminate_process()
-                raise TimeoutError("Process did not become ready within timeout")
+                raise ProcessReadyTimeoutError()
 
     def __enter__(self) -> Self:
         # Start process
@@ -84,7 +90,7 @@ class BackgroundProcess:
 
         return self
 
-    def __exit__(self, exc_type: type | None, exc_val: BaseException | None, exc_tb: Any | None) -> bool:  # type: ignore
+    def __exit__(self, exc_type: type | None, exc_val: BaseException | None, exc_tb: Any | None) -> Literal[False]:
         self._terminate_process()
         # Do not suppress exceptions
         return False

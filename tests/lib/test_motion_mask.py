@@ -1,4 +1,3 @@
-
 import numpy as np
 import pytest
 
@@ -15,14 +14,15 @@ def test_motion_mask_filtering():
     # Blob 1: Top half (should be kept)
     # Blob 2: Bottom half (should be removed)
     frame_raw = np.zeros((100, 100), dtype=np.uint8)
-    frame_raw[10:20, 10:20] = 255 # Top blob
-    frame_raw[60:70, 60:70] = 255 # Bottom blob
+    frame_raw[10:20, 10:20] = 255  # Top blob
+    frame_raw[60:70, 60:70] = 255  # Bottom blob
 
     prop = motion.get_motion_proportion(frame_raw)
 
     # We use pytest.approx because cv2.contourArea can be slightly
     # different from the exact pixel count of a rectangle.
     assert prop == pytest.approx(0.0081, abs=1e-4)
+
 
 def test_motion_multiple_lowest_points_masked():
     # Initialize motion handler with mask in constructor
@@ -38,13 +38,14 @@ def test_motion_multiple_lowest_points_masked():
 
     assert prop == 0.0
 
+
 def test_motion_mask_intersects_bottom_edge():
     # Initialize motion handler
     motion = MogMotion(history=1)
 
     # Create a mask that only covers the MIDDLE of the bottom edge
     mask = np.zeros((100, 100), dtype=np.uint8)
-    mask[70, 45:55] = 255 # Small mask in the center of the bottom edge
+    mask[70, 45:55] = 255  # Small mask in the center of the bottom edge
     motion.motion_mask = mask
 
     # Create a blob whose bottom edge is at Y=70 from X=30 to X=70

@@ -6,7 +6,6 @@ from wildcamtools.lib.motion import MogMotion
 
 
 def test_motion_mog(video_frame_generator: Generator[np.ndarray]):
-
     motion_mog = MogMotion(history=1, threshold=16, detect_shadows=False, kernel_size=3)
 
     for frame in video_frame_generator():

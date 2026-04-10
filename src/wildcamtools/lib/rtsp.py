@@ -4,6 +4,8 @@ from pathlib import Path
 from typing import override
 
 import ffmpeg
+import ffmpeg.codecs.encoders
+
 from wildcamtools.lib.background_process import BackgroundProcess
 
 logger = logging.getLogger(__name__)
@@ -21,7 +23,7 @@ def socket_check(host: str = "127.0.0.1", port: int = 8554, timeout: float = 1.0
 
 
 class BackgroundMediaMTX(BackgroundProcess):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__(
             [
                 "./tests/bin/mediamtx",

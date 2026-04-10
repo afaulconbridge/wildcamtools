@@ -1,4 +1,5 @@
 from abc import abstractmethod
+from typing import cast
 
 import cv2
 import numpy as np
@@ -23,7 +24,6 @@ class MotionHandler(FrameHandler):
         self.kernel_size = kernel_size
         self.kernel = np.ones((self.kernel_size, self.kernel_size), np.uint8)
         self.motion_mask = motion_mask
-
 
     def handle(self, frame: Frame) -> Frame:
         frame_out = self.update_background(frame.raw)
@@ -60,14 +60,13 @@ class MotionHandler(FrameHandler):
                 if self.motion_mask is not None:
                     mh, mw = self.motion_mask.shape
                     # Extract coordinates of points at the lowest Y level
-                    pts = [ (int(p[0, 0]), int(p[0, 1])) for p in lowest_points ]
+                    pts = [(int(p[0, 0]), int(p[0, 1])) for p in lowest_points]
 
                     # Check the points themselves
                     for x, y in pts:
-                        if 0 <= y < mh and 0 <= x < mw:
-                            if self.motion_mask[y, x] != 0:
-                                is_masked = True
-                                break
+                        if 0 <= y < mh and 0 <= x < mw and self.motion_mask[y, x] != 0:
+                            is_masked = True
+                            break
 
                     # For CHAIN_APPROX_SIMPLE, a straight bottom edge is represented by only its endpoints.
                     # We check the segment between the leftmost and rightmost points at max_y.
@@ -75,13 +74,12 @@ class MotionHandler(FrameHandler):
                         # Sort by X coordinate
                         pts.sort()
                         x_start, y_start = pts[0]
-                        x_end, y_end = pts[-1]
+                        x_end, _ = pts[-1]
                         # Scan along the horizontal segment at max_y
                         for x_sample in range(x_start, x_end + 1):
-                            if 0 <= y_start < mh and 0 <= x_sample < mw:
-                                if self.motion_mask[y_start, x_sample] != 0:
-                                    is_masked = True
-                                    break
+                            if 0 <= y_start < mh and 0 <= x_sample < mw and self.motion_mask[y_start, x_sample] != 0:
+                                is_masked = True
+                                break
 
                 if not is_masked:
                     filtered_contours.append(cnt)
@@ -121,6 +119,9 @@ class MogMotion(MotionHandler):
 
     def update_background(self, frame: MatLike) -> MatLike:
         frame_out = self.background_subtractor.apply(frame)
+        if frame_out is None:
+            # Return a zero-filled array of the same size as input
+            return np.zeros((frame.shape[0], frame.shape[1]), dtype=np.uint8)
         return frame_out
 
 
@@ -163,4 +164,5 @@ class AvgMotion(MotionHandler):
         # output should be uint8 with values of 255 or 0
         motion_mask = frame_difference.astype(np.uint8)
 
-        return motion_mask
+        # ensure we return the appropriate type because Pandas typing is complicated
+        return cast(MatLike, motion_mask)

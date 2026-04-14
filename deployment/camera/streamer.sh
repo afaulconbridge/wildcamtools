@@ -16,8 +16,8 @@ PIX_FMT="${PIX_FMT:-yuv420p}"                 # pixel format for ffmpeg filter
 RTSP_URL="rtsp://${HOST}:${PORT}/${PATH}"
 
 # Explanantions:
-#    -hide_banner: suppress the initial ffmpeg build/configuration banner 
-#    -loglevel error: only show error messages 
+#    -hide_banner: suppress the initial ffmpeg build/configuration banner
+#    -loglevel error: only show error messages
 #    -f v4l2: input as Video4Linux2
 #    -input_format "${INPUT_FORMAT}": request a specific format from the v4l2 device - if unsupported it will fail
 #    -video_size "${RESOLUTION}": resolution (WIDTHxHEIGHT) requested from camera

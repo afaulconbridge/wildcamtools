@@ -3,8 +3,8 @@ import contextlib
 import typer
 
 from wildcamtools.lib import FrameHandler
+from wildcamtools.lib.frames import Rescaler
 from wildcamtools.lib.motion import MogMotion
-from wildcamtools.lib.rescale import Rescaler
 from wildcamtools.lib.stats import get_video_stats
 from wildcamtools.lib.timing import Timer
 from wildcamtools.lib.vidio import FrameSourceFFMPEG, FrameWriterFFMPEG

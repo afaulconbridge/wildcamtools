@@ -15,7 +15,7 @@ systemctl stop streamer
 journald -b -u streamer
 ```
 
-To configure it, override the environment variables by created a systemd config extension file `/etc/systemd/system/streamer.service.d/override.conf` like: 
+To configure it, override the environment variables by created a systemd config extension file `/etc/systemd/system/streamer.service.d/override.conf` like:
 
 ```ini
 [Service]

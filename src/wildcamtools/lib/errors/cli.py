@@ -31,7 +31,7 @@ class SegmentError(click.BadArgumentUsage):
     """Exception raised when segment operations fail."""
 
 
-class OutputNotDirectoryError(SegmentError):
+class OutputNotDirectoryError(click.BadArgumentUsage):
     """Exception raised when output path is not a directory."""
 
     def __init__(self) -> None:

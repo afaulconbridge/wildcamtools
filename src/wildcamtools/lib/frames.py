@@ -1,7 +1,21 @@
+from pathlib import Path
+
 import cv2
 
-from wildcamtools.lib import Frame, FrameHandler
 from wildcamtools.lib.stats import VideoStats
+
+from . import Frame, FrameHandler
+
+
+class FrameImageWriter(FrameHandler):
+    def __init__(self, output_dir: Path):
+        self.output_dir = output_dir
+        self.output_dir.mkdir(parents=True, exist_ok=True)
+
+    def handle(self, frame: Frame) -> Frame | None:
+        filename = self.output_dir / f"frame_{frame.frame_no:05d}.jpg"
+        cv2.imwrite(str(filename), frame.raw)
+        return frame
 
 
 class Rescaler(FrameHandler):

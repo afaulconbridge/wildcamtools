@@ -193,8 +193,7 @@ class FrameSourceFFMPEG(FrameSource):
             # have to open the pipe _after_ ffmpeg has started writing into the pipe
             # otherwise it hangs
             if self._named_pipe:
-                with open(self._named_pipe, "rb") as pipe:
-                    self._named_pipe_reader = pipe
+                self._named_pipe_reader = open(self._named_pipe, "rb")  # noqa: SIM115
             logger.debug(f"Opened pipe {self._named_pipe}")
 
         in_bytes = (

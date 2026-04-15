@@ -5,7 +5,7 @@ import typer
 
 from wildcamtools.lib import Frame, FrameHandler
 from wildcamtools.lib.errors.cli import OutputNotDirectoryError
-from wildcamtools.lib.frames import FrameImageWriter, Rescaler
+from wildcamtools.lib.frames import FilterSSIM, FrameImageWriter, Rescaler
 from wildcamtools.lib.stats import get_video_stats
 from wildcamtools.lib.timing import Timer
 from wildcamtools.lib.vidio import FrameSourceFFMPEG
@@ -20,6 +20,7 @@ def frames(
     x: int | None = None,
     y: int | None = None,
     fps: float | None = None,
+    ssim: float | None = None,
 ) -> None:
 
     if output is None:
@@ -33,6 +34,8 @@ def frames(
     handlers: list[FrameHandler] = []
     if x or y or fps:
         handlers.append(Rescaler(stats=stats, x=x, y=y, fps=fps))
+    if ssim:
+        handlers.append(FilterSSIM(ssim))
     handlers.append(FrameImageWriter(output))
 
     timer = Timer()

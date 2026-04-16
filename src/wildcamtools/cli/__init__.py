@@ -2,6 +2,7 @@ import logging
 
 import typer
 
+from wildcamtools.cli.ai import app as ai_app
 from wildcamtools.cli.frames import app as frames_app
 from wildcamtools.cli.motion_mog2 import app as motion_mog2_app
 from wildcamtools.cli.perftest import app as perftest_app
@@ -24,6 +25,7 @@ app.add_typer(rtsp_app)
 app.add_typer(segment_app)
 app.add_typer(watch_app)
 app.add_typer(frames_app)
+app.add_typer(ai_app, name="ai")
 
 
 if __name__ == "__main__":

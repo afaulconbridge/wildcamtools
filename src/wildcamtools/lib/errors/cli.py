@@ -31,6 +31,13 @@ class SegmentError(click.BadArgumentUsage):
     """Exception raised when segment operations fail."""
 
 
+class InputNotDirectoryError(click.BadArgumentUsage):
+    """Exception raised when input path is not a directory."""
+
+    def __init__(self) -> None:
+        super().__init__("Input must be a directory of images")
+
+
 class OutputNotDirectoryError(click.BadArgumentUsage):
     """Exception raised when output path is not a directory."""
 

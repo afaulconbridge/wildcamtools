@@ -95,6 +95,24 @@ class VideoSizeNotSetError(VideoError):
         super().__init__("Must have size")
 
 
+class MotionFlowError(Exception):
+    """Exception raised related to motion flow."""
+
+
+class InvalidAlphaError(MotionFlowError):
+    """Exception raised when alpha is not between 0 and 1."""
+
+    def __init__(self, alpha: float) -> None:
+        super().__init__(f"Alpha must be between 0.0 and 1.0, got {alpha}")
+
+
+class InvalidMaxMagnitudeError(MotionFlowError):
+    """Exception raised when max_magnitude is not positive."""
+
+    def __init__(self, max_magnitude: float) -> None:
+        super().__init__(f"Max magnitude must be positive, got {max_magnitude}")
+
+
 class FFmpegPipeClosedError(VideoError):
     """Exception raised when FFmpeg process pipe is closed."""
 

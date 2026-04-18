@@ -54,8 +54,8 @@ def motion_flow(
         typer.secho("Threshold must be greater than 0")
         raise typer.Exit(code=1)
 
-    if kernel_size <= 0:
-        typer.secho("Kernel size must be greater than 0")
+    if kernel_size < 0:
+        typer.secho("Kernel size cannot be negative")
         raise typer.Exit(code=1)
 
     motion = FlowMotion(history=history, threshold=threshold, kernel_size=kernel_size)
@@ -76,8 +76,8 @@ def motion_mog2(
         typer.secho("Must have input longer than history")
         raise typer.Exit(code=1)
 
-    if kernel_size <= 0:
-        typer.secho("Kernel size must be greater than 0")
+    if kernel_size < 0:
+        typer.secho("Kernel size cannot be negative")
         raise typer.Exit(code=1)
 
     motion = MogMotion(history=history, threshold=threshold, detect_shadows=False, kernel_size=kernel_size)
@@ -98,8 +98,8 @@ def motion_avg(
         typer.secho("Must have input longer than history")
         raise typer.Exit(code=1)
 
-    if kernel_size <= 0:
-        typer.secho("Kernel size must be greater than 0")
+    if kernel_size < 0:
+        typer.secho("Kernel size cannot be negative")
         raise typer.Exit(code=1)
 
     motion = AvgMotion(history=history, threshold=threshold, kernel_size=kernel_size)

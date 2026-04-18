@@ -14,7 +14,7 @@ app = typer.Typer()
 
 
 @app.command()
-def motion_flow(
+def flow(
     input_: Annotated[Path, typer.Argument(metavar="INPUT")],
     output: Annotated[Path, typer.Argument(metavar="OUTPUT")],
     alpha: Annotated[float, typer.Option(min=0.0, max=1.0)] = 0.5,

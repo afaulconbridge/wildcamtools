@@ -10,30 +10,39 @@ from wildcamtools.lib import Frame, FrameHandler
 
 class MotionHandler(FrameHandler):
     history: int
-    kernel_size: int
+    kernel_size: float
     background_subtractor: cv2.BackgroundSubtractor
     motion_mask: np.ndarray | None = None
 
     def __init__(
         self,
         history: int,
-        kernel_size: int = 3,
+        kernel_size: float = 0.01,
         motion_mask: np.ndarray | None = None,
     ):
         self.history = history
         self.kernel_size = kernel_size
-        self.kernel = np.ones((self.kernel_size, self.kernel_size), np.uint8)
         self.motion_mask = motion_mask
 
     def handle(self, frame: Frame) -> Frame:
         frame_out = self.update_background(frame.raw)
         # despeckle if appropriate
-        if self.kernel_size:
-            frame_out = cv2.morphologyEx(frame_out, cv2.MORPH_OPEN, self.kernel)
-            frame_out = cv2.morphologyEx(frame_out, cv2.MORPH_CLOSE, self.kernel)
+        if self.kernel_size > 0:
+            kernel = self._compute_kernel(frame.raw)
+            frame_out = cv2.morphologyEx(frame_out, cv2.MORPH_OPEN, kernel)
+            frame_out = cv2.morphologyEx(frame_out, cv2.MORPH_CLOSE, kernel)
         # only set if we've gone through history
         proportion = self.get_motion_proportion(frame_out) if frame.frame_no > self.history else -1.0
         return Frame(raw=frame_out, frame_no=frame.frame_no, motion_proportion=proportion)
+
+    def _compute_kernel(self, frame_raw: MatLike) -> np.ndarray:
+        # Calculate kernel size based on longest dimension
+        # Round down to nearest odd number, minimum 3
+        max_dim = max(frame_raw.shape[:2])
+        k_size = int(max_dim * self.kernel_size)
+        k_size = k_size if k_size % 2 != 0 else k_size - 1
+        k_size = max(3, k_size)
+        return np.ones((k_size, k_size), np.uint8)
 
     def get_motion_proportion(self, frame: MatLike) -> float:
         if self.motion_mask is None:
@@ -94,17 +103,50 @@ class MotionHandler(FrameHandler):
         raise NotImplementedError
 
 
+class FlowMotion(MotionHandler):
+    threshold: float
+    prev_gray: MatLike | None = None
+
+    def __init__(
+        self,
+        history: int = 500,
+        threshold: float = 1.0,
+        kernel_size: float = 0.01,
+        motion_mask: np.ndarray | None = None,
+    ):
+        super().__init__(history=history, kernel_size=kernel_size, motion_mask=motion_mask)
+        self.threshold = threshold
+
+    def update_background(self, frame: MatLike) -> MatLike:
+        curr_gray = cv2.cvtColor(frame, cv2.COLOR_RGB2GRAY)
+
+        if self.prev_gray is None:
+            self.prev_gray = curr_gray
+            return np.zeros((frame.shape[0], frame.shape[1]), dtype=np.uint8)
+
+        # Calculate dense optical flow
+        flow = cv2.calcOpticalFlowFarneback(self.prev_gray, curr_gray, None, 0.5, 3, 15, 3, 5, 1.2, 0)  # type: ignore[call-overload]
+
+        # Compute magnitude
+        magnitude, _ = cv2.cartToPolar(flow[..., 0], flow[..., 1])
+
+        # Create a mask where magnitude > threshold
+        motion_mask = (magnitude > self.threshold).astype(np.uint8) * 255
+
+        self.prev_gray = curr_gray
+        return cast(MatLike, motion_mask)
+
+
 class MogMotion(MotionHandler):
     threshold: int
     detect_shadows: bool
-    kernel: np.ndarray
 
     def __init__(
         self,
         history: int = 500,
         threshold: int = 16,
         detect_shadows: bool = False,
-        kernel_size: int = 3,
+        kernel_size: float = 0.01,
         motion_mask: np.ndarray | None = None,
     ):
         super().__init__(history=history, kernel_size=kernel_size, motion_mask=motion_mask)
@@ -134,7 +176,7 @@ class AvgMotion(MotionHandler):
         self,
         history: int = 500,
         threshold: int = 16,
-        kernel_size: int = 3,
+        kernel_size: float = 0.01,
         motion_mask: np.ndarray | None = None,
     ):
         super().__init__(history=history, kernel_size=kernel_size, motion_mask=motion_mask)

@@ -3,7 +3,7 @@ from typing import Annotated
 
 import typer
 
-from wildcamtools.lib.motion import AvgMotion, MogMotion, MotionHandler
+from wildcamtools.lib.motion import AvgMotion, FlowMotion, MogMotion, MotionHandler
 from wildcamtools.lib.stats import get_video_stats
 from wildcamtools.lib.timing import Timer
 from wildcamtools.lib.vidio import FrameSourceFFMPEG, FrameWriterFFMPEG
@@ -36,18 +36,48 @@ def _shared(
     typer.secho(f"Processed {timer.intervals:d} frames in {timer.elapsed:.2f} sec; {timer.per_second:.2f}FPS")
 
 
+@app.command(name="flow")
+def motion_flow(
+    input_: Annotated[Path, typer.Argument(metavar="INPUT")],
+    output: Annotated[Path, typer.Argument(metavar="OUTPUT")],
+    history: int = 25,
+    threshold: float = 5.0,
+    kernel_size: float = 0.01,
+) -> None:
+    stats = get_video_stats(input_)
+
+    if stats.frame_count - history < 0:
+        typer.secho("Must have input longer than history")
+        raise typer.Exit(code=1)
+
+    if threshold <= 0:
+        typer.secho("Threshold must be greater than 0")
+        raise typer.Exit(code=1)
+
+    if kernel_size <= 0:
+        typer.secho("Kernel size must be greater than 0")
+        raise typer.Exit(code=1)
+
+    motion = FlowMotion(history=history, threshold=threshold, kernel_size=kernel_size)
+    _shared(input_, output, stats.fps, history, motion)
+
+
 @app.command(name="mog2")
 def motion_mog2(
     input_: Annotated[Path, typer.Argument(metavar="INPUT")],
     output: Annotated[Path, typer.Argument(metavar="OUTPUT")],
     history: int = 25,
     threshold: int = 16,
-    kernel_size: int = 3,
+    kernel_size: float = 0.01,
 ) -> None:
     stats = get_video_stats(input_)
 
     if stats.frame_count - history < 0:
         typer.secho("Must have input longer than history")
+        raise typer.Exit(code=1)
+
+    if kernel_size <= 0:
+        typer.secho("Kernel size must be greater than 0")
         raise typer.Exit(code=1)
 
     motion = MogMotion(history=history, threshold=threshold, detect_shadows=False, kernel_size=kernel_size)
@@ -60,12 +90,16 @@ def motion_avg(
     output: Annotated[Path, typer.Argument(metavar="OUTPUT")],
     history: int = 25,
     threshold: int = 16,
-    kernel_size: int = 3,
+    kernel_size: float = 0.01,
 ) -> None:
     stats = get_video_stats(input_)
 
     if stats.frame_count - history < 0:
         typer.secho("Must have input longer than history")
+        raise typer.Exit(code=1)
+
+    if kernel_size <= 0:
+        typer.secho("Kernel size must be greater than 0")
         raise typer.Exit(code=1)
 
     motion = AvgMotion(history=history, threshold=threshold, kernel_size=kernel_size)

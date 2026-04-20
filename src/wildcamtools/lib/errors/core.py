@@ -118,3 +118,18 @@ class FFmpegPipeClosedError(VideoError):
 
     def __init__(self) -> None:
         super().__init__("FFmpeg process pipe is closed")
+
+
+class BoundingBoxWidthError(ValueError):
+    def __init__(self) -> None:
+        super().__init__("Width is not valid")
+
+
+class BoundingBoxHeightError(ValueError):
+    def __init__(self) -> None:
+        super().__init__("Height is not valid")
+
+
+class MotionMaskNotCreatedError(RuntimeError):
+    def __init__(self) -> None:
+        super().__init__("Motion Mask not created")

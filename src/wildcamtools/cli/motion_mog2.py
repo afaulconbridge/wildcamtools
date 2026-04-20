@@ -1,8 +1,11 @@
 from pathlib import Path
 from typing import Annotated
 
+import cv2
 import typer
 
+from wildcamtools.lib import Frame
+from wildcamtools.lib.frames import MotionFlowHighlighter
 from wildcamtools.lib.motion import AvgMotion, FlowMotion, MogMotion, MotionHandler
 from wildcamtools.lib.stats import get_video_stats
 from wildcamtools.lib.timing import Timer
@@ -28,10 +31,13 @@ def _shared(
         for frame in video_input:
             with timer:
                 frame_out = handler.handle(frame)
-            if frame_out.motion_proportion > 0.001:
-                typer.secho(f"{frame.frame_no:4d} {frame_out.motion_proportion:0.3f}")
-            if frame.frame_no >= history:
-                video_writer.write(frame_out.raw)
+                if frame_out.motion_proportion > 0.001:
+                    typer.secho(f"{frame.frame_no:4d} {frame_out.motion_proportion:0.3f}")
+                if frame.frame_no >= history:
+                    image_out = frame.raw.copy()
+                    for bbox in handler.get_contour_bboxes():
+                        cv2.rectangle(image_out, (bbox.x1, bbox.y1), (bbox.x2, bbox.y2), (0, 255, 0), 3)
+                    video_writer.write(image_out)
 
     typer.secho(f"Processed {timer.intervals:d} frames in {timer.elapsed:.2f} sec; {timer.per_second:.2f}FPS")
 
@@ -40,9 +46,9 @@ def _shared(
 def motion_flow(
     input_: Annotated[Path, typer.Argument(metavar="INPUT")],
     output: Annotated[Path, typer.Argument(metavar="OUTPUT")],
-    history: int = 25,
-    threshold: float = 5.0,
-    kernel_size: float = 0.01,
+    history: int = 5,
+    threshold: float = 1.0,
+    kernel_size: float = 0.02,
 ) -> None:
     stats = get_video_stats(input_)
 
@@ -62,13 +68,35 @@ def motion_flow(
     _shared(input_, output, stats.fps, history, motion)
 
 
+@app.command()
+def flow_highlighter(
+    input_: Annotated[Path, typer.Argument(metavar="INPUT")],
+    output: Annotated[Path, typer.Argument(metavar="OUTPUT")],
+    alpha: Annotated[float, typer.Option(min=0.0, max=1.0)] = 0.5,
+    magnitude: Annotated[float, typer.Option(min=0.0)] = 10.0,
+) -> None:
+    stats = get_video_stats(input_)
+    handler = MotionFlowHighlighter(alpha=alpha, max_magnitude=magnitude)
+    timer = Timer()
+
+    with FrameWriterFFMPEG(output, fps=stats.fps) as video_writer, FrameSourceFFMPEG(input_) as video_input:
+        frame: Frame | None
+        for frame in video_input:
+            with timer:
+                frame = handler.handle(frame)
+            if frame is not None:
+                video_writer.write(frame.raw)
+
+    typer.secho(f"Processed {timer.intervals:d} frames in {timer.elapsed:.2f} sec; {timer.per_second:.2f}FPS")
+
+
 @app.command(name="mog2")
 def motion_mog2(
     input_: Annotated[Path, typer.Argument(metavar="INPUT")],
     output: Annotated[Path, typer.Argument(metavar="OUTPUT")],
     history: int = 25,
     threshold: int = 16,
-    kernel_size: float = 0.01,
+    kernel_size: float = 0.005,
 ) -> None:
     stats = get_video_stats(input_)
 
@@ -90,7 +118,7 @@ def motion_avg(
     output: Annotated[Path, typer.Argument(metavar="OUTPUT")],
     history: int = 25,
     threshold: int = 16,
-    kernel_size: float = 0.01,
+    kernel_size: float = 0.005,
 ) -> None:
     stats = get_video_stats(input_)
 

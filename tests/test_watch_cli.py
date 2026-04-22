@@ -58,7 +58,7 @@ def test_find_segments_for_timespan(dummy_segments):
         "seg_2026_04_21__10_00_30.mp4",
     ]
     assert res is not None
-    assert {res.name for res in res} == set(expected)
+    assert {item.name for item in res} == set(expected)
 
 
 def test_find_segments_incomplete_file(dummy_segments):

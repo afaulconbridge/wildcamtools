@@ -23,14 +23,7 @@ def test_segment_basic(runner, temp_dirs):
         mock_p = MagicMock()
         mock_create.return_value = mock_p
 
-        # The segment_app is likely a Typer app where the command is 'segment'
-        # but if the app itself is just the command, we might not need it.
-        # Based on the error exit code 2 (usually Typer usage error),
-        # let's try without the 'segment' command prefix since segment_app
-        # might be the command itself.
-        result = runner.invoke(segment_app, ["rtsp://test", str(output_dir)])
-        if result.exit_code != 0:
-            result = runner.invoke(segment_app, ["segment", "rtsp://test", str(output_dir)])
+        result = runner.invoke(segment_app, ["segment", "rtsp://test", str(output_dir)])
 
         assert result.exit_code == 0
         mock_create.assert_called_once()

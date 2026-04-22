@@ -21,6 +21,7 @@ def test_frame_source_ffmpeg(video_path: Path) -> None:
             assert array.shape == (2160, 3840, 3)  # 4k colour
 
 
+@pytest.mark.real_subprocess
 def test_frame_source_ffmpeg_rtsp(rtsp_server: str) -> None:
     frame_no = 0
     with FrameSourceFFMPEG(rtsp_server, 3840, 2160) as frame_source:

@@ -11,6 +11,9 @@ from wildcamtools.lib.vidio import FrameSourceFFMPEG, FrameWriterFFMPEG
 app = typer.Typer()
 
 
+MOTION_REPORT_THRESHOLD = 0.001
+
+
 def _shared(
     input_: Path,
     output: Path,
@@ -24,16 +27,29 @@ def _shared(
         FrameWriterFFMPEG(output, fps=fps) as video_writer,
         FrameSourceFFMPEG(input_) as video_input,
     ):
-        frame_out = None
         for frame in video_input:
             with timer:
                 frame_out = handler.handle(frame)
-            if frame_out.motion_proportion > 0.001:
+            if frame_out.motion_proportion > MOTION_REPORT_THRESHOLD:
                 typer.secho(f"{frame.frame_no:4d} {frame_out.motion_proportion:0.3f}")
             if frame.frame_no >= history:
                 video_writer.write(frame_out.raw)
 
     typer.secho(f"Processed {timer.intervals:d} frames in {timer.elapsed:.2f} sec; {timer.per_second:.2f}FPS")
+
+
+def _validate_common(stats_frame_count: int, history: int, threshold: float, kernel_size: float) -> None:
+    if history >= stats_frame_count:
+        typer.secho("Must have input longer than history")
+        raise typer.Exit(code=1)
+
+    if threshold <= 0:
+        typer.secho("Threshold must be greater than 0")
+        raise typer.Exit(code=1)
+
+    if kernel_size < 0:
+        typer.secho("Kernel size cannot be negative")
+        raise typer.Exit(code=1)
 
 
 @app.command()
@@ -45,18 +61,7 @@ def flow(
     kernel_size: float = 0.01,
 ) -> None:
     stats = get_video_stats(input_)
-
-    if stats.frame_count - history < 0:
-        typer.secho("Must have input longer than history")
-        raise typer.Exit(code=1)
-
-    if threshold <= 0:
-        typer.secho("Threshold must be greater than 0")
-        raise typer.Exit(code=1)
-
-    if kernel_size < 0:
-        typer.secho("Kernel size cannot be negative")
-        raise typer.Exit(code=1)
+    _validate_common(stats.frame_count, history, threshold, kernel_size)
 
     motion = FlowMotion(history=history, threshold=threshold, kernel_size=kernel_size)
     _shared(input_, output, stats.fps, history, motion)
@@ -71,14 +76,7 @@ def mog2(
     kernel_size: float = 0.01,
 ) -> None:
     stats = get_video_stats(input_)
-
-    if stats.frame_count - history < 0:
-        typer.secho("Must have input longer than history")
-        raise typer.Exit(code=1)
-
-    if kernel_size < 0:
-        typer.secho("Kernel size cannot be negative")
-        raise typer.Exit(code=1)
+    _validate_common(stats.frame_count, history, threshold, kernel_size)
 
     motion = MogMotion(history=history, threshold=threshold, detect_shadows=False, kernel_size=kernel_size)
     _shared(input_, output, stats.fps, history, motion)
@@ -93,14 +91,7 @@ def motion_avg(
     kernel_size: float = 0.01,
 ) -> None:
     stats = get_video_stats(input_)
-
-    if stats.frame_count - history < 0:
-        typer.secho("Must have input longer than history")
-        raise typer.Exit(code=1)
-
-    if kernel_size < 0:
-        typer.secho("Kernel size cannot be negative")
-        raise typer.Exit(code=1)
+    _validate_common(stats.frame_count, history, threshold, kernel_size)
 
     motion = AvgMotion(history=history, threshold=threshold, kernel_size=kernel_size)
     _shared(input_, output, stats.fps, history, motion)

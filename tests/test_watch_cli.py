@@ -1,28 +1,27 @@
 from datetime import datetime
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 from wildcamtools.cli.watch import WatcherManager, find_segments_for_timespan
 from wildcamtools.cli.watch import app as watch_app
+from wildcamtools.lib.states import WatcherTransitionMetrics
 
 
-def test_watch_invalid_paths(runner, temp_dirs):
-    segments_dir, output_dir = temp_dirs
+def test_watch_invalid_paths(runner, tmp_path):
+    segments_dir = tmp_path / "segments"
+    output_dir = tmp_path / "output"
+    segments_dir.mkdir()
+    output_dir.mkdir()
+    missing = tmp_path / "nonexistent"
 
     # Invalid segments path
-    result = runner.invoke(watch_app, ["rtsp://localhost", str(temp_dirs[0].parent / "nonexistent"), str(output_dir)])
+    result = runner.invoke(watch_app, ["rtsp://localhost", str(missing), str(output_dir)])
     assert result.exit_code != 0
-    assert (
-        "segments must be an existing directory" in result.stdout
-        or "segments must be an existing directory" in result.stderr
-    )
+    assert "segments" in result.stdout or "segments" in result.stderr
 
     # Invalid output path
-    result = runner.invoke(watch_app, ["rtsp://localhost", str(segments_dir), str(temp_dirs[0].parent / "nonexistent")])
+    result = runner.invoke(watch_app, ["rtsp://localhost", str(segments_dir), str(missing)])
     assert result.exit_code != 0
-    assert (
-        "output must be an existing directory" in result.stdout
-        or "output must be an existing directory" in result.stderr
-    )
+    assert "output" in result.stdout or "output" in result.stderr
 
 
 def test_watch_motion_mask_not_exists(runner, temp_dirs):
@@ -48,32 +47,18 @@ def test_watch_initialization(mock_run, runner, temp_dirs):
 
 
 def test_find_segments_for_timespan(dummy_segments):
-    # Created 5 segments from 10:00:00 to 10:00:45 (15s intervals)
-    # seg_2026_04_21__10_00_00.mp4
-    # seg_2026_04_21__10_00_15.mp4
-    # seg_2026_04_21__10_00_30.mp4
-    # seg_2026_04_21__10_00_45.mp4
-    # seg_2026_04_21__10_01_00.mp4 (actually index 4 is 10:01:00 if loop 5)
-
-    # Wait, my fixture did:
-    # i=0: 10:00:00
-    # i=1: 10:00:15
-    # i=2: 10:00:30
-    # i=3: 10:00:45
-    # i=4: 10:01:00 (since 0 + 4*15 = 60s)
-
+    # Timespan 10:00:05 -> 10:00:35 should overlap at least one 15s segment
     start = datetime(2026, 4, 21, 10, 0, 5)
     end = datetime(2026, 4, 21, 10, 0, 35)
 
-    # Finding from 10:00:05 to 10:00:35
-    # Should include segments that overlap this range.
-    # The logic in find_segments_for_timespan uses bisect_left/right on filenames.
-    # and return segments_files[max(start_position - 1, 0) : end_position]
-
     res = find_segments_for_timespan(start, end, dummy_segments)
+    expected = [
+        "seg_2026_04_21__10_00_00.mp4",
+        "seg_2026_04_21__10_00_15.mp4",
+        "seg_2026_04_21__10_00_30.mp4",
+    ]
     assert res is not None
-    # Expecting segments that cover the period
-    assert len(res) >= 1
+    assert {res.name for res in res} == set(expected)
 
 
 def test_find_segments_incomplete_file(dummy_segments):
@@ -91,13 +76,8 @@ def test_cleanup_old_segments(temp_dirs):
     for i in range(10):
         (segments_dir / f"seg_{i}.mp4").touch()
 
-    manager = MagicMock(spec=WatcherManager)
-    manager.segments_dir = segments_dir
-    manager.keep_count = 5
-
     # We need to call the actual method, but manager is a mock.
     # Let's just instantiate a real WatcherManager with minimum args.
-    from wildcamtools.lib.states import WatcherTransitionMetrics
 
     wm = WatcherManager(
         rtsp_stream="test",

@@ -49,13 +49,13 @@ def fixture_rtsp_server(video_path: Path) -> Generator[str]:
         yield "rtsp://localhost:8554/stream"
 
 
-@pytest.fixture
-def runner():
+@pytest.fixture(name="runner")
+def fixture_runner():
     return CliRunner()
 
 
-@pytest.fixture
-def temp_dirs(tmp_path):
+@pytest.fixture(name="temp_dirs")
+def fixture_temp_dirs(tmp_path):
     segments_dir = tmp_path / "segments"
     output_dir = tmp_path / "output"
     segments_dir.mkdir()
@@ -63,24 +63,29 @@ def temp_dirs(tmp_path):
     return segments_dir, output_dir
 
 
-@pytest.fixture
-def dummy_segments(temp_dirs):
+@pytest.fixture(name="dummy_segments")
+def fixture_dummy_segments(temp_dirs):
     segments_dir, _ = temp_dirs
     start_time = datetime(2026, 4, 21, 10, 0, 0)
     for i in range(5):
         t = start_time + timedelta(seconds=i * 15)
+        # Matches production format string used by find_segments_for_timespan
         fname = t.strftime("seg_%Y_%m_%d__%H_%M_%S.mp4")
         (segments_dir / fname).touch()
     return segments_dir
 
 
-@pytest.fixture(autouse=True)
+@pytest.fixture
 def mock_ffmpeg():
-    with patch("wildcamtools.lib.concat.concat_ffmpeg") as mock_concat:
+    with patch("wildcamtools.cli.watch.concat_ffmpeg") as mock_concat:
         yield mock_concat
 
 
-@pytest.fixture(autouse=True)
-def mock_subprocess():
+@pytest.fixture
+def mock_subprocess(request):
+    if request.node.get_closest_marker("real_subprocess"):
+        yield None
+        return
+
     with patch("subprocess.Popen") as mock_popen:
         yield mock_popen

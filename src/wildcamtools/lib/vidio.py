@@ -10,6 +10,7 @@ from typing import Any, Literal, Self
 import cv2
 import ffmpeg
 import ffmpeg.codecs.encoders
+import ffmpeg.formats.muxers
 import numpy as np
 
 from wildcamtools.lib import Frame

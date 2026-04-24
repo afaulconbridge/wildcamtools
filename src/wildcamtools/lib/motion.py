@@ -1,5 +1,6 @@
 import logging
 from abc import abstractmethod
+from collections.abc import Sequence
 from typing import cast
 
 import cv2
@@ -39,7 +40,7 @@ class MotionHandler(FrameHandler):
         if self.kernel_size > 0:
             if self.kernel is None:
                 self.kernel = self._compute_kernel(mask)
-            mask = cv2.erode(mask, self.kernel, iterations=1)
+            # mask = cv2.erode(mask, self.kernel, iterations=1)
             mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, self.kernel)
             mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, self.kernel)
         return mask
@@ -47,23 +48,25 @@ class MotionHandler(FrameHandler):
     def _compute_kernel(self, frame_raw: MatLike) -> np.ndarray:
         # Calculate kernel size based on longest dimension
         # Round down to nearest odd number, minimum 3
+        # TODO make kernel size based on area not length
         max_dim = max(frame_raw.shape[:2])
         k_size = int(max_dim * self.kernel_size)
         k_size = k_size if k_size % 2 != 0 else k_size - 1
         k_size = max(3, k_size)
         return np.ones((k_size, k_size), np.uint8)
 
-    def get_motion_proportion(self, frame: MatLike) -> float:
-        if self.motion_mask is None:
-            return cv2.countNonZero(frame) / (float(frame.shape[0]) * float(frame.shape[1]))
-        else:
-            contours, _ = cv2.findContours(frame, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    def _get_contours(self, mask: MatLike) -> Sequence[MatLike]:
+        contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
+        if self.motion_mask is None:
+            return contours
+        else:
             # Filter out contours whose lowest point (max Y coordinate) is within a masked area.
             # If a contour has multiple points with the same maximum Y coordinate,
             # we consider it masked if ANY of those points are in a masked area.
             # This prevents motion in specifically excluded regions (like moving foliage at the top)
             # from triggering a motion detection.
+            mh, mw = self.motion_mask.shape
             filtered_contours = []
             for cnt in contours:
                 # Find the maximum Y coordinate among all points in the contour
@@ -75,34 +78,37 @@ class MotionHandler(FrameHandler):
 
                 # The contour is removed if ANY of its lowest points are in a masked area
                 is_masked = False
-                if self.motion_mask is not None:
-                    mh, mw = self.motion_mask.shape
-                    # Extract coordinates of points at the lowest Y level
-                    pts = [(int(p[0, 0]), int(p[0, 1])) for p in lowest_points]
+                # Extract coordinates of points at the lowest Y level
+                pts = [(int(p[0, 0]), int(p[0, 1])) for p in lowest_points]
 
-                    # Check the points themselves
-                    for x, y in pts:
-                        if 0 <= y < mh and 0 <= x < mw and self.motion_mask[y, x] != 0:
+                # Check the points themselves
+                for x, y in pts:
+                    if 0 <= y < mh and 0 <= x < mw and self.motion_mask[y, x] != 0:
+                        is_masked = True
+                        break
+
+                # For CHAIN_APPROX_SIMPLE, a straight bottom edge is represented by only its endpoints.
+                # We check the segment between the leftmost and rightmost points at max_y.
+                if not is_masked and len(pts) >= 2:
+                    # Sort by X coordinate
+                    pts.sort()
+                    x_start, y_start = pts[0]
+                    x_end, _ = pts[-1]
+                    # Scan along the horizontal segment at max_y
+                    for x_sample in range(x_start, x_end + 1):
+                        if 0 <= y_start < mh and 0 <= x_sample < mw and self.motion_mask[y_start, x_sample] != 0:
                             is_masked = True
                             break
 
-                    # For CHAIN_APPROX_SIMPLE, a straight bottom edge is represented by only its endpoints.
-                    # We check the segment between the leftmost and rightmost points at max_y.
-                    if not is_masked and len(pts) >= 2:
-                        # Sort by X coordinate
-                        pts.sort()
-                        x_start, y_start = pts[0]
-                        x_end, _ = pts[-1]
-                        # Scan along the horizontal segment at max_y
-                        for x_sample in range(x_start, x_end + 1):
-                            if 0 <= y_start < mh and 0 <= x_sample < mw and self.motion_mask[y_start, x_sample] != 0:
-                                is_masked = True
-                                break
-
                 if not is_masked:
                     filtered_contours.append(cnt)
+            return filtered_contours
 
-            areas = (cv2.contourArea(cnt) for cnt in filtered_contours)
+    def get_motion_proportion(self, frame: MatLike) -> float:
+        if self.motion_mask is None:
+            return cv2.countNonZero(frame) / (float(frame.shape[0]) * float(frame.shape[1]))
+        else:
+            areas = (cv2.contourArea(cnt) for cnt in self._get_contours(frame))
             area_total = sum(areas)
             area_propotion = area_total / (float(frame.shape[0]) * float(frame.shape[1]))
             return area_propotion
@@ -114,8 +120,7 @@ class MotionHandler(FrameHandler):
         if self.motion_mask is None:
             raise MotionMaskNotCreatedError()
 
-        # TODO combine with masking from area calculation into a harmonized contour source
-        contours, _ = cv2.findContours(self.motion_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        contours = self._get_contours(self.motion_mask)
         rects = [cv2.boundingRect(cv2.approxPolyDP(contour, 3, True)) for contour in contours]
         # Convert cv2 bounding boxes (x, y, w, h) to BBox (x1, y1, x2, y2)
         merged_rects = [BBox(r[0], r[1], r[0] + r[2], r[1] + r[3]) for r in rects]
@@ -175,7 +180,6 @@ class FlowMotion(MotionHandler):
 
         # average motion over time
         if self.history > 1:
-            logger.debug("averaging flow over history")
             # create average on first frame
             if self.average_flow is None:
                 self.average_flow = np.full((flow.shape[0], flow.shape[1], 2), 0.0, np.float32)

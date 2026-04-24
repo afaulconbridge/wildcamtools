@@ -12,6 +12,7 @@ class Frame:
     raw: cv2.typing.MatLike
     frame_no: int
     motion_proportion: float = -1.0
+    filter_keep: bool = True
 
     @property
     def width(self) -> float:
@@ -56,4 +57,4 @@ class BBox:
 
 class FrameHandler(abc.ABC):
     @abc.abstractmethod
-    def handle(self, frame: Frame) -> Frame | None: ...
+    def handle(self, frame: Frame) -> Frame: ...

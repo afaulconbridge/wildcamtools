@@ -26,11 +26,11 @@ def rescale(
     timer = Timer()
 
     with FrameWriterFFMPEG(output, fps=handler.fps) as video_writer, FrameSourceFFMPEG(input_) as video_input:
-        frame: Frame | None
+        frame: Frame
         for frame in video_input:
             with timer:
                 frame = handler.handle(frame)
-            if frame is not None:
+            if frame.filter_keep:
                 video_writer.write(frame.raw)
 
     typer.secho(f"Processed {timer.intervals:d} frames in {timer.elapsed:.2f} sec; {timer.per_second:.2f}FPS")

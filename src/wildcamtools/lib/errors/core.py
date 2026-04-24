@@ -133,3 +133,13 @@ class BoundingBoxHeightError(ValueError):
 class MotionMaskNotCreatedError(RuntimeError):
     def __init__(self) -> None:
         super().__init__("Motion Mask not created")
+
+
+class InertiaValueError(ValueError):
+    def __init__(self) -> None:
+        super().__init__("Inertia is not valid")
+
+
+class ExpansionValueError(ValueError):
+    def __init__(self) -> None:
+        super().__init__("Expansion is not valid")

@@ -4,6 +4,7 @@ import typer
 
 from wildcamtools.cli.ai import app as ai_app
 from wildcamtools.cli.frames import app as frames_app
+from wildcamtools.cli.label import app as label_app
 from wildcamtools.cli.motion_mog2 import app as motion_mog2_app
 from wildcamtools.cli.perftest import app as perftest_app
 from wildcamtools.cli.rescale import app as rescale_app
@@ -25,6 +26,7 @@ app.add_typer(rtsp_app)
 app.add_typer(segment_app)
 app.add_typer(watch_app)
 app.add_typer(frames_app)
+app.add_typer(label_app, name="label")
 app.add_typer(ai_app, name="ai")
 
 

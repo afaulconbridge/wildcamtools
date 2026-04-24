@@ -20,10 +20,11 @@
 
 ## Conventions & Quirks
 
-- **Python Version**: Strict `==3.13.*`.
+- **Python Version**: Strict `==3.14.*`.
 - **OpenCV**: Uses `opencv-contrib-python-headless` to avoid GUI dependencies; `uv` override prevents `opencv-python` installation.
 - **Dependencies**: Managed via `uv` (checked via `uv.lock`).
 - **Verification Order**: `ruff format` $\to$ `ruff check` $\to$ `mypy` $\to$ `pytest`.
+- **Logging**: Use python logging module and %-string formatting.
 
 ## Best practices
 

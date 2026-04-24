@@ -10,7 +10,7 @@ logger = logging.getLogger(__name__)
 
 
 class LlamaCppAnalyser(AbstractAnalyser):
-    message: str = "This is a video image from a UK garden near a river. Is there an animal in this image, if so what? answer only 'no' or the name of the animal."
+    message: str = "This is a video image from a UK garden near a river. Is there an animal in this image, if so what? answer only 'no' or the common English name of the species."
     client: openai_lib.Client
     model: str
 

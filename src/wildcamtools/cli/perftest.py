@@ -17,7 +17,7 @@ def convert(input_: str, output: str, fps: float, timer: Timer, handler: FrameHa
         for frame in video_input:
             with timer:
                 frame_rescaled = handler.handle(frame)
-            if frame_rescaled is not None:
+            if frame_rescaled.filter_keep:
                 video_writer.write(frame_rescaled.raw)
 
 

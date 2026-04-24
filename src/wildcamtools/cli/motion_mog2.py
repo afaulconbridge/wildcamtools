@@ -4,7 +4,6 @@ from typing import Annotated
 import cv2
 import typer
 
-from wildcamtools.lib import Frame
 from wildcamtools.lib.frames import MotionFlowHighlighter
 from wildcamtools.lib.motion import AvgMotion, FlowMotion, MogMotion, MotionHandler
 from wildcamtools.lib.stats import get_video_stats
@@ -47,7 +46,7 @@ def motion_flow(
     input_: Annotated[Path, typer.Argument(metavar="INPUT")],
     output: Annotated[Path, typer.Argument(metavar="OUTPUT")],
     history: int = 5,
-    threshold: float = 1.0,
+    threshold: float = 0.1,
     kernel_size: float = 0.02,
 ) -> None:
     stats = get_video_stats(input_)
@@ -80,11 +79,10 @@ def flow_highlighter(
     timer = Timer()
 
     with FrameWriterFFMPEG(output, fps=stats.fps) as video_writer, FrameSourceFFMPEG(input_) as video_input:
-        frame: Frame | None
         for frame in video_input:
             with timer:
                 frame = handler.handle(frame)
-            if frame is not None:
+            if frame.filter_keep:
                 video_writer.write(frame.raw)
 
     typer.secho(f"Processed {timer.intervals:d} frames in {timer.elapsed:.2f} sec; {timer.per_second:.2f}FPS")

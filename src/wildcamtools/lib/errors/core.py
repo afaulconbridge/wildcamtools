@@ -143,3 +143,106 @@ class InertiaValueError(ValueError):
 class ExpansionValueError(ValueError):
     def __init__(self) -> None:
         super().__init__("Expansion is not valid")
+
+
+class PyAVError(Exception):
+    """Base exception for PyAV/FFmpeg-related errors."""
+
+
+class VideoReadError(PyAVError):
+    """Exception raised when reading video frames fails."""
+
+    def __init__(self, filename: str, operation: str, details: str | None = None) -> None:
+        message = f"Failed to read from '{filename}' during {operation}"
+        if details:
+            message += f": {details}"
+        super().__init__(message)
+
+
+class VideoWriteError(PyAVError):
+    """Exception raised when writing video frames fails."""
+
+    def __init__(self, filename: str, operation: str, details: str | None = None) -> None:
+        message = f"Failed to write to '{filename}' during {operation}"
+        if details:
+            message += f": {details}"
+        super().__init__(message)
+
+
+class ContainerError(PyAVError):
+    """Exception raised when container operations fail."""
+
+    def __init__(self, filename: str, operation: str, details: str | None = None) -> None:
+        message = f"Container operation failed for '{filename}' during {operation}"
+        if details:
+            message += f": {details}"
+        super().__init__(message)
+
+
+class CodecError(PyAVError):
+    """Exception raised when codec operations fail."""
+
+    def __init__(self, filename: str, codec_name: str, details: str | None = None) -> None:
+        message = f"Codec '{codec_name}' failed for '{filename}'"
+        if details:
+            message += f": {details}"
+        super().__init__(message)
+
+
+class StreamNotFoundError(PyAVError):
+    """Exception raised when a stream is not found in a container."""
+
+    def __init__(self, filename: str, stream_type: str = "video") -> None:
+        super().__init__(f"No {stream_type} stream found in '{filename}'")
+
+
+def translate_av_error(error: Exception, filename: str = "", operation: str = "operation") -> PyAVError:  # noqa: C901
+    """Translate a PyAV/FFmpeg exception to a domain-specific exception.
+
+    Maps av.error.FFmpegError and related exceptions to appropriate
+    domain-specific PyAVError subclasses based on error context.
+
+    Args:
+        error: The original exception from PyAV/FFmpeg
+        filename: The file being operated on
+        operation: Description of the operation being performed
+
+    Returns:
+        A PyAVError subclass with contextual information
+    """
+    import av.error
+
+    error_name = type(error).__name__
+    error_str = str(error)
+
+    if isinstance(error, av.error.FFmpegError):
+        if "No such file" in error_str or "Operation not permitted" in error_str:
+            return ContainerError(filename, operation, error_str)
+
+        if "Invalid data format" in error_str or "Invalid argument" in error_str:
+            return ContainerError(filename, operation, error_str)
+
+        if "Stream not found" in error_str or "Stream does not exist" in error_str:
+            return StreamNotFoundError(filename, "video")
+
+        if "Decoder not found" in error_str or "Encoder not found" in error_str:
+            return CodecError(filename, "unknown", error_str)
+
+        if "Error while decoding" in error_str:
+            return VideoReadError(filename, operation, error_str)
+
+        if "Error while encoding" in error_str:
+            return VideoWriteError(filename, operation, error_str)
+
+        return ContainerError(filename, operation, f"{error_name}: {error_str}")
+
+    if isinstance(error, ValueError):
+        return CodecError(filename, "unknown", f"{error_str}")
+
+    if isinstance(error, (av.error.EOFError, EOFError)):
+        return VideoReadError(filename, operation, "End of file reached")
+
+    if isinstance(error, (av.error.TimeoutError, TimeoutError)):
+        return VideoReadError(filename, operation, "Operation timed out")
+
+    return PyAVError(f"{error_name}: {error_str} (file: {filename}, operation: {operation})")

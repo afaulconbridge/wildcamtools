@@ -110,8 +110,8 @@ class Watcher(FrameHandler):
             self.transition_window_metrics[next_state].update(frame.motion_proportion)
 
     def _get_next_state(self, frame: Frame) -> WatcherStateEnum:  # noqa: C901
-        logger.debug(f"Frame no: {frame.frame_no}")
-        logger.debug(f"Motion proportion: {frame.motion_proportion}")
+        logger.debug("Frame no: %s", frame.frame_no)
+        logger.debug("Motion proportion: %s", frame.motion_proportion)
         match self.state:
             case WatcherStateEnum.PREPARING:
                 if frame.frame_no >= self.transition_metrics.preparing_duration:

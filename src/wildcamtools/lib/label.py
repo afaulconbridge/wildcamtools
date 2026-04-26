@@ -66,7 +66,7 @@ def save_and_next(output_path: Path, current_vid_name: str, label: str, videos: 
         save_label(output_path, current_vid_name, label)
         # Update cache
         st.session_state.labels[current_vid_name] = label
-        logger.info(f"Labeled {current_vid_name} as {label}")
+        logger.info("Labeled %s as %s", current_vid_name, label)
 
         # Move to next video
         if st.session_state.vid_idx < len(videos) - 1:
@@ -78,7 +78,7 @@ def save_and_next(output_path: Path, current_vid_name: str, label: str, videos: 
             logger.info("Finished labeling all videos")
     else:
         st.error("Please enter a label before saving.")
-        logger.warning(f"Attempted to save label for {current_vid_name} without providing a label")
+        logger.warning("Attempted to save label for %s without providing a label", current_vid_name)
 
 
 def main() -> None:
@@ -92,7 +92,7 @@ def main() -> None:
 
     if not vid_dir or not os.path.isdir(vid_dir):
         st.warning("Please provide a valid video directory.")
-        logger.warning(f"Invalid video directory provided: {vid_dir}")
+        logger.warning("Invalid video directory provided: %s", vid_dir)
         return
 
     # Get list of videos
@@ -104,7 +104,7 @@ def main() -> None:
 
     if not videos:
         st.info("No videos found in the specified directory.")
-        logger.info(f"No videos found in directory: {vid_dir}")
+        logger.info("No videos found in directory: %s", vid_dir)
         return
 
     # State for current video index

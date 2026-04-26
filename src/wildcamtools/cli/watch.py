@@ -33,7 +33,7 @@ logger = logging.getLogger(__name__)
 
 
 def find_segments_for_timespan(start_time: datetime, end_time: datetime, segments_dir: Path) -> tuple[Path, ...] | None:
-    logger.info(f"Finding segments from {start_time} to {end_time}")
+    logger.info("Finding segments from %s to %s", start_time, end_time)
     # given a directory
 
     # build a list of files in segment directory
@@ -43,12 +43,12 @@ def find_segments_for_timespan(start_time: datetime, end_time: datetime, segment
     ftime_string = "seg_%Y_%m_%d__%H_%M_%S.mp4"
     start_time_path = segments_dir / start_time.strftime(ftime_string)
     end_time_path = segments_dir / end_time.strftime(ftime_string)
-    logger.info(f"Finding segments from {start_time_path} to {end_time_path}")
+    logger.info("Finding segments from %s to %s", start_time_path, end_time_path)
 
     # work out where in the list the start and end filenames would be inserted
     start_position = bisect.bisect_left(segments_files, start_time_path)
     end_position = bisect.bisect_right(segments_files, end_time_path)
-    logger.info(f"Segment positions from {start_position} to {end_position}")
+    logger.info("Segment positions from %s to %s", start_position, end_position)
 
     if end_position == len(segments_files):
         # if we would cover the last file, beware
@@ -174,7 +174,7 @@ class WatcherManager:
             self.check_and_start_processes()
             sleep(self.segment_duration)
         output_file = self.output_dir / start_time.strftime("out_%Y_%m_%d__%H_%M_%S.mp4")
-        logger.info(f"Joining {len(to_merge)} segments into {output_file}")
+        logger.info("Joining %s segments into %s", len(to_merge), output_file)
         concat_ffmpeg(to_merge, output_file)
 
         # also output a JSON summary
@@ -191,7 +191,7 @@ class WatcherManager:
             # identify the oldest ones
             files_to_remove = files[keep:]
             for file_to_remove in files_to_remove:
-                logger.debug(f"removing {self.segments_dir / file_to_remove}")
+                logger.debug("removing %s", self.segments_dir / file_to_remove)
                 os.unlink(self.segments_dir / file_to_remove)
 
     def run(self) -> None:

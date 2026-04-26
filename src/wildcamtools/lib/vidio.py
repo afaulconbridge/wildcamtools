@@ -158,9 +158,9 @@ class FrameSourceFFMPEG(FrameSource):
     def __enter__(self) -> Self:
         self._temporary_dir = Path(tempfile.mkdtemp(prefix="wildcamtools_"))
         self._named_pipe = self._temporary_dir / "pipe.mp4"
-        logger.debug(f"Creating pipe {self._named_pipe}")
+        logger.debug("Creating pipe %s", self._named_pipe)
         os.mkfifo(self._named_pipe)
-        logger.debug(f"Created pipe {self._named_pipe}")
+        logger.debug("Created pipe %s", self._named_pipe)
 
         return self
 
@@ -190,12 +190,12 @@ class FrameSourceFFMPEG(FrameSource):
             raise StopIteration
 
         if not self._named_pipe_reader:
-            logger.debug(f"Opening pipe {self._named_pipe}")
+            logger.debug("Opening pipe %s", self._named_pipe)
             # have to open the pipe _after_ ffmpeg has started writing into the pipe
             # otherwise it hangs
             if self._named_pipe:
                 self._named_pipe_reader = open(self._named_pipe, "rb")  # noqa: SIM115
-            logger.debug(f"Opened pipe {self._named_pipe}")
+            logger.debug("Opened pipe %s", self._named_pipe)
 
         in_bytes = (
             self._named_pipe_reader.read(self.width * self.height * 3)

@@ -4,7 +4,7 @@ from typing import Annotated
 import typer
 
 from wildcamtools.lib.errors import OutputNotDirectoryError
-from wildcamtools.lib.segment import create_segment_process
+from wildcamtools.lib.segment import VideoSegmenter
 
 app = typer.Typer()
 
@@ -20,13 +20,9 @@ def segment(
         raise OutputNotDirectoryError()
     output.mkdir(parents=True, exist_ok=True)
 
-    p = create_segment_process(
-        input_=input_,
-        output=output,
-        duration=duration,
-    )
-
-    p.wait()
+    with VideoSegmenter(input_=input_, segment_dir=output, segment_duration=float(duration)) as segmenter:
+        for _ in segmenter:
+            pass
 
 
 if __name__ == "__main__":

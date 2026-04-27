@@ -7,6 +7,8 @@ from pathlib import Path
 from subprocess import Popen
 from typing import Any, Literal, Self
 
+import av
+import av.container
 import cv2
 import ffmpeg
 import ffmpeg.codecs.encoders
@@ -21,6 +23,7 @@ from wildcamtools.lib.errors import (
     VideoProbeError,
     VideoSizeNotSetError,
 )
+from wildcamtools.lib.errors.core import StreamNotFoundError, translate_av_error
 
 logger = logging.getLogger(__name__)
 
@@ -218,6 +221,141 @@ class FrameSourceFFMPEG(FrameSource):
         self.cumulative_time += end - start
 
         return frame
+
+
+class VideoReader(FrameSource):
+    """PyAV-based video reader with frame scaling and FPS control.
+
+    Uses PyAV for direct library access without subprocess or named pipes.
+    """
+
+    filename: Path | str
+    width: int | None
+    height: int | None
+    scale: float
+    fps: float
+    frame_no: int
+    hwaccel: str | None
+
+    _container: av.container.InputContainer | None
+    _stream: av.VideoStream | None
+    _target_fps: float | None
+    _last_pts: float | None
+
+    def __init__(
+        self,
+        filename: Path | str,
+        width: int | None = None,
+        height: int | None = None,
+        scale: float = 1.0,
+        fps: float = -1.0,
+        hwaccel: str | None = None,
+    ):
+        super().__init__()
+        self.filename = filename
+        self.width = width
+        self.height = height
+        self.scale = scale
+        self.fps = fps
+        self.hwaccel = hwaccel
+        self.frame_no = 0
+        self._container = None
+        self._stream = None
+        self._target_fps = None
+        self._last_pts = None
+
+        if hwaccel is not None:
+            logger.warning("Hardware acceleration (hwaccel) is not yet implemented")
+
+    def __enter__(self) -> Self:
+        try:
+            self._container = av.open(self.filename)
+            self._stream = self._container.streams.video[0]
+        except av.error.FFmpegError as e:
+            raise translate_av_error(e, str(self.filename), "open") from e
+        except (KeyError, IndexError) as e:
+            raise StreamNotFoundError(str(self.filename), "video") from e
+
+        if self.width is None or self.height is None:
+            self._detect_dimensions()
+
+        if self.fps > 0.0:
+            self._target_fps = self.fps
+        else:
+            self._target_fps = None
+
+        self._last_pts = None
+        self.frame_no = 0
+        return self
+
+    def __exit__(self, exc_type: type | None, exc_val: BaseException | None, exc_tb: Any | None) -> Literal[False]:
+        if self._container:
+            self._container.close()
+        self._container = None
+        self._stream = None
+        self._target_fps = None
+        self._last_pts = None
+        return False
+
+    def _detect_dimensions(self) -> None:
+        if not self._stream:
+            raise VideoNotInContextError()
+        self.width = int(self._stream.width * self.scale)
+        self.height = int(self._stream.height * self.scale)
+
+    def __next__(self) -> Frame:
+        if not self._container or not self._stream:
+            raise VideoNotInContextError()
+
+        if not self.width or not self.height:
+            raise VideoSizeNotSetError()
+
+        try:
+            for packet in self._container.demux(self._stream):
+                for frame in packet.decode():
+                    if self._should_drop_frame(frame):
+                        continue
+
+                    rgb_frame = frame.to_ndarray(format="rgb24")
+
+                    if self.scale != 1.0:
+                        rgb_frame = cv2.resize(  # type: ignore[assignment]
+                            rgb_frame,
+                            (self.width, self.height),
+                            interpolation=cv2.INTER_LINEAR,
+                        )
+
+                    result = Frame(raw=rgb_frame, frame_no=self.frame_no)
+                    self.frame_no += 1
+                    return result
+
+            raise StopIteration
+        except av.error.FFmpegError as e:
+            raise translate_av_error(e, str(self.filename), "read frame") from e
+        except EOFError as e:
+            raise StopIteration from e
+
+    def _should_drop_frame(self, frame: av.VideoFrame) -> bool:
+        if self._target_fps is None:
+            return False
+
+        if not self._stream or not self._stream.time_base:
+            return False
+
+        current_pts = frame.time * float(self._stream.time_base)
+
+        if self._last_pts is None:
+            self._last_pts = current_pts
+            return False
+
+        min_interval = 1.0 / self._target_fps
+        elapsed = current_pts - self._last_pts
+
+        if elapsed < min_interval:
+            return True
+
+        self._last_pts = current_pts
+        return False
 
 
 class FrameSourceFFMPEGSegmenter(FrameSource):

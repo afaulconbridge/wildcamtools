@@ -1,6 +1,7 @@
 import logging
 from datetime import datetime
 from pathlib import Path
+from subprocess import Popen
 from typing import Any, Literal, Self
 
 import av
@@ -182,3 +183,29 @@ class VideoSegmenter:
     @property
     def frame_count(self) -> int:
         return self._frame_no
+
+
+def create_segment_process(*, input_: str | Path, output: str | Path, duration: float) -> Popen:
+    import subprocess
+
+    cmd = [
+        "ffmpeg",
+        "-i",
+        str(input_),
+        "-c:v",
+        "copy",
+        "-f",
+        "segment",
+        "-segment_time",
+        str(int(duration)),
+        "-segment_format",
+        "mp4",
+        "-segment_format_options",
+        "movflags=+faststart",
+        "-reset_timestamps",
+        "1",
+        "-strftime",
+        "1",
+        str(Path(output) / "seg_%Y_%m_%d__%H_%M_%S.mp4"),
+    ]
+    return subprocess.Popen(cmd)  # noqa: S603

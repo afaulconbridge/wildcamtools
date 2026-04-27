@@ -42,13 +42,6 @@ class ProcessError(Exception):
     """Exception raised when background process operations fail."""
 
 
-class ProcessTypeMismatchError(ProcessError, TypeError):
-    """Exception raised when a process operation returns an unexpected type."""
-
-    def __init__(self) -> None:
-        super().__init__("ffmpeg.run_async did not return a Popen object")
-
-
 class ProcessNotInitializedError(ProcessError):
     """Exception raised when process has not been initialized."""
 
@@ -72,13 +65,6 @@ class ProcessReadyTimeoutError(ProcessError):
 
 class VideoError(Exception):
     """Exception raised when video operations fail."""
-
-
-class VideoProbeError(VideoError):
-    """Exception raised when video probe fails to find a stream."""
-
-    def __init__(self) -> None:
-        super().__init__("No video stream found in probe")
 
 
 class VideoNotInContextError(VideoError):
@@ -111,13 +97,6 @@ class InvalidMaxMagnitudeError(MotionFlowError):
 
     def __init__(self, max_magnitude: float) -> None:
         super().__init__(f"Max magnitude must be positive, got {max_magnitude}")
-
-
-class FFmpegPipeClosedError(VideoError):
-    """Exception raised when FFmpeg process pipe is closed."""
-
-    def __init__(self) -> None:
-        super().__init__("FFmpeg process pipe is closed")
 
 
 class BoundingBoxWidthError(ValueError):

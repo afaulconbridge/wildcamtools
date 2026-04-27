@@ -1,6 +1,6 @@
 from wildcamtools.lib.motion import MogMotion
 from wildcamtools.lib.states import Watcher, WatcherStateEnum, WatcherTransitionMetrics
-from wildcamtools.lib.vidio import FrameSourceFFMPEG
+from wildcamtools.lib.vidio import VideoReader
 
 
 def test_states(rtsp_server: str):
@@ -17,8 +17,8 @@ def test_states(rtsp_server: str):
         ),
     )
     visited_states = {watcher.state}
-    with FrameSourceFFMPEG(rtsp_server, 3840, 2160) as frame_source:
-        for frame in frame_source:
+    with VideoReader(rtsp_server, 3840, 2160) as video_reader:
+        for frame in video_reader:
             if frame.frame_no > 150:
                 break
             watcher.handle(frame)

@@ -5,8 +5,6 @@ from pathlib import Path
 from typing import Self, override
 
 import av
-import ffmpeg
-import ffmpeg.codecs.encoders
 
 from wildcamtools.lib.background_process import BackgroundProcess
 from wildcamtools.lib.errors.core import translate_av_error
@@ -44,23 +42,29 @@ class BackgroundFFMPEGBroadcast(BackgroundProcess):
 
     @override
     def _create_process(self) -> None:
-        ffmpeg_cmd = ffmpeg.input(
-            self.path,
-            stream_loop=-1,
-            re=True,
-        ).output(
-            filename="rtsp://localhost:8554/stream",
-            f="rtsp",
-            # codec="libx264",
-            # see https://trac.ffmpeg.org/wiki/Encode/H.264
-            encoder_options=ffmpeg.codecs.encoders.libx264(
-                tune="fastdecode",
-                crf=23.0,
-                preset="ultrafast",
-            ),
-        )
-        logger.debug(ffmpeg_cmd.compile_line())
-        self.process = ffmpeg_cmd.run_async()
+        import subprocess
+
+        cmd = [
+            "ffmpeg",
+            "-stream_loop",
+            "-1",
+            "-re",
+            "-i",
+            str(self.path),
+            "-c:v",
+            "libx264",
+            "-tune",
+            "fastdecode",
+            "-crf",
+            "23",
+            "-preset",
+            "ultrafast",
+            "-f",
+            "rtsp",
+            "rtsp://localhost:8554/stream",
+        ]
+        logger.debug(" ".join(cmd))
+        self.process = subprocess.Popen(cmd)  # noqa: S603
 
 
 class RTSPBroadcaster:

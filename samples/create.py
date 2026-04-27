@@ -2,7 +2,6 @@ import tempfile
 from math import pi, sqrt
 from pathlib import Path
 
-import ffmpeg
 from PIL import Image, ImageDraw
 
 
@@ -53,22 +52,30 @@ def create_circle_frames(
 
 
 def create_video_from_frames(path_wildcard: Path, output: Path | str, fps: int = 30) -> None:
-    ffmpeg.input(
-        path_wildcard,
-        demuxer_options=ffmpeg.formats.demuxers.image2(
-            pattern_type="glob",
-            framerate=str(fps),
-        ),
-    ).output(
-        codec="libx264",
-        encoder_options=ffmpeg.codecs.encoders.libx264(),
-        filename=output,
-    ).global_args(
-        hide_banner=True,
-        loglevel="error",
-    ).overwrite_output().run(
-        quiet=True,
-    )
+    import av
+    import numpy as np
+
+    output_path = Path(output)
+    container = av.open(str(output_path), mode="w")
+    stream = container.add_stream("libx264", rate=fps)
+    stream.width = 1920
+    stream.height = 1080
+    stream.pix_fmt = "yuv420p"
+    stream.options = {"crf": "23", "preset": "medium"}
+
+    frame_files = sorted(path_wildcard.parent.glob(path_wildcard.name.replace("*", "*")))
+    for frame_file in frame_files:
+        img = Image.open(frame_file).convert("RGB")
+        frame_array = np.array(img)
+        av_frame = av.VideoFrame.from_ndarray(frame_array, format="rgb24")
+        av_frame.pts = stream.frames
+        for packet in stream.encode(av_frame):
+            container.mux(packet)
+
+    for packet in stream.encode(None):
+        container.mux(packet)
+
+    container.close()
 
 
 if __name__ == "__main__":

@@ -101,6 +101,9 @@ class VideoSegmenter:
     def _close_segment_container(self) -> None:
         if self._segment_container:
             try:
+                stream = self._segment_container.streams.video[0]
+                for packet in stream.encode(None):
+                    self._segment_container.mux(packet)
                 self._segment_container.close()
             except Exception:
                 logger.exception("Error closing segment container")
@@ -163,8 +166,13 @@ class VideoSegmenter:
                     if not isinstance(frame, av.VideoFrame):
                         continue
 
-                    frame_time = float(frame.time)
-                    self._maybe_rotate_segment(frame_time)
+                    frame_time = (
+                        frame.time
+                        if frame.time is not None
+                        else (frame.pts * self._video_stream.time_base if frame.pts is not None else None)
+                    )
+                    if frame_time is not None:
+                        self._maybe_rotate_segment(frame_time)
                     self._write_frame_to_segment(frame)
 
                     rgb_frame = frame.to_rgb().to_ndarray()

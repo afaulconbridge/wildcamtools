@@ -1,4 +1,4 @@
-from collections.abc import Generator
+from collections.abc import Callable, Generator
 from pathlib import Path
 
 import numpy as np
@@ -36,7 +36,7 @@ def test_video_reader_rtsp(rtsp_server: str) -> None:
         assert frame_no < 181  # expect 5 seconds at 30 fps
 
 
-def test_video_writer(video_frame_generator: Generator[Frame], tmp_path: Path) -> None:
+def test_video_writer(video_frame_generator: Callable[[], Generator[Frame]], tmp_path: Path) -> None:
     with VideoWriter(tmp_path / "out.mp4", fps=30.0) as writer:
         for frame in video_frame_generator():
             writer.write(frame.raw)

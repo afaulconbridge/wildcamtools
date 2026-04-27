@@ -183,7 +183,12 @@ class VideoReader(FrameSource):
         if not self._stream or not self._stream.time_base:
             return False
 
-        current_pts = frame.time * float(self._stream.time_base)
+        if frame.time is not None:
+            current_pts = frame.time
+        elif frame.pts is not None:
+            current_pts = frame.pts * float(self._stream.time_base)
+        else:
+            return False
 
         if self._last_pts is None:
             self._last_pts = current_pts
@@ -263,7 +268,7 @@ class VideoWriter:
         if self._width is None or self._height is None:
             raise VideoSizeNotSetError()
 
-        logger.debug(f"Opening video writer for {self.out_filename} (codec={self.codec}, fps={self.fps})")
+        logger.debug("Opening video writer for %s (codec=%s, fps=%s)", self.out_filename, self.codec, self.fps)
         self._container = av.open(str(self.out_filename), mode="w")
         stream = self._container.add_stream(self.codec, rate=int(self.fps))
         if not isinstance(stream, av.video.stream.VideoStream):
@@ -274,7 +279,7 @@ class VideoWriter:
         self._stream.pix_fmt = self.pix_fmt
         self._stream.options = {"crf": str(self.crf), "preset": self.preset}
         self._started = True
-        logger.debug(f"Video writer opened: {self._width}x{self._height}")
+        logger.debug("Video writer opened: %dx%d", self._width, self._height)
 
     def _write_frame(self, frame: np.ndarray) -> None:
         if not self._container or not self._stream:
@@ -304,7 +309,7 @@ class VideoWriter:
 
             self._container.close()
         except Exception as e:
-            logger.warning(f"Error closing video writer: {e}")
+            logger.warning("Error closing video writer: %s", e)
         finally:
             self._container = None
             self._stream = None

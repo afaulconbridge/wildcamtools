@@ -35,18 +35,34 @@ def concat_videos(inputs: Iterable[Path], output: Path) -> None:
                 list_file.write(f"file '{filename.resolve()}'\n")
             list_file_path = list_file.name
 
-        with (
-            av.open(
-                list_file_path,
-                format="concat",
-                options={"safe": "0"},
-            ) as container,
-            av.open(output, "w") as output_container,
-        ):
-            for packet in container.demux():
-                output_container.mux(packet)
+        temp_output = output.with_name(output.name + ".tmp")
+        try:
+            with (
+                av.open(
+                    list_file_path,
+                    format="concat",
+                    options={"safe": "0"},
+                ) as container,
+                av.open(temp_output, "w") as output_container,
+            ):
+                stream_map: dict[int, av.stream.Stream] = {}
+                for in_stream in container.streams:
+                    if in_stream.type != "video":
+                        continue
+                    stream_map[in_stream.index] = output_container.add_stream(in_stream.codec.name)
 
-        logger.debug("Successfully concatenated %d videos", len(inputs_list))
+                for packet in container.demux():
+                    if packet.dts is None or packet.stream.index not in stream_map:
+                        continue
+                    packet.stream = stream_map[packet.stream.index]
+                    output_container.mux(packet)
+
+            temp_output.replace(output)
+            logger.debug("Successfully concatenated %d videos", len(inputs_list))
+        except Exception:
+            with suppress(Exception):
+                temp_output.unlink()
+            raise
 
     except Exception as e:
         raise translate_av_error(e, str(output), "concat") from e

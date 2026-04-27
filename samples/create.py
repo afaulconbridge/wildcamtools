@@ -58,15 +58,22 @@ def create_video_from_frames(path_wildcard: Path, output: Path | str, fps: int =
     output_path = Path(output)
     container = av.open(str(output_path), mode="w")
     stream = container.add_stream("libx264", rate=fps)
-    stream.width = 1920
-    stream.height = 1080
     stream.pix_fmt = "yuv420p"
     stream.options = {"crf": "23", "preset": "medium"}
 
     frame_files = sorted(path_wildcard.parent.glob(path_wildcard.name.replace("*", "*")))
+    expected_size: tuple[int, int] | None = None
     for frame_file in frame_files:
         img = Image.open(frame_file).convert("RGB")
         frame_array = np.array(img)
+        current_size = (img.width, img.height)
+        if expected_size is None:
+            expected_size = current_size
+            stream.width = img.width
+            stream.height = img.height
+        elif current_size != expected_size:
+            msg = f"Frame size mismatch: expected {expected_size}, got {current_size} in {frame_file}"
+            raise ValueError(msg)
         av_frame = av.VideoFrame.from_ndarray(frame_array, format="rgb24")
         av_frame.pts = stream.frames
         for packet in stream.encode(av_frame):

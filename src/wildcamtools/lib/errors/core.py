@@ -194,6 +194,12 @@ def translate_av_error(error: Exception, filename: str = "", operation: str = "o
     error_name = type(error).__name__
     error_str = str(error)
 
+    if isinstance(error, (av.error.EOFError, EOFError)):
+        return VideoReadError(filename, operation, "End of file reached")
+
+    if isinstance(error, (av.error.TimeoutError, TimeoutError)):
+        return VideoReadError(filename, operation, "Operation timed out")
+
     if isinstance(error, av.error.FFmpegError):
         if "No such file" in error_str or "Operation not permitted" in error_str:
             return ContainerError(filename, operation, error_str)
@@ -217,11 +223,5 @@ def translate_av_error(error: Exception, filename: str = "", operation: str = "o
 
     if isinstance(error, ValueError):
         return CodecError(filename, "unknown", f"{error_str}")
-
-    if isinstance(error, (av.error.EOFError, EOFError)):
-        return VideoReadError(filename, operation, "End of file reached")
-
-    if isinstance(error, (av.error.TimeoutError, TimeoutError)):
-        return VideoReadError(filename, operation, "Operation timed out")
 
     return PyAVError(f"{error_name}: {error_str} (file: {filename}, operation: {operation})")

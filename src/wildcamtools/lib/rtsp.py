@@ -63,7 +63,7 @@ class BackgroundFFMPEGBroadcast(BackgroundProcess):
             "rtsp",
             "rtsp://localhost:8554/stream",
         ]
-        logger.debug(" ".join(cmd))
+        logger.debug("ffmpeg command: %s", " ".join(cmd))
         self.process = subprocess.Popen(cmd)  # noqa: S603
 
 
@@ -92,17 +92,25 @@ class RTSPBroadcaster:
             self._thread = None
 
     def _broadcast_loop(self) -> None:
+        error_count = 0
+        max_errors = 5
         while not self._stop_event.is_set():
             try:
                 self._broadcast_once()
+                error_count = 0
                 if not self.loop:
                     break
             except Exception:
                 if self._stop_event.is_set():
                     break
-                logger.exception("Broadcast error")
+                error_count += 1
+                logger.exception("Broadcast error (attempt %d/%d)", error_count, max_errors)
+                if error_count >= max_errors:
+                    logger.exception("Max broadcast errors reached, stopping")
+                    break
                 if not self.loop:
                     raise
+                self._stop_event.wait(1.0)
 
     def _broadcast_once(self) -> None:
         try:
@@ -124,9 +132,11 @@ class RTSPBroadcaster:
                         if self._stop_event.is_set():
                             break
                         for frame in packet.decode():
-                            output_container.mux(output_stream.encode(frame))
+                            for encoded_packet in output_stream.encode(frame):
+                                output_container.mux(encoded_packet)
 
-                    output_container.mux(output_stream.encode(None))
+                    for encoded_packet in output_stream.encode(None):
+                        output_container.mux(encoded_packet)
         except Exception as e:
             raise translate_av_error(e, str(self.source), "RTSP broadcast") from e
 

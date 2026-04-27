@@ -34,6 +34,7 @@ class MotionHandler(FrameHandler):
         frame_out = self.update_background(frame.raw)
         # only set if we've gone through history
         proportion = self.get_motion_proportion(frame_out) if frame.frame_no > self.history else -1.0
+        logger.debug("Motion %d: %03f", frame.frame_no, proportion)
         return Frame(raw=frame_out, frame_no=frame.frame_no, motion_proportion=proportion)
 
     def _despeckle(self, mask: MatLike) -> MatLike:

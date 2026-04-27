@@ -16,7 +16,7 @@ class PerformanceMetrics(BaseModel):
 
 def run_program_and_measure(program_args: Iterable[str]) -> PerformanceMetrics:
     start_time = time.time()
-    process = psutil.Popen(program_args)
+    process = psutil.Popen(list(program_args))
 
     # Wait for the program to finish
     process.wait()

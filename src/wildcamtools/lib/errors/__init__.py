@@ -24,6 +24,8 @@ from wildcamtools.lib.errors.core import (
     VideoNotInContextError,
     VideoProbeError,
     VideoSizeNotSetError,
+    VideoWriteError,
+    translate_av_error,
 )
 
 __all__ = [
@@ -50,4 +52,6 @@ __all__ = [
     "VideoNotInContextError",
     "VideoProbeError",
     "VideoSizeNotSetError",
+    "VideoWriteError",
+    "translate_av_error",
 ]

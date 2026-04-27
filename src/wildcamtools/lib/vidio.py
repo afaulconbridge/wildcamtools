@@ -22,8 +22,10 @@ from wildcamtools.lib.errors import (
     VideoNotInContextError,
     VideoProbeError,
     VideoSizeNotSetError,
+    VideoWriteError,
+    translate_av_error,
 )
-from wildcamtools.lib.errors.core import StreamNotFoundError, translate_av_error
+from wildcamtools.lib.errors.core import StreamNotFoundError
 
 logger = logging.getLogger(__name__)
 
@@ -497,3 +499,118 @@ class FrameWriterFFMPEG:
     def __exit__(self, exc_type: type | None, exc_val: BaseException | None, exc_tb: Any | None) -> Literal[False]:
         self.close()
         return False
+
+
+class VideoWriter:
+    """
+    Context-managed video writer using PyAV for direct library access.
+    Accepts numpy arrays (HxWx3 RGB or HxWx4 RGBA) and writes to video files.
+    """
+
+    # TODO: Add hardware acceleration support (e.g., h264_nvenc, h264_vaapi)
+
+    def __init__(
+        self,
+        out_filename: Path | str,
+        fps: float,
+        codec: str = "libx264",
+        crf: int = 23,
+        preset: str = "medium",
+        pix_fmt: str = "yuv420p",
+    ):
+        self.out_filename = Path(out_filename)
+        self.fps = fps
+        self.codec = codec
+        self.crf = crf
+        self.preset = preset
+        self.pix_fmt = pix_fmt
+
+        self._container: av.container.OutputContainer | None = None
+        self._stream: av.video.stream.VideoStream | None = None
+        self._width: int | None = None
+        self._height: int | None = None
+        self._started = False
+        self._frame_count = 0
+
+    def __enter__(self) -> Self:
+        return self
+
+    def __exit__(self, exc_type: type | None, exc_val: BaseException | None, exc_tb: Any | None) -> Literal[False]:
+        self.close()
+        return False
+
+    def write(self, frame: np.ndarray) -> None:
+        """
+        Write a single frame to the output video.
+        Infers dimensions from the first frame.
+        """
+        if frame.ndim == 2:
+            frame = np.stack((frame,) * 3, axis=-1)
+
+        h, w, ch = frame.shape
+        if ch == 4:
+            frame = frame[:, :, :3]
+
+        if not self._started:
+            self._width = w
+            self._height = h
+            self._open_container()
+
+        if frame.shape[0] != (self._height or 0) or frame.shape[1] != (self._width or 0):
+            frame = cv2.resize(frame, (int(self._width or 0), int(self._height or 0)), interpolation=cv2.INTER_LINEAR)
+
+        self._write_frame(frame)
+
+    def _open_container(self) -> None:
+        if self._width is None or self._height is None:
+            raise VideoSizeNotSetError()
+
+        logger.debug(f"Opening video writer for {self.out_filename} (codec={self.codec}, fps={self.fps})")
+        self._container = av.open(str(self.out_filename), mode="w")
+        stream = self._container.add_stream(self.codec, rate=int(self.fps))
+        if not isinstance(stream, av.video.stream.VideoStream):
+            raise VideoWriteError(str(self.out_filename), "opening container", "Expected video stream")
+        self._stream = stream
+        self._stream.width = self._width
+        self._stream.height = self._height
+        self._stream.pix_fmt = self.pix_fmt
+        self._stream.options = {"crf": str(self.crf), "preset": self.preset}
+        self._started = True
+        logger.debug(f"Video writer opened: {self._width}x{self._height}")
+
+    def _write_frame(self, frame: np.ndarray) -> None:
+        if not self._container or not self._stream:
+            raise VideoWriteError(str(self.out_filename), "writing frame", "Container or stream not initialized")
+
+        try:
+            av_frame = av.VideoFrame.from_ndarray(frame, format="rgb24")
+            av_frame.pts = self._frame_count
+            self._frame_count += 1
+
+            packets = self._stream.encode(av_frame)
+            for packet in packets:
+                self._container.mux(packet)
+        except Exception as e:
+            logger.exception("Failed to write frame %d to %s", self._frame_count, self.out_filename)
+            raise translate_av_error(e, str(self.out_filename), "writing frame") from e
+
+    def close(self) -> None:
+        """Flush encoder and close container."""
+        if not self._container or not self._stream:
+            return
+
+        try:
+            packets = self._stream.encode(None)
+            for packet in packets:
+                self._container.mux(packet)
+
+            self._container.close()
+        except Exception as e:
+            logger.warning(f"Error closing video writer: {e}")
+        finally:
+            self._container = None
+            self._stream = None
+            self._started = False
+            self._width = None
+            self._height = None
+            self._frame_count = 0

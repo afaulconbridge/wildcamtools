@@ -14,7 +14,7 @@ from typing import Annotated
 import typer
 from typer_config import use_yaml_config
 
-from wildcamtools.lib.concat import concat_ffmpeg
+from wildcamtools.lib.concat import concat_videos
 from wildcamtools.lib.errors import (
     CannotCombineOpenWindowError,
     MotionMaskNotExistsError,
@@ -175,7 +175,7 @@ class WatcherManager:
             sleep(self.segment_duration)
         output_file = self.output_dir / start_time.strftime("out_%Y_%m_%d__%H_%M_%S.mp4")
         logger.info(f"Joining {len(to_merge)} segments into {output_file}")
-        concat_ffmpeg(to_merge, output_file)
+        concat_videos(to_merge, output_file)
 
         # also output a JSON summary
         with open(self.output_dir / start_time.strftime("out_%Y_%m_%d__%H_%M_%S.json"), "w") as json_out:

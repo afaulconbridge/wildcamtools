@@ -10,7 +10,8 @@ logger = logging.getLogger(__name__)
 
 
 class OllamaAnalyser(AbstractAnalyser):
-    message: str = "This is a video image from a UK garden near a river. Is there an animal in this image, if so what? answer only 'no' or the common English name of the species."
+    message: str = """This is a video image from a UK garden near a river. Is there an animal in this image, if so what? answer only 'no' or its common name.
+For example: 'deer', 'bird', 'fox', 'mouse', 'no', 'hedgehog', 'otter', etc."""
     client: ollama_lib.Client
     model: str
 

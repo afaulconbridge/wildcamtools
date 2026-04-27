@@ -239,30 +239,30 @@ def watch(
     ] = 4,  # no. segments # TODO calculate from offset_start and segment_duration
     offset_start: Annotated[float, typer.Option(metavar="FLOAT", envvar="WCT_OFFSET_START")] = 10.0,  # seconds
     offset_end: Annotated[float, typer.Option(metavar="FLOAT", envvar="WCT_OFFSET_END")] = 10.0,  # seconds
-    history: Annotated[int, typer.Option(metavar="INT", envvar="WTC_HISTORY")] = 30,  # frames
-    threshold: Annotated[int, typer.Option(metavar="INT", envvar="WTC_THRESHOLD")] = 16,  # < 128?
-    kernel_size: Annotated[int, typer.Option(metavar="INT", envvar="WTC_KERNEL_SIZE")] = 3,  # pixels
-    scale: Annotated[float, typer.Option(metavar="FLOAT", envvar="WTC_SCALE")] = 0.25,  # <1.0
-    fps: Annotated[float, typer.Option(metavar="FLOAT", envvar="WTC_FPS")] = 5.0,  # >=1.0
+    history: Annotated[int, typer.Option(metavar="INT", envvar="WCT_HISTORY")] = 30,  # frames
+    threshold: Annotated[int, typer.Option(metavar="INT", envvar="WCT_THRESHOLD")] = 16,  # < 128?
+    kernel_size: Annotated[int, typer.Option(metavar="INT", envvar="WCT_KERNEL_SIZE")] = 3,  # pixels
+    scale: Annotated[float, typer.Option(metavar="FLOAT", envvar="WCT_SCALE")] = 0.25,  # <1.0
+    fps: Annotated[float, typer.Option(metavar="FLOAT", envvar="WCT_FPS")] = 5.0,  # >=1.0
     hwaccel: Annotated[
-        str, typer.Option(metavar="STR", envvar="WTC_AWACCEL")
+        str, typer.Option(metavar="STR", envvar="WCT_HWACCEL")
     ] = "",  # see https://trac.ffmpeg.org/wiki/HWAccelIntro
-    segment_duration: Annotated[int, typer.Option(metavar="INT", envvar="WTC_SEG_DURATION")] = 15,  # seconds
-    green_to_amber_motion_min: Annotated[float, typer.Option(metavar="FLOAT", envvar="WTC_GREEN_2_AMBER_MIN")] = 0.01,
+    segment_duration: Annotated[int, typer.Option(metavar="INT", envvar="WCT_SEG_DURATION")] = 15,  # seconds
+    green_to_amber_motion_min: Annotated[float, typer.Option(metavar="FLOAT", envvar="WCT_GREEN_2_AMBER_MIN")] = 0.01,
     amber_to_green_proportion_max: Annotated[
-        float, typer.Option(metavar="FLOAT", envvar="WTC_AMBER_2_GREEN_MAX")
+        float, typer.Option(metavar="FLOAT", envvar="WCT_AMBER_2_GREEN_MAX")
     ] = 0.0075,
-    amber_to_red_duration: Annotated[int, typer.Option(metavar="INT", envvar="WTC_AMBER_2_RED_DURATION")] = 5,  # frames
+    amber_to_red_duration: Annotated[int, typer.Option(metavar="INT", envvar="WCT_AMBER_2_RED_DURATION")] = 5,  # frames
     red_to_red_amber_proportion_max: Annotated[
-        float, typer.Option(metavar="FLOAT", envvar="WTC_RED_2_RED_AMBER_MAX")
+        float, typer.Option(metavar="FLOAT", envvar="WCT_RED_2_RED_AMBER_MAX")
     ] = 0.0075,
     red_amber_to_red_proportion_min: Annotated[
-        float, typer.Option(metavar="FLOAT", envvar="WTC_RED_AMBER_2_RED_MIN")
+        float, typer.Option(metavar="FLOAT", envvar="WCT_RED_AMBER_2_RED_MIN")
     ] = 0.01,
     red_amber_to_green_duration: Annotated[
-        int, typer.Option(metavar="INT", envvar="WTC_RED_AMBER_2_GREEN_DURATION")
+        int, typer.Option(metavar="INT", envvar="WCT_RED_AMBER_2_GREEN_DURATION")
     ] = 5,  # frames
-    motion_mask: Annotated[Path | None, typer.Option(metavar="PATH", envvar="WTC_MOTION_MASK")] = None,
+    motion_mask: Annotated[Path | None, typer.Option(metavar="PATH", envvar="WCT_MOTION_MASK")] = None,
 ) -> None:
     if motion_mask:
         motion_mask = motion_mask.resolve()

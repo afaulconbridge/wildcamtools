@@ -45,7 +45,7 @@ class BackgroundFFMPEGBroadcast(BackgroundProcess):
 
     @override
     def _create_process(self) -> None:
-        ffmpeg_cmd = ffmpeg.input(
+        ffmpeg_cmd = ffmpeg.input(  # type: ignore [attr-defined]
             self.path,
             stream_loop=-1,
             re=True,

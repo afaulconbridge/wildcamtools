@@ -1,7 +1,13 @@
 import abc
 import base64
 from collections.abc import Iterable
+from enum import StrEnum
 from pathlib import Path
+
+
+class Backend(StrEnum):
+    LLAMACPP = "llamacpp"
+    OLLAMA = "ollama"
 
 
 class AbstractAnalyser(abc.ABC):

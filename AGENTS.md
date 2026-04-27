@@ -20,8 +20,7 @@
 
 ## Conventions & Quirks
 
-- **Python Version**: Strict `==3.13.*`. Use appropriate language features.
-
+- **Python Version**: Strict `==3.13.*` and use appropriate language features when applicable
 - **OpenCV**: Uses `opencv-contrib-python-headless` to avoid GUI dependencies; `uv` override prevents `opencv-python` installation.
 - **Dependencies**: Managed via `uv` (checked via `uv.lock`).
     - AI dependencies (openai, ollama) can be used only in `src/wildcamtools/lib/ai`.

@@ -182,9 +182,14 @@ class VideoReader(FrameSource):
 
     def _process_next_buffered_frame(self) -> Frame:
         """Process and return the next buffered frame."""
-        frame = self._decoded_frames.pop(0)
-        if self._should_drop_frame(frame):
-            return self.__next__()
+        while True:
+            frame = self._decoded_frames.pop(0)
+            if not self._should_drop_frame(frame):
+                break
+            if not self._decoded_frames:
+                self._decode_next_packet()
+            if not self._decoded_frames:
+                raise StopIteration
 
         rgb_frame = frame.to_ndarray(format="rgb24")
 

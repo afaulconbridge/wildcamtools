@@ -25,13 +25,14 @@ def _escape_ffconcat_path(path: Path) -> str:
         Escaped path string safe for ffconcat
 
     Raises:
-        ValueError: If path contains unsupported characters (newlines)
+        ValueError: If path contains unsupported characters (newlines, carriage returns)
     """
     path_str = str(path.resolve())
     if "\n" in path_str or "\r" in path_str:
         msg = f"Path contains newline characters which are not supported in ffconcat: {path}"
         raise ValueError(msg)
     escaped = path_str.replace("\\", "\\\\").replace("'", "''")
+    logger.debug("Escaped path for ffconcat: %s -> %s", path_str, escaped)
     return escaped
 
 
@@ -73,6 +74,7 @@ def concat_videos(inputs: Iterable[Path], output: Path) -> None:
                 stream_map: dict[int, av.stream.Stream] = {}
                 for in_stream in container.streams:
                     if in_stream.type != "video":
+                        logger.debug("Skipping non-video stream (type=%s, index=%d)", in_stream.type, in_stream.index)
                         continue
                     stream_map[in_stream.index] = output_container.add_stream_from_template(in_stream)
 

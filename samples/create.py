@@ -68,13 +68,13 @@ def create_video_from_frames(path_wildcard: Path, output: Path | str, fps: int =
                 img = img.convert("RGB")
                 frame_array = np.array(img)
                 current_size = (img.width, img.height)
-            if expected_size is None:
-                expected_size = current_size
-                stream.width = img.width
-                stream.height = img.height
-            elif current_size != expected_size:
-                msg = f"Frame size mismatch: expected {expected_size}, got {current_size} in {frame_file}"
-                raise ValueError(msg)
+                if expected_size is None:
+                    expected_size = current_size
+                    stream.width = img.width
+                    stream.height = img.height
+                elif current_size != expected_size:
+                    msg = f"Frame size mismatch: expected {expected_size}, got {current_size} in {frame_file}"
+                    raise ValueError(msg)
             av_frame = av.VideoFrame.from_ndarray(frame_array, format="rgb24")
             av_frame.pts = stream.frames
             for packet in stream.encode(av_frame):

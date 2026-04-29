@@ -188,6 +188,8 @@ class VideoSegmenter:
 
     def _process_next_buffered_frame(self) -> Frame:
         """Process and return the next buffered frame."""
+        if not self._video_stream:
+            raise VideoNotInContextError()
         frame = self._decoded_frames.pop(0)
         frame_time = (
             frame.time

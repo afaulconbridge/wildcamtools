@@ -39,7 +39,7 @@ class FileFrameSourceCV2(FrameSource):
     cap: cv2.VideoCapture | None = None
 
     def __init__(self, filename: str):
-        super()
+        super().__init__()
         self.filename = filename
 
     def __enter__(self) -> Self:

@@ -109,7 +109,7 @@ class FrameImageWriter(FrameHandler):
         if frame.filter_keep:
             filename = self.output_dir / f"frame_{frame.frame_no:05d}.jpg"
             cv2.imwrite(str(filename), frame.raw)
-            logger.debug(f"Writing {frame.frame_no} -> {filename}")
+            logger.debug("Writing %s -> %s", frame.frame_no, filename)
         return frame
 
 
@@ -159,7 +159,7 @@ class Rescaler(FrameHandler):
             while self.now >= self.target_frametime:
                 self.now -= self.target_frametime
 
-            logger.debug(f"Rescaled {frame.frame_no}")
+            logger.debug("Rescaled %s", frame.frame_no)
             return Frame(
                 raw=frame_rescaled,
                 frame_no=frame.frame_no,
@@ -202,7 +202,7 @@ class FilterSSIM(FrameHandler):
 
         # this calculation is pretty slow
         similarity = float(structural_similarity(frame_previous_resized, frame_resized, data_range=255, channel_axis=2))
-        logger.debug(f"SSIM ({frame.frame_no}) = {similarity:04f}")
+        logger.debug("SSIM (%s) = %04f", frame.frame_no, similarity)
 
         if similarity > self.similarity_minimum:
             # frame is too similar to the previous interesting frame, skip it
@@ -317,7 +317,12 @@ class CropPanHandler(FrameHandler):
         crop = frame.raw[self.window.y1 : self.window.y2, self.window.x1 : self.window.x2]
         # output the cropped version
         logger.debug(
-            f"Crop {frame.frame_no} to ({self.window.x1},{self.window.y1})-({self.window.x2},{self.window.y2})"
+            "Crop %s to (%s,%s)-(%s,%s)",
+            frame.frame_no,
+            self.window.x1,
+            self.window.y1,
+            self.window.x2,
+            self.window.y2,
         )
         return Frame(
             raw=crop,

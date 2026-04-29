@@ -139,6 +139,7 @@ class VideoReader(FrameSource):
         self._stream = None
         self._target_fps = None
         self._last_pts = None
+        self._decoded_frames.clear()
         return False
 
     def _detect_dimensions(self) -> None:
@@ -302,17 +303,18 @@ class VideoWriter:
             raise VideoSizeNotSetError()
 
         logger.debug("Opening video writer for %s (codec=%s, fps=%s)", self.out_filename, self.codec, self.fps)
-        self._container = av.open(str(self.out_filename), mode="w")
-        stream = self._container.add_stream(self.codec, rate=Fraction(str(self.fps)))
-        if not isinstance(stream, av.video.stream.VideoStream):
-            raise VideoWriteError(str(self.out_filename), "opening container", "Expected video stream")
-        self._stream = stream
-        self._stream.width = self._width
-        self._stream.height = self._height
-        self._stream.pix_fmt = self.pix_fmt
-        self._stream.options = {"crf": str(self.crf), "preset": self.preset}
-        self._started = True
-        logger.debug("Video writer opened: %dx%d", self._width, self._height)
+        try:
+            self._container = av.open(str(self.out_filename), mode="w")
+            stream = self._container.add_stream(self.codec, rate=Fraction(str(self.fps)))
+            self._stream = stream  # type: ignore[assignment]
+            self._stream.width = self._width  # type: ignore[union-attr]
+            self._stream.height = self._height  # type: ignore[union-attr]
+            self._stream.pix_fmt = self.pix_fmt  # type: ignore[union-attr]
+            self._stream.options = {"crf": str(self.crf), "preset": self.preset}  # type: ignore[union-attr]
+            self._started = True
+            logger.debug("Video writer opened: %dx%d", self._width, self._height)
+        except Exception as e:
+            raise translate_av_error(e, str(self.out_filename), "opening container") from e
 
     def _write_frame(self, frame: np.ndarray) -> None:
         if not self._container or not self._stream:

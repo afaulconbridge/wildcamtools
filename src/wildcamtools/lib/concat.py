@@ -73,8 +73,10 @@ def concat_videos(inputs: Iterable[Path], output: Path) -> None:
             ):
                 stream_map: dict[int, av.stream.Stream] = {}
                 for in_stream in container.streams:
-                    if in_stream.type != "video":
-                        logger.debug("Skipping non-video stream (type=%s, index=%d)", in_stream.type, in_stream.index)
+                    if in_stream.type not in ("video", "audio"):
+                        logger.debug(
+                            "Skipping non-video/audio stream (type=%s, index=%d)", in_stream.type, in_stream.index
+                        )
                         continue
                     stream_map[in_stream.index] = output_container.add_stream_from_template(in_stream)
 

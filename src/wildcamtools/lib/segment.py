@@ -105,14 +105,17 @@ class VideoSegmenter:
 
     def _close_segment_container(self) -> None:
         if self._segment_container:
+            segment_file = str(self._segment_container.file)
             try:
                 stream = self._segment_container.streams.video[0]
                 for packet in stream.encode(None):
                     self._segment_container.mux(packet)
                 self._segment_container.close()
-            except Exception:
-                logger.exception("Error closing segment container")
-            self._segment_container = None
+            except Exception as e:
+                self._segment_container = None
+                raise translate_av_error(e, segment_file, "closing segment container") from e
+            finally:
+                self._segment_container = None
 
     def _create_segment_container(self) -> None:
         if not self._video_stream:
@@ -131,6 +134,7 @@ class VideoSegmenter:
             output_stream.height = self._video_stream.height
             output_stream.pix_fmt = "yuv420p"
             output_stream.time_base = self._video_stream.time_base
+            self._segment_count += 1
         except Exception as e:
             raise translate_av_error(e, segment_path, "creating segment container") from e
 
@@ -145,15 +149,14 @@ class VideoSegmenter:
         except Exception as e:
             raise translate_av_error(e, str(self._segment_container.file), "muxing frame to segment") from e
 
-    def _maybe_rotate_segment(self, frame_time: float) -> None:
+    def _maybe_rotate_segment(self, frame_time: float | None) -> None:
         if self._segment_container is None:
             self._create_segment_container()
-            self._last_segment_time = frame_time
+            self._last_segment_time = frame_time if frame_time is not None else 0.0
             return
 
-        if frame_time - self._last_segment_time >= self.segment_duration:
+        if frame_time is not None and frame_time - self._last_segment_time >= self.segment_duration:
             self._close_segment_container()
-            self._segment_count += 1
             self._create_segment_container()
             self._last_segment_time = frame_time
 
@@ -195,8 +198,7 @@ class VideoSegmenter:
             if frame.time is not None
             else (frame.pts * self._video_stream.time_base if frame.pts is not None else None)
         )
-        if frame_time is not None:
-            self._maybe_rotate_segment(frame_time)
+        self._maybe_rotate_segment(frame_time)
         self._write_frame_to_segment(frame)
 
         rgb_frame = frame.to_rgb().to_ndarray()

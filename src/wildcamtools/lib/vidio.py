@@ -1,4 +1,5 @@
 import logging
+from fractions import Fraction
 from pathlib import Path
 from typing import Any, Literal, Self
 
@@ -82,6 +83,7 @@ class VideoReader(FrameSource):
     _stream: av.VideoStream | None
     _target_fps: float | None
     _last_pts: float | None
+    _decoded_frames: list[av.VideoFrame]
 
     def __init__(
         self,
@@ -104,6 +106,7 @@ class VideoReader(FrameSource):
         self._stream = None
         self._target_fps = None
         self._last_pts = None
+        self._decoded_frames: list[av.VideoFrame] = []
 
         if hwaccel is not None:
             logger.warning("Hardware acceleration (hwaccel) is not yet implemented")
@@ -152,29 +155,49 @@ class VideoReader(FrameSource):
             raise VideoSizeNotSetError()
 
         try:
-            for packet in self._container.demux(self._stream):
-                for frame in packet.decode():
-                    if self._should_drop_frame(frame):
-                        continue
+            while True:
+                if self._decoded_frames:
+                    return self._process_next_buffered_frame()
 
-                    rgb_frame = frame.to_ndarray(format="rgb24")
+                self._decode_next_packet()
 
-                    if self.scale != 1.0:
-                        rgb_frame = cv2.resize(  # type: ignore[assignment]
-                            rgb_frame,
-                            (self.width, self.height),
-                            interpolation=cv2.INTER_LINEAR,
-                        )
-
-                    result = Frame(raw=rgb_frame, frame_no=self.frame_no)
-                    self.frame_no += 1
-                    return result
-
-            raise StopIteration
+                if not self._decoded_frames:
+                    raise StopIteration
         except (av.error.EOFError, EOFError) as e:
             raise StopIteration from e
         except av.error.FFmpegError as e:
             raise translate_av_error(e, str(self.filename), "read frame") from e
+
+    def _decode_next_packet(self) -> None:
+        """Decode the next packet and buffer all video frames."""
+        if not self._container or not self._stream:
+            raise VideoNotInContextError()
+        for packet in self._container.demux(self._stream):
+            decoded = packet.decode()
+            for frame in decoded:
+                if isinstance(frame, av.VideoFrame):
+                    self._decoded_frames.append(frame)
+            if self._decoded_frames:
+                break
+
+    def _process_next_buffered_frame(self) -> Frame:
+        """Process and return the next buffered frame."""
+        frame = self._decoded_frames.pop(0)
+        if self._should_drop_frame(frame):
+            return self.__next__()
+
+        rgb_frame = frame.to_ndarray(format="rgb24")
+
+        if self.scale != 1.0 and self.width and self.height:
+            rgb_frame = cv2.resize(  # type: ignore[assignment]
+                rgb_frame,
+                (self.width, self.height),
+                interpolation=cv2.INTER_LINEAR,
+            )
+
+        result = Frame(raw=rgb_frame, frame_no=self.frame_no)
+        self.frame_no += 1
+        return result
 
     def _should_drop_frame(self, frame: av.VideoFrame) -> bool:
         if self._target_fps is None:
@@ -239,7 +262,12 @@ class VideoWriter:
         return self
 
     def __exit__(self, exc_type: type | None, exc_val: BaseException | None, exc_tb: Any | None) -> Literal[False]:
-        self.close()
+        try:
+            self.close()
+        except Exception:
+            if exc_type is None:
+                raise
+            logger.exception("Error during cleanup while handling another exception")
         return False
 
     def write(self, frame: np.ndarray) -> None:
@@ -270,7 +298,7 @@ class VideoWriter:
 
         logger.debug("Opening video writer for %s (codec=%s, fps=%s)", self.out_filename, self.codec, self.fps)
         self._container = av.open(str(self.out_filename), mode="w")
-        stream = self._container.add_stream(self.codec, rate=int(self.fps))
+        stream = self._container.add_stream(self.codec, rate=Fraction(str(self.fps)))
         if not isinstance(stream, av.video.stream.VideoStream):
             raise VideoWriteError(str(self.out_filename), "opening container", "Expected video stream")
         self._stream = stream
@@ -309,7 +337,7 @@ class VideoWriter:
 
             self._container.close()
         except Exception as e:
-            logger.warning("Error closing video writer: %s", e)
+            raise translate_av_error(e, str(self.out_filename), "closing writer") from e
         finally:
             self._container = None
             self._stream = None

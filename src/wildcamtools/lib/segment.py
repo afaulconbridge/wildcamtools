@@ -52,6 +52,7 @@ class VideoSegmenter:
     _segment_count: int
     _last_segment_time: float
     _segment_file: Path | None
+    _decoded_frames: list[av.VideoFrame]
 
     def __init__(
         self,
@@ -74,6 +75,7 @@ class VideoSegmenter:
         self._segment_count = 0
         self._last_segment_time = 0.0
         self._segment_file = None
+        self._decoded_frames: list[av.VideoFrame] = []
 
     def __iter__(self) -> Self:
         return self
@@ -160,29 +162,46 @@ class VideoSegmenter:
         if not self._input_container or not self._video_stream:
             raise VideoNotInContextError()
 
+        while True:
+            if self._decoded_frames:
+                return self._process_next_buffered_frame()
+
+            self._decode_next_packet()
+
+            if not self._decoded_frames:
+                raise StopIteration
+
+    def _decode_next_packet(self) -> None:
+        """Decode the next packet and buffer all video frames."""
+        if not self._input_container or not self._video_stream:
+            raise VideoNotInContextError()
         for packet in self._input_container.demux(self._video_stream):
             try:
-                for frame in packet.decode():
-                    if not isinstance(frame, av.VideoFrame):
-                        continue
-
-                    frame_time = (
-                        frame.time
-                        if frame.time is not None
-                        else (frame.pts * self._video_stream.time_base if frame.pts is not None else None)
-                    )
-                    if frame_time is not None:
-                        self._maybe_rotate_segment(frame_time)
-                    self._write_frame_to_segment(frame)
-
-                    rgb_frame = frame.to_rgb().to_ndarray()
-                    result = Frame(raw=rgb_frame, frame_no=self._frame_no)
-                    self._frame_no += 1
-                    return result
+                decoded = packet.decode()
+                for frame in decoded:
+                    if isinstance(frame, av.VideoFrame):
+                        self._decoded_frames.append(frame)
             except Exception as e:
                 raise translate_av_error(e, str(self.input_), "reading frame") from e
+            if self._decoded_frames:
+                break
 
-        raise StopIteration
+    def _process_next_buffered_frame(self) -> Frame:
+        """Process and return the next buffered frame."""
+        frame = self._decoded_frames.pop(0)
+        frame_time = (
+            frame.time
+            if frame.time is not None
+            else (frame.pts * self._video_stream.time_base if frame.pts is not None else None)
+        )
+        if frame_time is not None:
+            self._maybe_rotate_segment(frame_time)
+        self._write_frame_to_segment(frame)
+
+        rgb_frame = frame.to_rgb().to_ndarray()
+        result = Frame(raw=rgb_frame, frame_no=self._frame_no)
+        self._frame_no += 1
+        return result
 
     @property
     def segment_count(self) -> int:
@@ -205,7 +224,7 @@ def create_segment_process(*, input_: str | Path, output: str | Path, duration: 
         "-f",
         "segment",
         "-segment_time",
-        str(int(duration)),
+        str(duration),
         "-segment_format",
         "mp4",
         "-segment_format_options",

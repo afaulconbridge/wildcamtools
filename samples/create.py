@@ -61,7 +61,7 @@ def create_video_from_frames(path_wildcard: Path, output: Path | str, fps: int =
         stream.pix_fmt = "yuv420p"
         stream.options = {"crf": "23", "preset": "medium"}
 
-        frame_files = sorted(path_wildcard.parent.glob(path_wildcard.name.replace("*", "*")))
+        frame_files = sorted(path_wildcard.parent.glob(path_wildcard.name))
         expected_size: tuple[int, int] | None = None
         for frame_file in frame_files:
             with Image.open(frame_file) as img:
@@ -79,6 +79,10 @@ def create_video_from_frames(path_wildcard: Path, output: Path | str, fps: int =
             av_frame.pts = stream.frames
             for packet in stream.encode(av_frame):
                 container.mux(packet)
+
+        if expected_size is None:
+            msg = f"No frames found matching pattern {path_wildcard}"
+            raise ValueError(msg)
 
         for packet in stream.encode(None):
             container.mux(packet)

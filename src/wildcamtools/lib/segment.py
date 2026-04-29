@@ -84,6 +84,9 @@ class VideoSegmenter:
         self.segment_dir.mkdir(parents=True, exist_ok=True)
         try:
             self._input_container = av.open(str(self.input_), mode="r")
+            if not self._input_container.streams.video:
+                msg = f"No video streams found in {self.input_}"
+                raise ValueError(msg)  # noqa: TRY301
             self._video_stream = self._input_container.streams.video[0]
         except Exception as e:
             raise translate_av_error(e, str(self.input_), "opening input container") from e
@@ -119,7 +122,7 @@ class VideoSegmenter:
         segment_path = datetime.now().strftime(segment_path)
 
         try:
-            self._segment_container = av.open(segment_path, mode="w")
+            self._segment_container = av.open(segment_path, mode="w", options=self.format_options)
             output_stream = self._segment_container.add_stream(
                 codec_name="libx264",
                 rate=self._video_stream.average_rate or self._video_stream.base_rate,
@@ -128,10 +131,6 @@ class VideoSegmenter:
             output_stream.height = self._video_stream.height
             output_stream.pix_fmt = "yuv420p"
             output_stream.time_base = self._video_stream.time_base
-
-            if self.format_options:
-                for key, value in self.format_options.items():
-                    self._segment_container.options[key] = value
         except Exception as e:
             raise translate_av_error(e, segment_path, "creating segment container") from e
 
@@ -215,8 +214,6 @@ class VideoSegmenter:
 
 
 def create_segment_process(*, input_: str | Path, output: str | Path, duration: float) -> Popen:
-    import subprocess
-
     cmd = [
         "ffmpeg",
         "-i",
@@ -237,4 +234,4 @@ def create_segment_process(*, input_: str | Path, output: str | Path, duration: 
         "1",
         str(Path(output) / "seg_%Y_%m_%d__%H_%M_%S.mp4"),
     ]
-    return subprocess.Popen(cmd)  # noqa: S603
+    return Popen(cmd)  # noqa: S603

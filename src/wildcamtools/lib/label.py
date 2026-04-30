@@ -19,8 +19,10 @@ def load_labels(output: Path) -> dict[str, str]:
                     data = json.loads(line)
                     if "video" in data and "label" in data:
                         labels[data["video"]] = data["label"]
-        except OSError, json.JSONDecodeError:
+        except OSError:
             logger.exception("Failed to load existing labels")
+        except json.JSONDecodeError:
+            logger.exception("Failed to decode existing labels")
     return labels
 
 

@@ -13,7 +13,7 @@ from pydantic import BaseModel
 from wildcamtools.lib import Frame, FrameHandler
 from wildcamtools.lib.motion import MogMotion
 from wildcamtools.lib.stats import VideoStats, get_video_stats
-from wildcamtools.lib.vidio import FrameSourceFFMPEG
+from wildcamtools.lib.vidio import VideoReader
 
 logger = logging.getLogger(__name__)
 
@@ -199,7 +199,7 @@ def enqueue_motion_windows(
     def _find_motion_times(source: str, stats: VideoStats, watcher: Watcher) -> Generator[MotionWindow]:
         start_frame: int | None = None
         start_time: datetime | None = None
-        with FrameSourceFFMPEG(
+        with VideoReader(
             source,
             width=stats.x,
             height=stats.y,

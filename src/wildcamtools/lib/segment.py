@@ -1,10 +1,198 @@
+import logging
+from datetime import datetime
 from pathlib import Path
 from subprocess import Popen
+from typing import Any, Literal, Self
 
+import av
+import av.container
 import ffmpeg
 import ffmpeg.formats.muxers
 
-from wildcamtools.lib.errors import ProcessTypeMismatchError
+from wildcamtools.lib import Frame
+from wildcamtools.lib.errors.core import ProcessTypeMismatchError, VideoNotInContextError
+
+logger = logging.getLogger(__name__)
+
+
+class VideoSegmenter:
+    """
+    FrameSource that segments video input while emitting frames.
+
+    Uses two separate PyAV containers:
+    - Container 1: Segment muxer that writes segment files to disk
+    - Container 2: Frame decoder that emits Frame objects
+
+    This dual-container architecture allows decoding once while muxing
+    to both outputs simultaneously.
+
+    Parameters:
+        input_: Path to input video file or RTSP URL
+        segment_dir: Directory to write segment files
+        segment_duration: Duration of each segment in seconds
+        segment_pattern: Filename pattern for segments (default: seg_%Y_%m_%d__%H_%M_%S.mp4)
+        format_options: Optional dict of format options for segment muxer
+
+    TODO: Optimize to use single container with custom output callback
+          to avoid maintaining two separate container instances.
+    """
+
+    input_: str | Path
+    segment_dir: Path
+    segment_duration: float
+    segment_pattern: str
+    format_options: dict[str, str] | None
+
+    _input_container: av.container.InputContainer | None
+    _segment_container: av.container.OutputContainer | None
+    _video_stream: av.VideoStream | None
+    _frame_no: int
+    _segment_count: int
+    _last_segment_time: float
+    _segment_file: Path | None
+    _decoded_frames: list[av.VideoFrame]
+
+    def __init__(
+        self,
+        input_: str | Path,
+        segment_dir: str | Path,
+        segment_duration: float,
+        segment_pattern: str = "seg_%Y_%m_%d__%H_%M_%S.mp4",
+        format_options: dict[str, str] | None = None,
+    ) -> None:
+        self.input_ = input_
+        self.segment_dir = Path(segment_dir)
+        self.segment_duration = segment_duration
+        self.segment_pattern = segment_pattern
+        self.format_options = format_options
+
+        self._input_container = None
+        self._segment_container = None
+        self._video_stream = None
+        self._frame_no = 0
+        self._segment_count = 0
+        self._last_segment_time = 0.0
+        self._segment_file = None
+        self._decoded_frames: list[av.VideoFrame] = []
+
+    def __iter__(self) -> Self:
+        return self
+
+    def __enter__(self) -> Self:
+        self.segment_dir.mkdir(parents=True, exist_ok=True)
+        self._input_container = av.open(str(self.input_), mode="r")
+        if not self._input_container.streams.video:
+            msg = f"No video streams found in {self.input_}"
+            raise ValueError(msg)
+        self._video_stream = self._input_container.streams.video[0]
+        return self
+
+    def __exit__(self, exc_type: type | None, exc_val: BaseException | None, exc_tb: Any | None) -> Literal[False]:
+        self._close_segment_container()
+        if self._input_container:
+            try:
+                self._input_container.close()
+            except Exception:
+                logger.exception("Error closing input container")
+            self._input_container = None
+        self._video_stream = None
+        return False
+
+    def _close_segment_container(self) -> None:
+        if self._segment_container:
+            stream = self._segment_container.streams.video[0]
+            for packet in stream.encode(None):
+                self._segment_container.mux(packet)
+            self._segment_container.close()
+            self._segment_container = None
+
+    def _create_segment_container(self) -> None:
+        if not self._video_stream:
+            raise VideoNotInContextError()
+
+        segment_path = str(self.segment_dir / self.segment_pattern)
+        segment_path = datetime.now().strftime(segment_path)
+
+        self._segment_container = av.open(segment_path, mode="w", options=self.format_options)
+        output_stream = self._segment_container.add_stream(
+            codec_name="libx264",
+            rate=self._video_stream.average_rate or self._video_stream.base_rate,
+        )
+        output_stream.width = self._video_stream.width
+        output_stream.height = self._video_stream.height
+        output_stream.pix_fmt = "yuv420p"
+        output_stream.time_base = self._video_stream.time_base
+        self._segment_count += 1
+
+    def _write_frame_to_segment(self, frame: av.VideoFrame) -> None:
+        if not self._segment_container or not self._video_stream:
+            return
+
+        stream = self._segment_container.streams.video[0]
+        for packet in stream.encode(frame):
+            self._segment_container.mux(packet)
+
+    def _maybe_rotate_segment(self, frame_time: float | None) -> None:
+        if self._segment_container is None:
+            self._create_segment_container()
+            self._last_segment_time = frame_time if frame_time is not None else 0.0
+            return
+
+        if frame_time is not None and frame_time - self._last_segment_time >= self.segment_duration:
+            self._close_segment_container()
+            self._create_segment_container()
+            self._last_segment_time = frame_time
+
+    def __next__(self) -> Frame:
+        if not self._input_container or not self._video_stream:
+            raise VideoNotInContextError()
+
+        while True:
+            if self._decoded_frames:
+                return self._process_next_buffered_frame()
+
+            self._decode_next_packet()
+
+            if not self._decoded_frames:
+                raise StopIteration
+
+    def _decode_next_packet(self) -> None:
+        """Decode the next packet and buffer all video frames."""
+        if not self._input_container or not self._video_stream:
+            raise VideoNotInContextError()
+        for packet in self._input_container.demux(self._video_stream):
+            decoded = packet.decode()
+            for frame in decoded:
+                if isinstance(frame, av.VideoFrame):
+                    self._decoded_frames.append(frame)
+            if self._decoded_frames:
+                break
+
+    def _process_next_buffered_frame(self) -> Frame:
+        """Process and return the next buffered frame."""
+        if not self._video_stream:
+            raise VideoNotInContextError()
+        frame = self._decoded_frames.pop(0)
+        frame_time = (
+            frame.time
+            if frame.time is not None
+            else (frame.pts * self._video_stream.time_base if frame.pts is not None else None)
+        )
+        self._maybe_rotate_segment(frame_time)
+        self._write_frame_to_segment(frame)
+
+        rgb_frame = frame.to_rgb().to_ndarray()
+        result = Frame(raw=rgb_frame, frame_no=self._frame_no)
+        self._frame_no += 1
+        return result
+
+    @property
+    def segment_count(self) -> int:
+        return self._segment_count
+
+    @property
+    def frame_count(self) -> int:
+        return self._frame_no
 
 
 def create_segment_process(*, input_: str | Path, output: str | Path, duration: float) -> Popen:

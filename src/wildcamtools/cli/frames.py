@@ -10,7 +10,7 @@ from wildcamtools.lib.frames import CropPanHandler, FilterSSIM, FrameImageWriter
 from wildcamtools.lib.motion import FlowMotion
 from wildcamtools.lib.stats import get_video_stats
 from wildcamtools.lib.timing import Timer
-from wildcamtools.lib.vidio import FrameSourceFFMPEG
+from wildcamtools.lib.vidio import VideoReader
 
 app = typer.Typer()
 logger = logging.getLogger(__name__)
@@ -43,7 +43,7 @@ def ssim(
 
     timer = Timer()
 
-    with FrameSourceFFMPEG(input_) as video_input:
+    with VideoReader(input_) as video_input:
         frame: Frame
         for frame in video_input:
             with timer:
@@ -101,7 +101,7 @@ def flow(
     )
     handlers.append(FrameImageWriter(output))
 
-    with FrameSourceFFMPEG(input_) as video_input:
+    with VideoReader(input_) as video_input:
         for frame in video_input:
             with timer:
                 for handler in handlers:

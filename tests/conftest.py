@@ -7,7 +7,7 @@ import pytest
 
 from wildcamtools.lib import Frame
 from wildcamtools.lib.rtsp import BackgroundFFMPEGBroadcast, BackgroundMediaMTX
-from wildcamtools.lib.vidio import FrameSourceFFMPEG
+from wildcamtools.lib.vidio import VideoReader
 
 
 @pytest.fixture(name="logging", scope="session", autouse=True)
@@ -35,7 +35,7 @@ def fixture_video_path(data_directory: Path) -> Path:
 @pytest.fixture(name="video_frame_generator")
 def fixture_video_frame_generator(video_path: Path) -> Generator[Generator[Frame]]:
     def internal_generator() -> Generator[Frame]:
-        with FrameSourceFFMPEG(video_path) as video_source:
+        with VideoReader(video_path) as video_source:
             yield from video_source
 
     yield internal_generator

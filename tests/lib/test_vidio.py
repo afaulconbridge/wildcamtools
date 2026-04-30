@@ -1,15 +1,15 @@
-from collections.abc import Generator
+from collections.abc import Callable, Generator
 from pathlib import Path
 
 import numpy as np
 
 from wildcamtools.lib import Frame
-from wildcamtools.lib.vidio import FrameSourceFFMPEG, FrameWriterFFMPEG
+from wildcamtools.lib.vidio import VideoReader, VideoWriter
 
 
-def test_frame_source_ffmpeg(video_path: Path) -> None:
-    with FrameSourceFFMPEG(video_path) as frame_source:
-        for frame in frame_source:
+def test_video_reader(video_path: Path) -> None:
+    with VideoReader(video_path) as video_reader:
+        for frame in video_reader:
             frame_no = frame.frame_no
             array = frame.raw
             assert frame_no >= 0
@@ -19,10 +19,10 @@ def test_frame_source_ffmpeg(video_path: Path) -> None:
             assert array.shape == (2160, 3840, 3)  # 4k colour
 
 
-def test_frame_source_ffmpeg_rtsp(rtsp_server: str) -> None:
+def test_video_reader_rtsp(rtsp_server: str) -> None:
     frame_no = 0
-    with FrameSourceFFMPEG(rtsp_server, 3840, 2160) as frame_source:
-        for frame in frame_source:
+    with VideoReader(rtsp_server, 3840, 2160) as video_reader:
+        for frame in video_reader:
             if frame.frame_no > 150:
                 break
             frame_no = frame.frame_no
@@ -36,14 +36,13 @@ def test_frame_source_ffmpeg_rtsp(rtsp_server: str) -> None:
         assert frame_no < 181  # expect 5 seconds at 30 fps
 
 
-def test_frame_writer_ffmpeg(video_frame_generator: Generator[Frame], tmp_path: Path) -> None:
-    with FrameWriterFFMPEG(tmp_path / "out.mp4", fps=30.0) as writer:
+def test_video_writer(video_frame_generator: Callable[[], Generator[Frame]], tmp_path: Path) -> None:
+    with VideoWriter(tmp_path / "out.mp4", fps=30.0) as writer:
         for frame in video_frame_generator():
             writer.write(frame.raw)
 
-    # now read what was written back to check its valid
-    with FrameSourceFFMPEG(tmp_path / "out.mp4", 3840, 2160) as frame_source:
-        for frame in frame_source:
+    with VideoReader(tmp_path / "out.mp4", 3840, 2160) as video_reader:
+        for frame in video_reader:
             frame_no = frame.frame_no
             array = frame.raw
             assert frame_no >= 0

@@ -14,7 +14,7 @@ from typing import Annotated
 import typer
 from typer_config import use_yaml_config
 
-from wildcamtools.lib.concat import concat_ffmpeg
+from wildcamtools.lib.concat import concat_videos
 from wildcamtools.lib.errors import (
     CannotCombineOpenWindowError,
     MotionMaskNotExistsError,
@@ -175,7 +175,7 @@ class WatcherManager:
             sleep(self.segment_duration)
         output_file = self.output_dir / start_time.strftime("out_%Y_%m_%d__%H_%M_%S.mp4")
         logger.info("Joining %s segments into %s", len(to_merge), output_file)
-        concat_ffmpeg(to_merge, output_file)
+        concat_videos(to_merge, output_file)
 
         # also output a JSON summary
         with open(self.output_dir / start_time.strftime("out_%Y_%m_%d__%H_%M_%S.json"), "w") as json_out:
@@ -277,11 +277,11 @@ def watch(
 
     segments = segments.resolve()
     if not segments.is_dir() or not segments.exists():
-        raise typer.BadParameter("segments must be an existing directory")  # noqa: TRY003
+        raise typer.BadParameter("segments must be an existing directory")
 
     output = output.resolve()
     if not output.is_dir() or not output.exists():
-        raise typer.BadParameter("output must be an existing directory")  # noqa: TRY003
+        raise typer.BadParameter("output must be an existing directory")
     transition_metrics = WatcherTransitionMetrics(
         preparing_duration=history,
         green_to_amber_motion_min=green_to_amber_motion_min,

@@ -2,7 +2,8 @@ import tempfile
 from math import pi, sqrt
 from pathlib import Path
 
-import ffmpeg
+import av
+import numpy as np
 from PIL import Image, ImageDraw
 
 
@@ -53,22 +54,37 @@ def create_circle_frames(
 
 
 def create_video_from_frames(path_wildcard: Path, output: Path | str, fps: int = 30) -> None:
-    ffmpeg.input(
-        path_wildcard,
-        demuxer_options=ffmpeg.formats.demuxers.image2(
-            pattern_type="glob",
-            framerate=str(fps),
-        ),
-    ).output(
-        codec="libx264",
-        encoder_options=ffmpeg.codecs.encoders.libx264(),
-        filename=output,
-    ).global_args(
-        hide_banner=True,
-        loglevel="error",
-    ).overwrite_output().run(
-        quiet=True,
-    )
+    output_path = Path(output)
+    with av.open(str(output_path), mode="w") as container:
+        stream = container.add_stream("libx264", rate=fps)
+        stream.pix_fmt = "yuv420p"
+        stream.options = {"crf": "23", "preset": "medium"}
+
+        frame_files = sorted(path_wildcard.parent.glob(path_wildcard.name))
+        expected_size: tuple[int, int] | None = None
+        for frame_file in frame_files:
+            with Image.open(frame_file) as img:
+                img = img.convert("RGB")
+                frame_array = np.array(img)
+                current_size = (img.width, img.height)
+                if expected_size is None:
+                    expected_size = current_size
+                    stream.width = img.width
+                    stream.height = img.height
+                elif current_size != expected_size:
+                    msg = f"Frame size mismatch: expected {expected_size}, got {current_size} in {frame_file}"
+                    raise ValueError(msg)
+            av_frame = av.VideoFrame.from_ndarray(frame_array, format="rgb24")
+            av_frame.pts = stream.frames
+            for packet in stream.encode(av_frame):
+                container.mux(packet)
+
+        if expected_size is None:
+            msg = f"No frames found matching pattern {path_wildcard}"
+            raise ValueError(msg)
+
+        for packet in stream.encode(None):
+            container.mux(packet)
 
 
 if __name__ == "__main__":

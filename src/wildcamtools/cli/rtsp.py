@@ -3,14 +3,14 @@ from time import sleep
 
 import typer
 
-from wildcamtools.lib.rtsp import BackgroundFFMPEGBroadcast, BackgroundMediaMTX
+from wildcamtools.lib.rtsp import BackgroundMediaMTX, RTSPBroadcaster
 
 app = typer.Typer()
 
 
 @app.command()
 def serve(path: Path) -> None:
-    with BackgroundMediaMTX(), BackgroundFFMPEGBroadcast(path):
+    with BackgroundMediaMTX(), RTSPBroadcaster(path, "rtsp://localhost:8554/stream"):
         typer.secho("RTSP stream ready at rtsp://localhost:8554/stream")
         try:
             while True:

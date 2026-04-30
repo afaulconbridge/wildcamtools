@@ -2,13 +2,6 @@ class FrameError(Exception):
     """Exception raised when related to video frames."""
 
 
-class CannotSeekVideoError(FrameError):
-    """Exception raised when trying to seek in a video  that does not suppport seeking."""
-
-    def __init__(self) -> None:
-        super().__init__("Unable to seek video file")
-
-
 class RTSPError(Exception):
     """Exception raised when related to RTSP streaming."""
 
@@ -74,13 +67,6 @@ class VideoError(Exception):
     """Exception raised when video operations fail."""
 
 
-class VideoProbeError(VideoError):
-    """Exception raised when video probe fails to find a stream."""
-
-    def __init__(self) -> None:
-        super().__init__("No video stream found in probe")
-
-
 class VideoNotInContextError(VideoError):
     """Exception raised when video source is used outside context manager."""
 
@@ -111,13 +97,6 @@ class InvalidMaxMagnitudeError(MotionFlowError):
 
     def __init__(self, max_magnitude: float) -> None:
         super().__init__(f"Max magnitude must be positive, got {max_magnitude}")
-
-
-class FFmpegPipeClosedError(VideoError):
-    """Exception raised when FFmpeg process pipe is closed."""
-
-    def __init__(self) -> None:
-        super().__init__("FFmpeg process pipe is closed")
 
 
 class BoundingBoxWidthError(ValueError):

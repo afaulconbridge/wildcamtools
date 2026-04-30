@@ -57,6 +57,30 @@ wheels = [
 ]
 
 [[package]]
+name = "av"
+version = "17.0.1"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/4e/f0/8c8dca97ae0cf00e8e2a53bb5cb9aca5fd484f585ef3e9b412200aff3ebd/av-17.0.1.tar.gz", hash = "sha256:fbcbd4aa43bca6a8691816283112d1659a27f407bbeb66d1397023691339f5d4", size = 4411938, upload-time = "2026-04-18T17:12:34.29Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/4c/82/e7007dcef7bd2d2c377e2e85977701384f42d19fc808c2ccb3a99eaf58f2/av-17.0.1-cp311-abi3-macosx_11_0_x86_64.whl", hash = "sha256:987f4f46ceae4da6c614dcbd2b8149be9dbf680c3bb7a6841c58af9cff4d9230", size = 23238802, upload-time = "2026-04-18T17:11:51.166Z" },
+    { url = "https://files.pythonhosted.org/packages/6b/aa/858b09a08ea6f83f91be44b5a5adad13ae8d9ac8b80fda27e73c24bfb160/av-17.0.1-cp311-abi3-macosx_14_0_arm64.whl", hash = "sha256:d97f54e55b18a74912f479c1978aadd1341d38d892dee95bb5c2f2dccfa72f32", size = 18709338, upload-time = "2026-04-18T17:11:53.286Z" },
+    { url = "https://files.pythonhosted.org/packages/a8/8b/8de3fd21c4b0b74d44337421abeab0e71462337fb6a28fff888e0c356cbd/av-17.0.1-cp311-abi3-manylinux_2_28_aarch64.whl", hash = "sha256:e6eee84afa48d0e9321047cd3e4facd44b401493f6bdc753e2e1d1e7c9e6d13e", size = 34007351, upload-time = "2026-04-18T17:11:56.116Z" },
+    { url = "https://files.pythonhosted.org/packages/02/28/167b291356c2cc315a2d62a95b0ceace72b5b0bf547de30b89313110f032/av-17.0.1-cp311-abi3-manylinux_2_28_x86_64.whl", hash = "sha256:c58c71bffd9383908c85695ac61d3184c668accb04a5bd1b262e0fb8d09f60a5", size = 36345295, upload-time = "2026-04-18T17:11:59.125Z" },
+    { url = "https://files.pythonhosted.org/packages/04/fa/aae56f2ff2c204c408641e1120f5ca5ce9c3390cf5362245c6f1158704b5/av-17.0.1-cp311-abi3-musllinux_1_2_aarch64.whl", hash = "sha256:42d6745d30a410ec9b22aef79a52a7ab5a001eb8f5adfd952946606a30983318", size = 35183754, upload-time = "2026-04-18T17:12:01.697Z" },
+    { url = "https://files.pythonhosted.org/packages/ba/bd/776046f27093aef80155a204ca7d82a887ae4ee72ba4ef8411b46ea7898c/av-17.0.1-cp311-abi3-musllinux_1_2_x86_64.whl", hash = "sha256:3ed6bcd7021fe55832f95b8ef78dd01a4cb21faf3cd71f1e1bf4f20bf100b278", size = 37430809, upload-time = "2026-04-18T17:12:04.231Z" },
+    { url = "https://files.pythonhosted.org/packages/d9/d5/3261bd2c6b7f6c0aa8379fc970d1ecf496330990b992ad28607785074268/av-17.0.1-cp311-abi3-win_amd64.whl", hash = "sha256:9af524e8632a54032e361d6b88895bd3e7c6212ca560de60f5ccc525323c764c", size = 28889649, upload-time = "2026-04-18T17:12:07.04Z" },
+    { url = "https://files.pythonhosted.org/packages/98/39/381104e427a0c7231d2ec0d25d538d58fc20fc0458846b95860d3ef8073b/av-17.0.1-cp311-abi3-win_arm64.whl", hash = "sha256:50e58a473d65ea29b645e45c9fd8518a6783737135683ecc40571a91592bdfe4", size = 21918412, upload-time = "2026-04-18T17:12:09.312Z" },
+    { url = "https://files.pythonhosted.org/packages/c7/8c/bb1498f031abb6157b30b7fc2379359176953821b6ba59fbd89dbb56f61f/av-17.0.1-cp314-cp314t-macosx_11_0_x86_64.whl", hash = "sha256:1d33871742d1e71562db3c8e752cacc5a62766d7efc3ae408bff1c3e26ebb46e", size = 23484157, upload-time = "2026-04-18T17:12:11.67Z" },
+    { url = "https://files.pythonhosted.org/packages/1a/58/dedaef187b797243cd5762722e376c69c5ad95ab23db44127f09afc2cd66/av-17.0.1-cp314-cp314t-macosx_14_0_arm64.whl", hash = "sha256:1229e879f4b6431bc00f69d7f8891fe9a683b0a6e0e009e6c98eb7e449f0383d", size = 18920872, upload-time = "2026-04-18T17:12:14.826Z" },
+    { url = "https://files.pythonhosted.org/packages/9b/26/5c550231651d6285e6a5c4f6f4a0e67459bfe2b622a7c9352be8cca8c819/av-17.0.1-cp314-cp314t-manylinux_2_28_aarch64.whl", hash = "sha256:4744837f4116964280bcc72285e3cdd51361e98a696205aadd924203440ef511", size = 37471077, upload-time = "2026-04-18T17:12:17.349Z" },
+    { url = "https://files.pythonhosted.org/packages/59/e4/9807b89a9d775c6f015677996c48bce48aaff70b5d95885adf39e59832a2/av-17.0.1-cp314-cp314t-manylinux_2_28_x86_64.whl", hash = "sha256:3d0a7d45d9599bf9df9f8249827113d4f36df1cd6b5356227b997f0552dbc98e", size = 39566981, upload-time = "2026-04-18T17:12:19.942Z" },
+    { url = "https://files.pythonhosted.org/packages/5c/72/a22a657abc3de652f5b4f46cbbebdf7cba629752112791b81f05d340991d/av-17.0.1-cp314-cp314t-musllinux_1_2_aarch64.whl", hash = "sha256:9acd0b6a6e02af2b37f63d97a03ee2c47936d58e82425c3cd075a95245937c59", size = 38397369, upload-time = "2026-04-18T17:12:22.909Z" },
+    { url = "https://files.pythonhosted.org/packages/ae/b2/f4e83e41c1e3c186f34b7df506779d0cd7e40499e2e19519c7ece148cd20/av-17.0.1-cp314-cp314t-musllinux_1_2_x86_64.whl", hash = "sha256:3d3a36204cb1f1e7691e6446afa8d6b7097b09946dae732c71c5d05ce09e506e", size = 40582445, upload-time = "2026-04-18T17:12:26.285Z" },
+    { url = "https://files.pythonhosted.org/packages/c8/59/8676188b72eed09d48ce6cfaf0f22b0bb9f3cfd74d388ee2b7fdf960536d/av-17.0.1-cp314-cp314t-win_amd64.whl", hash = "sha256:b87b98afe971cde123953073bc9c95ab0b7efd2ecc082dd2dbd11f9d9abf190e", size = 29217136, upload-time = "2026-04-18T17:12:29.189Z" },
+    { url = "https://files.pythonhosted.org/packages/5f/af/0a6e1d2a845988039f6c197fa7269b5e9abbe17354fb41cc9d75bb260fcb/av-17.0.1-cp314-cp314t-win_arm64.whl", hash = "sha256:a87a42c36e29f75e7dff7281944f2a6876a2c8875e225ccbf6c1ae62748b4caa", size = 22072676, upload-time = "2026-04-18T17:12:31.836Z" },
+]
+
+[[package]]
 name = "blinker"
 version = "1.9.0"
 source = { registry = "https://pypi.org/simple" }
@@ -218,11 +242,11 @@ wheels = [
 
 [[package]]
 name = "ffmpeg-core"
-version = "4.0.2"
+version = "4.1"
 source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/8e/cf/d8cdfb003c469e6832b7c330c2061c3787bffd3142aa9382d0df38d6c389/ffmpeg_core-4.0.2.tar.gz", hash = "sha256:bfa6468b1394bd511175e25850f7418441572a9f4d70fbd75cff383a6cc6db4e", size = 43519, upload-time = "2026-04-09T13:58:46.726Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/3b/18/7a9c86748be940a31fbfabb9abfafba2fa646d30251599f09829a295de92/ffmpeg_core-4.1.tar.gz", hash = "sha256:732c36a900dc9d025ee756adee6bddbd350336456d9fde60fce75a90b7bcc7fc", size = 43532, upload-time = "2026-04-18T11:11:38.055Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/ea/19/be277b9be36aff56c3c9017cf161bf7016dc7b60be7edad3546d19acbd06/ffmpeg_core-4.0.2-py3-none-any.whl", hash = "sha256:08a362715786cabc36c2d452554b4c248e5df4f5c77533017eafb852c33cea30", size = 53057, upload-time = "2026-04-09T13:58:45.145Z" },
+    { url = "https://files.pythonhosted.org/packages/a8/c3/127d79ddeb402fe17216555f04125132781d19949c97e455676665dabe8e/ffmpeg_core-4.1-py3-none-any.whl", hash = "sha256:68f59c1a81268b8af14c62e9dfbc69cc021792d3a8b9ebf83609715b06f83766", size = 53035, upload-time = "2026-04-18T11:11:36.817Z" },
 ]
 
 [[package]]
@@ -1310,26 +1334,26 @@ wheels = [
 
 [[package]]
 name = "typed-ffmpeg"
-version = "4.0.2"
+version = "4.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "typed-ffmpeg-v8" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/8a/66/08147a9c376832bf71031ae0949b1d68ff6f5295d36c64475c7ba485f90b/typed_ffmpeg-4.0.2.tar.gz", hash = "sha256:15406a70d4b8aef29932f84ba86b211443cdb41336f7d990c42c57e55f5ed935", size = 2056, upload-time = "2026-04-09T14:00:40.073Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/4f/a7/4171baf4cfcb3f259d8f6c43a3fd9e1bfd17e8f09339b3c972f74320c815/typed_ffmpeg-4.1.tar.gz", hash = "sha256:680b388b00a7f8aaa0731e6d284cdd8bedba19c17fc50f23b573fb1f037d990e", size = 2057, upload-time = "2026-04-18T11:13:31.934Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/5b/fb/d563ab870cc228b5ba2a653015a6840d1a81657ba6093410f09bbede1996/typed_ffmpeg-4.0.2-py3-none-any.whl", hash = "sha256:6a8b6fc670ffb5a59068a10a159c373da79224409c3a0ef07b13b57771f55498", size = 1853, upload-time = "2026-04-09T14:00:39.128Z" },
+    { url = "https://files.pythonhosted.org/packages/9b/c4/feea760dde1855b008b2f8a8c2052cd10431d6310f4ec9a351d02c43a55b/typed_ffmpeg-4.1-py3-none-any.whl", hash = "sha256:1e066efa262f19b9254d315149d2e03511ffc96689d7b24788ede97db7dd7e2b", size = 1833, upload-time = "2026-04-18T11:13:31.122Z" },
 ]
 
 [[package]]
 name = "typed-ffmpeg-v8"
-version = "4.0.2"
+version = "4.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "ffmpeg-core" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/f0/18/57fc4fec489a0088954e09dbae2cc53b70d3993b718543a19d420bc29a3d/typed_ffmpeg_v8-4.0.2.tar.gz", hash = "sha256:e0fb179a68a49e16efc345f42a2e3a3e327f6242e6ef0b4d47837d8cdad4f4a9", size = 346383, upload-time = "2026-04-09T14:00:27.479Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/f7/3a/3a41768c9e4d5871d10975b54cf0e2b30a3011e55d046b39a210c1591653/typed_ffmpeg_v8-4.1.tar.gz", hash = "sha256:c006248ec7b2a352669c9d17a2375ea6b3e92256dc15c0fc2e8dba2e3733e8b5", size = 345975, upload-time = "2026-04-18T11:13:19.59Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/12/eb/659dd05564a8e264e82bc9e0a1ccabdd2b7e64c26a773612b386747e4768/typed_ffmpeg_v8-4.0.2-py3-none-any.whl", hash = "sha256:2030cf2bbe5c902c66b0b6c6dfab52b2a16579b800bfafcaf0d911d05ebc7381", size = 367232, upload-time = "2026-04-09T14:00:26.412Z" },
+    { url = "https://files.pythonhosted.org/packages/ec/fa/1ef8a3a50a3962495a190ccb3bb56771af21150471be7f50fe8099d0e0f6/typed_ffmpeg_v8-4.1-py3-none-any.whl", hash = "sha256:cf07c92137ce30710783aca9d2834d2446371320c05f6ee6c04548c3a8bddb59", size = 366919, upload-time = "2026-04-18T11:13:18.344Z" },
 ]
 
 [[package]]
@@ -1444,6 +1468,7 @@ name = "wildcamtools"
 version = "0.0.1"
 source = { editable = "." }
 dependencies = [
+    { name = "av" },
     { name = "ollama" },
     { name = "openai" },
     { name = "opencv-contrib-python-headless" },
@@ -1472,6 +1497,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "av", specifier = ">=14.0.0,<18.0.0" },
     { name = "ollama", specifier = ">=0.6.2" },
     { name = "openai", specifier = ">=2.32.0" },
     { name = "opencv-contrib-python-headless", specifier = ">=4.12.0.88" },
@@ -1481,7 +1507,7 @@ requires-dist = [
     { name = "scikit-image", specifier = ">=0.26.0" },
     { name = "scipy-stubs", specifier = ">=1.17.1.4" },
     { name = "streamlit", specifier = ">=1.56.0" },
-    { name = "typed-ffmpeg", specifier = ">=4.0.2" },
+    { name = "typed-ffmpeg", specifier = ">=4.1" },
     { name = "typer", specifier = ">=0.20.0" },
     { name = "typer-config", specifier = ">=1.4.3" },
     { name = "types-psutil", specifier = ">=7.0.0.20251111" },

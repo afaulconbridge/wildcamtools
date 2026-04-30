@@ -8,7 +8,7 @@ from wildcamtools.lib.frames import MotionFlowHighlighter
 from wildcamtools.lib.motion import AvgMotion, FlowMotion, MogMotion, MotionHandler
 from wildcamtools.lib.stats import get_video_stats
 from wildcamtools.lib.timing import Timer
-from wildcamtools.lib.vidio import FrameSourceFFMPEG, FrameWriterFFMPEG
+from wildcamtools.lib.vidio import VideoReader, VideoWriter
 
 app = typer.Typer()
 
@@ -23,8 +23,8 @@ def _shared(
     timer = Timer()
 
     with (
-        FrameWriterFFMPEG(output, fps=fps) as video_writer,
-        FrameSourceFFMPEG(input_) as video_input,
+        VideoWriter(output, fps=fps) as video_writer,
+        VideoReader(input_) as video_input,
     ):
         frame_out = None
         for frame in video_input:
@@ -78,7 +78,7 @@ def flow_highlighter(
     handler = MotionFlowHighlighter(alpha=alpha, max_magnitude=magnitude)
     timer = Timer()
 
-    with FrameWriterFFMPEG(output, fps=stats.fps) as video_writer, FrameSourceFFMPEG(input_) as video_input:
+    with VideoWriter(output, fps=stats.fps) as video_writer, VideoReader(input_) as video_input:
         for frame in video_input:
             with timer:
                 frame = handler.handle(frame)

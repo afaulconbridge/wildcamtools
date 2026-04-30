@@ -25,10 +25,11 @@ dependencies = [
   "scikit-image>=0.26.0",
   "scipy-stubs>=1.17.1.4",
   "streamlit>=1.56.0",
-  "typed-ffmpeg>=4.0.2",
+  "av>=14.0.0,<18.0.0",
   "typer>=0.20.0",
   "typer-config>=1.4.3",
   "types-psutil>=7.0.0.20251111",
+  "typed-ffmpeg>=4.1",
 ]
 [dependency-groups]
 dev = [
@@ -121,6 +122,8 @@ ignore = [
   "E501",
   # DoNotAssignLambda
   "E731",
+  # Avoid specifying long messages outside the exception class
+  "TRY003",
 ]
 
 [tool.ruff.lint.per-file-ignores]

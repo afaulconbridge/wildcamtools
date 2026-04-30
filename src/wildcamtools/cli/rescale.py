@@ -7,7 +7,7 @@ from wildcamtools.lib import Frame
 from wildcamtools.lib.frames import Rescaler
 from wildcamtools.lib.stats import get_video_stats
 from wildcamtools.lib.timing import Timer
-from wildcamtools.lib.vidio import FrameSourceFFMPEG, FrameWriterFFMPEG
+from wildcamtools.lib.vidio import VideoReader, VideoWriter
 
 app = typer.Typer()
 
@@ -25,7 +25,7 @@ def rescale(
     handler = Rescaler(stats=stats, x=x, y=y, fps=fps)
     timer = Timer()
 
-    with FrameWriterFFMPEG(output, fps=handler.fps) as video_writer, FrameSourceFFMPEG(input_) as video_input:
+    with VideoWriter(output, fps=handler.fps) as video_writer, VideoReader(input_) as video_input:
         frame: Frame
         for frame in video_input:
             with timer:

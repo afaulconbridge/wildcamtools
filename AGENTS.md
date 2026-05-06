@@ -20,13 +20,19 @@
 
 ## Conventions & Quirks
 
-- **Python Version**: Strict `==3.14.*` and use appropriate language features when applicable
+- **Python Version**: Strict `==3.13.*`. Use appropriate language features.
+
 - **OpenCV**: Uses `opencv-contrib-python-headless` to avoid GUI dependencies; `uv` override prevents `opencv-python` installation.
 - **Dependencies**: Managed via `uv` (checked via `uv.lock`).
+    - AI dependencies (openai, ollama) can be used only in `src/wildcamtools/lib/ai`.
+    - CLI dependencies (typer, click) can be used only in `src/wildcamtools/cli`.
+
 - **Verification Order**: `ruff format` $\to$ `ruff check` $\to$ `mypy` $\to$ `pytest`.
 - **Logging**: Use python logging module and %-string formatting.
 
 ## Best practices
 
-- **Format after edit**: Use `uv run ruff format .` after each edit to ensure that files are correctly formatted.
-- **Before commit**: Use `uv run prek -a` before committing to prevent trivial problems.
+- **After editing a python file**: Use `uv run ruff format {filename}` after each edit to ensure that python files are correctly formatted.
+- **Before commit**:
+  - Use `uv run prek` after staging but before committing to catch small problems.
+  - Use a code-review subagent to review changes, then use another sub-agent to fix any problems identified. Repeat until review passes, or the issues are not fixable.

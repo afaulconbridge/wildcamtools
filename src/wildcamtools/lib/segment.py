@@ -196,7 +196,7 @@ class VideoSegmenter:
 
 
 def create_segment_process(*, input_: str | Path, output: str | Path, duration: float) -> Popen:
-    f = ffmpeg.input(  # type: ignore [attr-defined]
+    f = ffmpeg.input(
         input_,
         # demuxer_options=ffmpeg.formats.demuxers.rtsp(rtsp_transport="tcp"),
     ).output(

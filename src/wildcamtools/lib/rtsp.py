@@ -45,14 +45,13 @@ class BackgroundFFMPEGBroadcast(BackgroundProcess):
 
     @override
     def _create_process(self) -> None:
-        ffmpeg_cmd = ffmpeg.input(  # type: ignore [attr-defined]
+        ffmpeg_cmd = ffmpeg.input(
             self.path,
             stream_loop=-1,
             re=True,
         ).output(
             filename="rtsp://localhost:8554/stream",
             f="rtsp",
-            # codec="libx264",
             # see https://trac.ffmpeg.org/wiki/Encode/H.264
             encoder_options=ffmpeg.codecs.encoders.libx264(
                 tune="fastdecode",

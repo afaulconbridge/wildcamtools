@@ -30,6 +30,8 @@ dependencies = [
   "typer-config>=1.4.3",
   "types-psutil>=7.0.0.20251111",
   "typed-ffmpeg>=4.1",
+  "sqlmodel>=0.0.22",
+  "alembic>=1.14.0",
 ]
 [dependency-groups]
 dev = [

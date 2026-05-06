@@ -11,6 +11,17 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0 # Ensures we have the full history for diff
+
+      - name: Get diff
+        # this will only work for non-fork PRs
+        env:
+          HEAD_REF: ${{ github.head_ref }}
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          git fetch origin "$HEAD_REF"
+          git diff origin/"$BASE_REF"..origin/"$HEAD_REF" > diff.txt
 
       - name: Install OpenCode
         run: |
@@ -22,7 +33,7 @@ jobs:
         env:
           OLLAMA_CLOUD_API_KEY: ${{ secrets.OLLAMA_CLOUD_API_KEY }}
         run: |
-          OUTPUT=$(opencode run --agent code-reviewer 'Review the changes in the current branch compared to the main branch.') || {
+          OUTPUT=$(opencode run --agent code-reviewer "This is a diff of changes in this pull request compared to the target main branch, review it." --file diff.txt) || {
             echo "OpenCode failed to execute."
             exit 1
           }

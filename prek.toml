@@ -43,5 +43,6 @@ repo = "local"
 hooks = [
   { id = "ruff-format", name = "ruff format", language = "system", files = "\\.py$", entry = "uv run ruff format" },
   { id = "ruff-check", name = "ruff check", language = "system", files = "\\.py$", entry = "uv run ruff check" },
-  { id = "mypy", name = "mypy", language = "system", files = "^src/.*\\.py$", entry = "uv run mypy" },
+  # run via a shell wrapper to inject additional arguments in CI to avoid flakey caching
+  { id = "mypy", name = "mypy", language = "system", files = "^src/.*\\.py$", entry = "sh -c \"uv run mypy ${PREK_MYPY_FLAGS}\"" },
 ]

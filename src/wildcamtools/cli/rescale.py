@@ -31,7 +31,7 @@ def rescale(
             with timer:
                 frame = handler.handle(frame)
             if frame.filter_keep:
-                video_writer.write(frame.raw)
+                video_writer.write(frame.output)
 
     typer.secho(f"Processed {timer.intervals:d} frames in {timer.elapsed:.2f} sec; {timer.per_second:.2f}FPS")
 

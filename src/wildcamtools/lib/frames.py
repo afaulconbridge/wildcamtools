@@ -20,8 +20,7 @@ logger = logging.getLogger(__name__)
 
 
 def resize_with_aspect_ratio(image: np.ndarray, target_size: tuple[int, int]) -> np.ndarray:
-    """
-    Resizes image to fit within target_size while maintaining aspect ratio.
+    """Resizes image to fit within target_size while maintaining aspect ratio.
 
     Args:
         image: The input image as a numpy array.
@@ -29,6 +28,7 @@ def resize_with_aspect_ratio(image: np.ndarray, target_size: tuple[int, int]) ->
 
     Returns:
         The resized numpy array.
+
     """
     target_w, target_h = target_size
     h, w = image.shape[:2]
@@ -45,8 +45,7 @@ def resize_with_aspect_ratio(image: np.ndarray, target_size: tuple[int, int]) ->
 
 
 def pad_to_size(image: np.ndarray, target_size: tuple[int, int]) -> np.ndarray:
-    """
-    Pads an image with black borders to reach the exact target_size.
+    """Pads an image with black borders to reach the exact target_size.
 
     Args:
         image: The input image (usually after being resized).
@@ -54,6 +53,7 @@ def pad_to_size(image: np.ndarray, target_size: tuple[int, int]) -> np.ndarray:
 
     Returns:
         The padded numpy array.
+
     """
     target_w, target_h = target_size
     h, w = image.shape[:2]
@@ -70,10 +70,11 @@ def pad_to_size(image: np.ndarray, target_size: tuple[int, int]) -> np.ndarray:
 
 
 def match_image_sizes(
-    img1: np.ndarray, img2: np.ndarray, target_size: tuple[int, int] | None = None
+    img1: np.ndarray,
+    img2: np.ndarray,
+    target_size: tuple[int, int] | None = None,
 ) -> tuple[np.ndarray, np.ndarray]:
-    """
-    Main coordinator function that uses resize and pad to make two images identical in size.
+    """Main coordinator function that uses resize and pad to make two images identical in size.
 
     Args:
         img1: First input image.
@@ -82,6 +83,7 @@ def match_image_sizes(
 
     Returns:
         A tuple containing the two processed numpy arrays.
+
     """
     if target_size is None:
         max_w = max(img1.shape[1], img2.shape[1])
@@ -108,7 +110,7 @@ class FrameImageWriter(FrameHandler):
     def handle(self, frame: Frame) -> Frame:
         if frame.filter_keep:
             filename = self.output_dir / f"frame_{frame.frame_no:05d}.jpg"
-            cv2.imwrite(str(filename), frame.raw)
+            cv2.imwrite(str(filename), frame.output)
             logger.debug("Writing %s -> %s", frame.frame_no, filename)
         return frame
 
@@ -150,33 +152,27 @@ class Rescaler(FrameHandler):
 
         if self.now >= self.target_frametime:
             # were going to return this frame, so rescale it
-            if self.preserve_aspect:
-                frame_rescaled = resize_with_aspect_ratio(frame.raw, (self.x, self.y))
-            else:
-                frame_rescaled = cv2.resize(frame.raw, (self.x, self.y), interpolation=cv2.INTER_LINEAR)
-
             # if multiple frames have not been kept this could be significantly high
+            if self.preserve_aspect:
+                frame.rescale = resize_with_aspect_ratio(frame.output, (self.x, self.y))
+            else:
+                frame.rescale = cv2.resize(frame.output, (self.x, self.y), interpolation=cv2.INTER_LINEAR)
+
             while self.now >= self.target_frametime:
                 self.now -= self.target_frametime
 
             logger.debug("Rescaled %s", frame.frame_no)
-            return Frame(
-                raw=frame_rescaled,
-                frame_no=frame.frame_no,
-                filter_keep=frame.filter_keep,
-                motion_proportion=frame.motion_proportion,
-            )
-        else:
-            # skip this frame
-            frame.filter_keep = False
             return frame
+        # skip this frame
+        frame.filter_keep = False
+        return frame
 
 
 class FilterSSIM(FrameHandler):
     """Structural Similarity Image Metric based frame filter"""
 
     similarity_minimum: float
-    frame_previous_interesting: Frame | None = None
+    frame_previous_interesting: np.ndarray | None = None
 
     def __init__(self, similarity_minimum: float = 0.9):
         self.similarity_minimum = similarity_minimum
@@ -189,16 +185,19 @@ class FilterSSIM(FrameHandler):
 
         # no previous frame of interest, so this frame is interesting by default
         if self.frame_previous_interesting is None:
-            self.frame_previous_interesting = frame
+            self.frame_previous_interesting = frame.output.copy()
             return frame
 
+        frame_current = frame.output
+        frame_previous = self.frame_previous_interesting
+
         # to calculate ssim, images must be identical sizes so rescale+pad if necessary
-        frame_y, frame_x = frame.raw.shape[:2]
-        frame_previous_y, frame_previous_x = self.frame_previous_interesting.raw.shape[:2]
+        frame_y, frame_x = frame_current.shape[:2]
+        frame_previous_y, frame_previous_x = frame_previous.shape[:2]
         if frame_x != frame_previous_x or frame_y != frame_previous_y:
-            frame_previous_resized, frame_resized = match_image_sizes(self.frame_previous_interesting.raw, frame.raw)
+            frame_previous_resized, frame_resized = match_image_sizes(frame_previous, frame_current)
         else:
-            frame_previous_resized, frame_resized = (self.frame_previous_interesting.raw, frame.raw)
+            frame_previous_resized, frame_resized = (frame_previous, frame_current)
 
         # this calculation is pretty slow
         similarity = float(structural_similarity(frame_previous_resized, frame_resized, data_range=255, channel_axis=2))
@@ -208,7 +207,7 @@ class FilterSSIM(FrameHandler):
             # frame is too similar to the previous interesting frame, skip it
             frame.filter_keep = False
         else:
-            self.frame_previous_interesting = frame
+            self.frame_previous_interesting = frame.output.copy()
         return frame
 
 
@@ -256,11 +255,8 @@ class MotionFlowHighlighter(FrameHandler):
         highlighted = cv2.addWeighted(frame.raw, 1 - self.alpha, flow_bgr, self.alpha, 0)
 
         self.prev_gray = curr_gray
-        return Frame(
-            raw=highlighted,
-            frame_no=frame.frame_no,
-            filter_keep=frame.filter_keep,
-        )
+        frame.raw = highlighted
+        return frame
 
 
 class CropPanHandler(FrameHandler):
@@ -315,7 +311,6 @@ class CropPanHandler(FrameHandler):
             )
 
         crop = frame.raw[self.window.y1 : self.window.y2, self.window.x1 : self.window.x2]
-        # output the cropped version
         logger.debug(
             "Crop %s to (%s,%s)-(%s,%s)",
             frame.frame_no,
@@ -324,9 +319,7 @@ class CropPanHandler(FrameHandler):
             self.window.x2,
             self.window.y2,
         )
-        return Frame(
-            raw=crop,
-            frame_no=frame.frame_no,
-            motion_proportion=frame_mask.motion_proportion,
-            filter_keep=frame.filter_keep,
-        )
+        frame.crop = crop
+        frame.crop_bbox = self.window
+        frame.motion_proportion = frame_mask.motion_proportion
+        return frame

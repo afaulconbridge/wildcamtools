@@ -35,7 +35,8 @@ class MotionHandler(FrameHandler):
         # only set if we've gone through history
         proportion = self.get_motion_proportion(frame_out) if frame.frame_no > self.history else -1.0
         logger.debug("Motion %d: %03f", frame.frame_no, proportion)
-        return Frame(raw=frame_out, frame_no=frame.frame_no, motion_proportion=proportion)
+        frame.motion_proportion = proportion
+        return frame
 
     def _despeckle(self, mask: MatLike) -> MatLike:
         if self.kernel_size > 0:
@@ -61,58 +62,56 @@ class MotionHandler(FrameHandler):
 
         if self.motion_mask is None:
             return contours
-        else:
-            # Filter out contours whose lowest point (max Y coordinate) is within a masked area.
-            # If a contour has multiple points with the same maximum Y coordinate,
-            # we consider it masked if ANY of those points are in a masked area.
-            # This prevents motion in specifically excluded regions (like moving foliage at the top)
-            # from triggering a motion detection.
-            mh, mw = self.motion_mask.shape
-            filtered_contours = []
-            for cnt in contours:
-                # Find the maximum Y coordinate among all points in the contour
-                # cnt shape is (N, 1, 2)
-                max_y = np.max(cnt[:, 0, 1])
+        # Filter out contours whose lowest point (max Y coordinate) is within a masked area.
+        # If a contour has multiple points with the same maximum Y coordinate,
+        # we consider it masked if ANY of those points are in a masked area.
+        # This prevents motion in specifically excluded regions (like moving foliage at the top)
+        # from triggering a motion detection.
+        mh, mw = self.motion_mask.shape
+        filtered_contours = []
+        for cnt in contours:
+            # Find the maximum Y coordinate among all points in the contour
+            # cnt shape is (N, 1, 2)
+            max_y = np.max(cnt[:, 0, 1])
 
-                # Find all points that have this maximum Y coordinate
-                lowest_points = cnt[cnt[:, 0, 1] == max_y]
+            # Find all points that have this maximum Y coordinate
+            lowest_points = cnt[cnt[:, 0, 1] == max_y]
 
-                # The contour is removed if ANY of its lowest points are in a masked area
-                is_masked = False
-                # Extract coordinates of points at the lowest Y level
-                pts = [(int(p[0, 0]), int(p[0, 1])) for p in lowest_points]
+            # The contour is removed if ANY of its lowest points are in a masked area
+            is_masked = False
+            # Extract coordinates of points at the lowest Y level
+            pts = [(int(p[0, 0]), int(p[0, 1])) for p in lowest_points]
 
-                # Check the points themselves
-                for x, y in pts:
-                    if 0 <= y < mh and 0 <= x < mw and self.motion_mask[y, x] != 0:
+            # Check the points themselves
+            for x, y in pts:
+                if 0 <= y < mh and 0 <= x < mw and self.motion_mask[y, x] != 0:
+                    is_masked = True
+                    break
+
+            # For CHAIN_APPROX_SIMPLE, a straight bottom edge is represented by only its endpoints.
+            # We check the segment between the leftmost and rightmost points at max_y.
+            if not is_masked and len(pts) >= 2:
+                # Sort by X coordinate
+                pts.sort()
+                x_start, y_start = pts[0]
+                x_end, _ = pts[-1]
+                # Scan along the horizontal segment at max_y
+                for x_sample in range(x_start, x_end + 1):
+                    if 0 <= y_start < mh and 0 <= x_sample < mw and self.motion_mask[y_start, x_sample] != 0:
                         is_masked = True
                         break
 
-                # For CHAIN_APPROX_SIMPLE, a straight bottom edge is represented by only its endpoints.
-                # We check the segment between the leftmost and rightmost points at max_y.
-                if not is_masked and len(pts) >= 2:
-                    # Sort by X coordinate
-                    pts.sort()
-                    x_start, y_start = pts[0]
-                    x_end, _ = pts[-1]
-                    # Scan along the horizontal segment at max_y
-                    for x_sample in range(x_start, x_end + 1):
-                        if 0 <= y_start < mh and 0 <= x_sample < mw and self.motion_mask[y_start, x_sample] != 0:
-                            is_masked = True
-                            break
-
-                if not is_masked:
-                    filtered_contours.append(cnt)
-            return filtered_contours
+            if not is_masked:
+                filtered_contours.append(cnt)
+        return filtered_contours
 
     def get_motion_proportion(self, frame: MatLike) -> float:
         if self.motion_mask is None:
             return cv2.countNonZero(frame) / (float(frame.shape[0]) * float(frame.shape[1]))
-        else:
-            areas = (cv2.contourArea(cnt) for cnt in self._get_contours(frame))
-            area_total = sum(areas)
-            area_propotion = area_total / (float(frame.shape[0]) * float(frame.shape[1]))
-            return area_propotion
+        areas = (cv2.contourArea(cnt) for cnt in self._get_contours(frame))
+        area_total = sum(areas)
+        area_propotion = area_total / (float(frame.shape[0]) * float(frame.shape[1]))
+        return area_propotion
 
     @abstractmethod
     def update_background(self, frame: MatLike) -> MatLike: ...
@@ -176,7 +175,7 @@ class FlowMotion(MotionHandler):
             return np.zeros((frame.shape[0], frame.shape[1]), dtype=np.uint8)
 
         # Calculate dense optical flow
-        flow = cast(MatLike, cv2.calcOpticalFlowFarneback(self.prev_gray, curr_gray, None, 0.5, 3, 15, 3, 5, 1.2, 0))  # type: ignore[call-overload]
+        flow = cast("MatLike", cv2.calcOpticalFlowFarneback(self.prev_gray, curr_gray, None, 0.5, 3, 15, 3, 5, 1.2, 0))  # type: ignore[call-overload]
         self.prev_gray = curr_gray
 
         # average motion over time
@@ -202,7 +201,7 @@ class FlowMotion(MotionHandler):
         # Create a mask where magnitude > threshold
         mask = (magnitude > self.threshold).astype(np.uint8) * 255
 
-        mask = cast(MatLike, mask)  # type: ignore[assignment]
+        mask = cast("MatLike", mask)  # type: ignore[assignment]
 
         self.motion_mask = self._despeckle(mask)
         return self.motion_mask

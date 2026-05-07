@@ -72,13 +72,14 @@ def evaluate_frames(
     url: str,
     model: str,
     api_key: str = "API_KEY",
+    prompt: str | None = None,
 ) -> bool:
     analyser: AbstractAnalyser
     match backend:
         case Backend.LLAMACPP:
-            analyser = LlamaCppAnalyser(model=model, base_url=url)
+            analyser = LlamaCppAnalyser(model=model, base_url=url, message=prompt)
         case Backend.OLLAMA:
-            analyser = OllamaAnalyser(model=model, host=url, api_key=api_key)
+            analyser = OllamaAnalyser(model=model, host=url, api_key=api_key, message=prompt)
         case _:
             raise ValueError(f"Unsupported backend: {backend}")
 

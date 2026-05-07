@@ -20,6 +20,19 @@ app = typer.Typer()
 logger = logging.getLogger(__name__)
 
 
+def _read_prompt_file(prompt_file: Path | None) -> str | None:
+    """Read prompt from file if provided, validating existence and content."""
+    if prompt_file is None:
+        return None
+    if not prompt_file.exists():
+        raise FileNotFoundError(f"Prompt file not found: {prompt_file}")
+    prompt = prompt_file.read_text()
+    if not prompt.strip():
+        logger.warning("Prompt file %s is empty, using default prompt", prompt_file)
+        return None
+    return prompt
+
+
 @app.command()
 def analyze(
     input_: Annotated[Path, typer.Argument(metavar="INPUT")],
@@ -28,6 +41,7 @@ def analyze(
     url: Annotated[str, typer.Option(help="Base URL for the backend")] = "http://localhost:8080/v1",
     api_key: Annotated[str | None, typer.Option(help="API key for ollama backend")] = None,
     output: Annotated[Path | None, typer.Option(metavar="OUTPUT")] = None,
+    prompt_file: Annotated[Path | None, typer.Option(help="Path to a text file containing the prompt")] = None,
 ) -> None:
     if not input_.exists():
         raise FileNotFoundError()
@@ -35,13 +49,15 @@ def analyze(
         raise InputNotDirectoryError()
     images = list(input_.iterdir())
 
+    prompt = _read_prompt_file(prompt_file)
+
     timer = Timer()
     analyser: AbstractAnalyser
     match backend:
         case Backend.LLAMACPP:
-            analyser = LlamaCppAnalyser(model=model, base_url=url)
+            analyser = LlamaCppAnalyser(model=model, base_url=url, message=prompt)
         case Backend.OLLAMA:
-            analyser = OllamaAnalyser(model=model, host=url, api_key=api_key)
+            analyser = OllamaAnalyser(model=model, host=url, api_key=api_key, message=prompt)
         case _:
             raise ValueError(f"Unsupported backend: {backend}")
 
@@ -71,8 +87,9 @@ def evaluate(
     crop_expansion: float = 0.75,
     crop_inertia: float = 10.0,
     similarity_minimum: float | None = None,
+    prompt_file: Annotated[Path | None, typer.Option(help="Path to a text file containing the prompt")] = None,
 ) -> None:
-    # TODO add option to read prompt from text file
+    prompt = _read_prompt_file(prompt_file)
 
     # read json lines
     labelled_data = load_labels(labels)
@@ -125,6 +142,7 @@ def evaluate(
                 url,
                 model,
                 api_key=api_key if api_key else "API_KEY",
+                prompt=prompt,
             )
             logger.info("File %s correct? %s", filename, result)
 

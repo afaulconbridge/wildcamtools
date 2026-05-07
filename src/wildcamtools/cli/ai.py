@@ -9,7 +9,7 @@ from typing import Annotated, Any
 import typer
 
 from wildcamtools.lib.ai import AbstractAnalyser, Backend
-from wildcamtools.lib.ai.evaluate import create_frames, evaluate_frames
+from wildcamtools.lib.ai.evaluate import AIEvaluation, AIFrameCreation, create_frames, evaluate_frames
 from wildcamtools.lib.ai.llamacpp import LlamaCppAnalyser
 from wildcamtools.lib.ai.ollama import OllamaAnalyser
 from wildcamtools.lib.errors.cli import InputNotDirectoryError
@@ -121,10 +121,15 @@ def evaluate(
         for parameter_dict in parameter_dicts:
             for filename in labelled_data:
                 frame_directory = TemporaryDirectory()
+                frame_creation = AIFrameCreation(
+                    filename=Path(filename),
+                    video_directory=video_directory,
+                    tmpdir=Path(frame_directory.name),
+                    **parameter_dict,
+                )
                 future = pool.apply_async(
                     create_frames,
-                    args=(video_directory / filename, video_directory, Path(frame_directory.name)),
-                    kwds=parameter_dict,
+                    args=(frame_creation,),
                 )
                 futures.append((future, filename, frame_directory, parameter_dict))
 
@@ -132,41 +137,45 @@ def evaluate(
         for future, filename, frame_directory, parameter_dict in futures:
             # as image generation finishes, detect and compare to label
             # use get() with a None return to ensure exceptions are raised
-            future.get()
+            frame_creation_result = future.get()
 
             label = labelled_data[filename]
-            result = evaluate_frames(
-                Path(frame_directory.name),
-                label,
-                backend,
-                url,
-                model,
-                api_key=api_key if api_key else "API_KEY",
-                prompt=prompt,
+            evaluated_result = evaluate_frames(
+                AIEvaluation(
+                    frame_directory=Path(frame_directory.name),
+                    label=label,
+                    backend=backend,
+                    url=url,
+                    model=model,
+                    api_key=api_key if api_key else "API_KEY",
+                    prompt=prompt,
+                )
             )
-            logger.info("File %s correct? %s", filename, result)
+            logger.info("File %s correct? %s", filename, evaluated_result.correct)
 
             counter_key = tuple(sorted(parameter_dict.items()))
             if counter_key not in counters:
                 counters[counter_key] = [0, 0]
-            counters[counter_key][0] += 1 if result else 0
+            counters[counter_key][0] += 1 if evaluated_result.correct else 0
             counters[counter_key][1] += 1
 
             # TODO parameterize filename
             with open("result.jsonl", "a") as result_file:
-                out_dict = dict(parameter_dict)
-                out_dict["filename"] = filename
-                out_dict["model"] = model
-                # this is a tuple of a dictionary of fixed variables and a dictionary of unknown result variables
-                result_out = (
-                    out_dict,
-                    {
-                        "result": result,
-                        "label": label,
-                        # TODO add more variables here e.g. frame count, motion proportion (min,q1,median,q2,max)
-                    },
+                output_parameter_dict = dict(parameter_dict)
+                output_parameter_dict["filename"] = filename
+                output_parameter_dict["model"] = model
+                result_dict = {
+                    "result": evaluated_result.correct,
+                    "raw_result": evaluated_result.raw_result,
+                    "label": label,
+                    "frame_count": frame_creation_result.frame_count,
+                    # TODO add more variables here e.g. motion proportion (min,q1,median,q2,max)
+                }
+                output_dict = (
+                    output_parameter_dict,
+                    result_dict,
                 )
-                result_file.write(json.dumps(result_out))
+                result_file.write(json.dumps(output_dict))
                 result_file.write("\n")
 
             # now cleanup the frames

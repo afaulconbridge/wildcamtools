@@ -8,7 +8,7 @@ from wildcamtools.lib import FrameHandler
 from wildcamtools.lib.ai import AbstractAnalyser, Backend
 from wildcamtools.lib.ai.llamacpp import LlamaCppAnalyser
 from wildcamtools.lib.ai.ollama import OllamaAnalyser
-from wildcamtools.lib.frames import CropPanHandler, FilterSSIM, FrameImageWriter, Rescaler
+from wildcamtools.lib.frames import CropPanHandler, FilterSSIM, FrameImageWriter, FrameTiler, Rescaler
 from wildcamtools.lib.motion import MogMotion
 from wildcamtools.lib.stats import get_video_stats
 from wildcamtools.lib.vidio import VideoReader
@@ -31,11 +31,15 @@ class AIFrameCreation:
     crop_inertia: float = 10.0
     similarity_minimum: float | None = None
     do_croppan: bool = False
+    tiling_cols: int | None = None
+    tiling_rows: int | None = None
+    tiling_overlap: float | None = None
 
 
 @dataclass(kw_only=True)
 class AIFrameCreationResult(AIFrameCreation):
     frame_count: int
+    tiling_overlap: float | None = None
 
     @classmethod
     def from_creation(cls, creation: AIFrameCreation, *, frame_count: int) -> AIFrameCreationResult:
@@ -53,6 +57,9 @@ class AIFrameCreationResult(AIFrameCreation):
             crop_inertia=creation.crop_inertia,
             similarity_minimum=creation.similarity_minimum,
             do_croppan=creation.do_croppan,
+            tiling_cols=creation.tiling_cols,
+            tiling_rows=creation.tiling_rows,
+            tiling_overlap=creation.tiling_overlap,
             frame_count=frame_count,
         )
 
@@ -119,6 +126,15 @@ def create_frames(
 
     if frame_creation.similarity_minimum is not None:
         handlers.append(FilterSSIM(similarity_minimum=frame_creation.similarity_minimum))
+
+    if frame_creation.tiling_cols is not None and frame_creation.tiling_rows is not None:
+        handlers.append(
+            FrameTiler(
+                cols=frame_creation.tiling_cols,
+                rows=frame_creation.tiling_rows,
+                overlap=frame_creation.tiling_overlap or 0.0,
+            )
+        )
 
     handlers.append(FrameImageWriter(frame_creation.tmpdir))
 

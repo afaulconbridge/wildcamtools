@@ -108,7 +108,29 @@ class FrameImageWriter(FrameHandler):
         super().__init__()
 
     def handle(self, frame: Frame) -> Frame:
+        # write a whole frame image
         if frame.filter_keep:
+            if frame.tiles is not None and frame.tiling_rows is not None and frame.tiling_cols is not None:
+                for row in range(frame.tiling_rows):
+                    for col in range(frame.tiling_cols):
+                        tile = frame.get_tile(col, row)
+                        if tile is not None:
+                            filename = self.output_dir / f"frame_{frame.frame_no:05d}_tile_{row}_{col}.jpg"
+                            cv2.imwrite(str(filename), tile)
+                            logger.debug(
+                                "Writing tile %d,%d (%dx%d) -> %s",
+                                row,
+                                col,
+                                tile.shape[0],
+                                tile.shape[1],
+                                filename,
+                            )
+                logger.info(
+                    "Wrote %d tiles for frame %s",
+                    len(frame.tiles),
+                    frame.frame_no,
+                )
+            # write a whole frame image
             filename = self.output_dir / f"frame_{frame.frame_no:05d}.jpg"
             cv2.imwrite(str(filename), frame.output)
             logger.debug("Writing %s -> %s", frame.frame_no, filename)
@@ -322,4 +344,85 @@ class CropPanHandler(FrameHandler):
         frame.crop = crop
         frame.crop_bbox = self.window
         frame.motion_proportion = frame_mask.motion_proportion
+        return frame
+
+
+class FrameTiler(FrameHandler):
+    """Splits frames into a grid of tiles for parallel motion detection.
+
+    When image dimensions don't divide evenly, extra pixels are distributed
+    to edge tiles (right and bottom edges are larger).
+    """
+
+    cols: int
+    rows: int
+    overlap: float
+
+    def __init__(self, cols: int = 2, rows: int = 2, overlap: float = 0.0) -> None:
+        if cols < 1:
+            raise ValueError(f"cols must be at least 1, got {cols}")
+        if rows < 1:
+            raise ValueError(f"rows must be at least 1, got {rows}")
+        if overlap < 0.0 or overlap >= 1.0:
+            raise ValueError(f"overlap must be between 0.0 and 1.0, got {overlap}")
+        self.cols = cols
+        self.rows = rows
+        self.overlap = overlap
+        super().__init__()
+
+    def handle(self, frame: Frame) -> Frame:
+        img = frame.output
+        img_h, img_w = img.shape[:2]
+
+        if self.overlap > 0:
+            tile_w = img_w / (1 + (self.cols - 1) * (1 - self.overlap))
+            tile_h = img_h / (1 + (self.rows - 1) * (1 - self.overlap))
+        else:
+            tile_w = img_w / self.cols
+            tile_h = img_h / self.rows
+
+        tile_w_int = int(tile_w)
+        tile_h_int = int(tile_h)
+
+        logger.info(
+            "Tiling frame %s: %dx%d -> %dx%d tiles (%d cols x %d rows, overlap %.2f%%)",
+            frame.frame_no,
+            img_w,
+            img_h,
+            tile_w_int,
+            tile_h_int,
+            self.cols,
+            self.rows,
+            self.overlap * 100,
+        )
+
+        tiles: list[cv2.typing.MatLike] = []
+        for row in range(self.rows):
+            for col in range(self.cols):
+                x_start = int(col * tile_w * (1 - self.overlap))
+                y_start = int(row * tile_h * (1 - self.overlap))
+
+                if col == self.cols - 1:
+                    x_start = img_w - tile_w_int
+                if row == self.rows - 1:
+                    y_start = img_h - tile_h_int
+
+                x_end = x_start + tile_w_int
+                y_end = y_start + tile_h_int
+
+                tile = img[y_start:y_end, x_start:x_end]
+                tiles.append(tile)
+                logger.debug(
+                    "Tile (%d,%d): %dx%d pixels",
+                    row,
+                    col,
+                    tile.shape[1],
+                    tile.shape[0],
+                )
+
+        frame.tiles = tiles
+        frame.tiling_cols = self.cols
+        frame.tiling_rows = self.rows
+        frame.tiling_width = tile_w_int
+        frame.tiling_height = tile_h_int
         return frame

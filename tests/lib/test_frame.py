@@ -311,6 +311,34 @@ class TestHandlerChainIntegration:
         assert written_image.shape[0] == 50
         assert written_image.shape[1] == 100
 
+    def test_frame_image_writer_writes_tiles(self, tmp_path):
+        from wildcamtools.lib.frames import FrameImageWriter, FrameTiler
+
+        raw = np.random.randint(0, 255, (100, 200, 3), dtype=np.uint8)
+        frame = Frame(raw=raw, frame_no=1)
+
+        tiler = FrameTiler(cols=2, rows=2)
+        frame = tiler.handle(frame)
+
+        writer = FrameImageWriter(tmp_path)
+        result = writer.handle(frame)
+
+        assert result.filter_keep is True
+        assert (tmp_path / "frame_00001_tile_0_0.jpg").exists()
+        assert (tmp_path / "frame_00001_tile_0_1.jpg").exists()
+        assert (tmp_path / "frame_00001_tile_1_0.jpg").exists()
+        assert (tmp_path / "frame_00001_tile_1_1.jpg").exists()
+
+        import cv2
+
+        for row in range(2):
+            for col in range(2):
+                tile_file = tmp_path / f"frame_00001_tile_{row}_{col}.jpg"
+                tile_image = cv2.imread(str(tile_file))
+                assert tile_image is not None
+                assert tile_image.shape[0] == 50
+                assert tile_image.shape[1] == 100
+
     def test_rescaler_uses_output_property(self):
         from wildcamtools.lib.frames import Rescaler
         from wildcamtools.lib.stats import Colourspace, VideoStats
@@ -356,3 +384,279 @@ class TestHandlerChainIntegration:
         assert frame.output is rescale
         assert frame.width_rescaled == 50
         assert frame.height_rescaled == 25
+
+
+class TestFrameTiling:
+    def test_frame_tiling_fields_default_to_none(self):
+        raw = np.zeros((100, 200, 3), dtype=np.uint8)
+        frame = Frame(raw=raw, frame_no=1)
+
+        assert frame.tiles is None
+        assert frame.tiling_cols is None
+        assert frame.tiling_rows is None
+        assert frame.tiling_width is None
+        assert frame.tiling_height is None
+
+    def test_get_tile_returns_none_when_no_tiles(self):
+        raw = np.zeros((100, 200, 3), dtype=np.uint8)
+        frame = Frame(raw=raw, frame_no=1)
+
+        assert frame.get_tile(0, 0) is None
+
+    def test_get_tile_returns_none_for_invalid_coordinates(self):
+        raw = np.zeros((100, 200, 3), dtype=np.uint8)
+        frame = Frame(
+            raw=raw, frame_no=1, tiles=[raw], tiling_cols=1, tiling_rows=1, tiling_width=200, tiling_height=100
+        )
+
+        assert frame.get_tile(-1, 0) is None
+        assert frame.get_tile(0, -1) is None
+        assert frame.get_tile(1, 0) is None
+        assert frame.get_tile(0, 1) is None
+        assert frame.get_tile(5, 5) is None
+
+    def test_get_tile_returns_correct_tile(self):
+        raw = np.zeros((100, 200, 3), dtype=np.uint8)
+        tile1 = np.ones((50, 100, 3), dtype=np.uint8)
+        tile2 = np.ones((50, 100, 3), dtype=np.uint8) * 2
+        tiles = [tile1, tile2]
+
+        frame = Frame(
+            raw=raw, frame_no=1, tiles=tiles, tiling_cols=2, tiling_rows=1, tiling_width=100, tiling_height=50
+        )
+
+        assert np.array_equal(frame.get_tile(0, 0), tile1)
+        assert np.array_equal(frame.get_tile(1, 0), tile2)
+
+
+class TestFrameTiler:
+    def test_frame_tiler_creation(self):
+        from wildcamtools.lib.frames import FrameTiler
+
+        tiler = FrameTiler(cols=3, rows=2)
+        assert tiler.cols == 3
+        assert tiler.rows == 2
+
+    def test_frame_tiler_default_values(self):
+        from wildcamtools.lib.frames import FrameTiler
+
+        tiler = FrameTiler()
+        assert tiler.cols == 2
+        assert tiler.rows == 2
+
+    def test_frame_tiler_invalid_cols(self):
+        import pytest
+
+        from wildcamtools.lib.frames import FrameTiler
+
+        with pytest.raises(ValueError, match="cols must be at least 1"):
+            FrameTiler(cols=0)
+
+        with pytest.raises(ValueError, match="cols must be at least 1"):
+            FrameTiler(cols=-1)
+
+    def test_frame_tiler_invalid_rows(self):
+        import pytest
+
+        from wildcamtools.lib.frames import FrameTiler
+
+        with pytest.raises(ValueError, match="rows must be at least 1"):
+            FrameTiler(rows=0)
+
+        with pytest.raises(ValueError, match="rows must be at least 1"):
+            FrameTiler(rows=-1)
+
+    def test_frame_tiler_splits_frame_into_tiles(self):
+        from wildcamtools.lib.frames import FrameTiler
+
+        raw = np.random.randint(0, 255, (100, 200, 3), dtype=np.uint8)
+        frame = Frame(raw=raw, frame_no=1)
+
+        tiler = FrameTiler(cols=2, rows=2)
+        result = tiler.handle(frame)
+
+        assert result.tiles is not None
+        assert len(result.tiles) == 4
+        assert result.tiling_cols == 2
+        assert result.tiling_rows == 2
+        assert result.tiling_width == 100
+        assert result.tiling_height == 50
+
+    def test_frame_tiler_tiles_cover_image(self):
+        from wildcamtools.lib.frames import FrameTiler
+
+        raw = np.random.randint(0, 255, (100, 200, 3), dtype=np.uint8)
+        frame = Frame(raw=raw, frame_no=1)
+
+        tiler = FrameTiler(cols=2, rows=2)
+        result = tiler.handle(frame)
+
+        assert result.tiles is not None
+        for tile in result.tiles:
+            assert tile.shape[0] == 50
+            assert tile.shape[1] == 100
+            assert tile.shape[2] == 3
+
+    def test_frame_tiler_get_tile_access(self):
+        from wildcamtools.lib.frames import FrameTiler
+
+        raw = np.random.randint(0, 255, (100, 200, 3), dtype=np.uint8)
+        frame = Frame(raw=raw, frame_no=1)
+
+        tiler = FrameTiler(cols=2, rows=2)
+        result = tiler.handle(frame)
+
+        assert result.get_tile(0, 0) is not None
+        assert result.get_tile(1, 0) is not None
+        assert result.get_tile(0, 1) is not None
+        assert result.get_tile(1, 1) is not None
+
+    def test_frame_tiler_single_tile(self):
+        from wildcamtools.lib.frames import FrameTiler
+
+        raw = np.random.randint(0, 255, (100, 200, 3), dtype=np.uint8)
+        frame = Frame(raw=raw, frame_no=1)
+
+        tiler = FrameTiler(cols=1, rows=1)
+        result = tiler.handle(frame)
+
+        assert result.tiles is not None
+        assert len(result.tiles) == 1
+        assert result.tiling_cols == 1
+        assert result.tiling_rows == 1
+        assert result.tiling_width == 200
+        assert result.tiling_height == 100
+        assert np.array_equal(result.tiles[0], raw)
+
+    def test_frame_tiler_uses_output_property(self):
+        from wildcamtools.lib.frames import FrameTiler
+
+        raw = np.zeros((100, 200, 3), dtype=np.uint8)
+        crop = np.random.randint(0, 255, (50, 100, 3), dtype=np.uint8)
+        frame = Frame(raw=raw, frame_no=1, crop=crop)
+
+        tiler = FrameTiler(cols=2, rows=2)
+        result = tiler.handle(frame)
+
+        assert result.tiles is not None
+        assert len(result.tiles) == 4
+        for tile in result.tiles:
+            assert tile.shape[2] == 3
+
+    def test_frame_tiler_non_divisible_dimensions(self):
+        from wildcamtools.lib.frames import FrameTiler
+
+        raw = np.random.randint(0, 255, (101, 201, 3), dtype=np.uint8)
+        frame = Frame(raw=raw, frame_no=1)
+
+        tiler = FrameTiler(cols=2, rows=2)
+        result = tiler.handle(frame)
+
+        assert result.tiles is not None
+        assert len(result.tiles) == 4
+        assert all(tile.shape == result.tiles[0].shape for tile in result.tiles)
+        assert result.tiles[0].shape == (50, 100, 3)
+        assert result.tiling_width == 100
+        assert result.tiling_height == 50
+
+    def test_frame_tiler_covers_entire_image(self):
+        from wildcamtools.lib.frames import FrameTiler
+
+        raw = np.random.randint(0, 255, (100, 200, 3), dtype=np.uint8)
+        frame = Frame(raw=raw, frame_no=1)
+
+        tiler = FrameTiler(cols=3, rows=2)
+        result = tiler.handle(frame)
+
+        assert result.tiles is not None
+        assert len(result.tiles) == 6
+        assert all(tile.shape == result.tiles[0].shape for tile in result.tiles)
+
+        tile_h, tile_w = result.tiles[0].shape[:2]
+        step_y = int(tile_h * (1 - 0))
+        step_x = int(tile_w * (1 - 0))
+
+        last_tile_start_y = raw.shape[0] - tile_h
+        last_tile_start_x = raw.shape[1] - tile_w
+        assert last_tile_start_y >= step_y
+        assert last_tile_start_x >= step_x * 2
+        assert last_tile_start_y + tile_h == raw.shape[0]
+        assert last_tile_start_x + tile_w == raw.shape[1]
+
+    def test_frame_tiler_asymmetric_grid(self):
+        from wildcamtools.lib.frames import FrameTiler
+
+        raw = np.random.randint(0, 255, (100, 200, 3), dtype=np.uint8)
+        frame = Frame(raw=raw, frame_no=1)
+
+        tiler = FrameTiler(cols=3, rows=2)
+        result = tiler.handle(frame)
+
+        assert result.tiles is not None
+        assert len(result.tiles) == 6
+        assert result.tiling_cols == 3
+        assert result.tiling_rows == 2
+        assert result.tiling_width == 66
+        assert result.tiling_height == 50
+
+    def test_frame_tiler_overlap_default(self):
+        from wildcamtools.lib.frames import FrameTiler
+
+        raw = np.random.randint(0, 255, (100, 200, 3), dtype=np.uint8)
+        frame = Frame(raw=raw, frame_no=1)
+
+        tiler = FrameTiler(cols=2, rows=2)
+        result = tiler.handle(frame)
+
+        assert result.tiles is not None
+        assert len(result.tiles) == 4
+        assert result.tiles[0].shape == (50, 100, 3)
+
+    def test_frame_tiler_overlap_fifty_percent(self):
+        from wildcamtools.lib.frames import FrameTiler
+
+        raw = np.random.randint(0, 255, (100, 200, 3), dtype=np.uint8)
+        frame = Frame(raw=raw, frame_no=1)
+
+        tiler = FrameTiler(cols=2, rows=2, overlap=0.5)
+        result = tiler.handle(frame)
+
+        assert result.tiles is not None
+        assert len(result.tiles) == 4
+        assert all(tile.shape == result.tiles[0].shape for tile in result.tiles)
+        assert result.tiles[0].shape[0] > 50
+        assert result.tiles[0].shape[1] > 100
+
+    def test_frame_tiler_overlap_coverage(self):
+        from wildcamtools.lib.frames import FrameTiler
+
+        raw = np.random.randint(0, 255, (100, 200, 3), dtype=np.uint8)
+        frame = Frame(raw=raw, frame_no=1)
+
+        tiler = FrameTiler(cols=3, rows=2, overlap=0.5)
+        result = tiler.handle(frame)
+
+        assert result.tiles is not None
+        assert len(result.tiles) == 6
+        assert all(tile.shape == result.tiles[0].shape for tile in result.tiles)
+
+        tile_h, tile_w = result.tiles[0].shape[:2]
+        last_tile_start_y = raw.shape[0] - tile_h
+        last_tile_start_x = raw.shape[1] - tile_w
+
+        assert last_tile_start_y + tile_h == raw.shape[0]
+        assert last_tile_start_x + tile_w == raw.shape[1]
+
+    def test_frame_tiler_overlap_invalid(self):
+        import pytest
+
+        from wildcamtools.lib.frames import FrameTiler
+
+        with pytest.raises(ValueError, match=r"overlap must be between 0\.0 and 1\.0"):
+            FrameTiler(cols=2, rows=2, overlap=-0.1)
+
+        with pytest.raises(ValueError, match=r"overlap must be between 0\.0 and 1\.0"):
+            FrameTiler(cols=2, rows=2, overlap=1.0)
+
+        with pytest.raises(ValueError, match=r"overlap must be between 0\.0 and 1\.0"):
+            FrameTiler(cols=2, rows=2, overlap=1.5)

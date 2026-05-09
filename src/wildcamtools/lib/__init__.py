@@ -19,6 +19,11 @@ class Frame:
     crop: cv2.typing.MatLike | None = None
     rescale: cv2.typing.MatLike | None = None
     crop_bbox: BBox | None = None
+    tiles: list[cv2.typing.MatLike] | None = None
+    tiling_cols: int | None = None
+    tiling_rows: int | None = None
+    tiling_width: int | None = None
+    tiling_height: int | None = None
 
     @property
     def output(self) -> cv2.typing.MatLike:
@@ -69,6 +74,14 @@ class Frame:
         if self.crop is not None:
             return int(self.crop.shape[0])
         return self.height_raw
+
+    def get_tile(self, x: int, y: int) -> cv2.typing.MatLike | None:
+        if self.tiles is None or self.tiling_cols is None or self.tiling_rows is None:
+            return None
+        if x < 0 or x >= self.tiling_cols or y < 0 or y >= self.tiling_rows:
+            return None
+        index = y * self.tiling_cols + x
+        return self.tiles[index]
 
 
 @dataclass(frozen=True)

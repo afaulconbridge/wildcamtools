@@ -11,13 +11,10 @@ logger = logging.getLogger(__name__)
 
 @app.command()
 def run() -> None:
-    """Run the Streamlit video labeling application."""
-    # We need to point streamlit to the correct file path
-    script_path = Path(__file__).parent.parent / "lib" / "web" / "label.py"
+    """Run the Streamlit results viewer application."""
+    script_path = Path(__file__).parent.parent / "lib" / "web" / "results.py"
     python_exe = sys.executable
 
-    # Streamlit must be run via 'streamlit run ...'
-    # We can use subprocess to launch it.
     cmd = [python_exe, "-m", "streamlit", "run", str(script_path)]
 
     try:
@@ -26,7 +23,7 @@ def run() -> None:
         logger.exception("Error in streamlit application")
         raise typer.Exit(code=1) from e
     except KeyboardInterrupt:
-        logger.info("Stopping labeling app...")
+        logger.info("Stopping results viewer...")
         raise
 
 

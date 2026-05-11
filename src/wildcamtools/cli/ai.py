@@ -19,8 +19,8 @@ from wildcamtools.lib.ai.evaluate import (
 from wildcamtools.lib.ai.llamacpp import LlamaCppAnalyser
 from wildcamtools.lib.ai.ollama import OllamaAnalyser
 from wildcamtools.lib.errors.cli import InputNotDirectoryError
-from wildcamtools.lib.label import load_labels
 from wildcamtools.lib.timing import Timer
+from wildcamtools.lib.web.label import load_labels
 
 app = typer.Typer()
 logger = logging.getLogger(__name__)

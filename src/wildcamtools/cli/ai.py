@@ -9,16 +9,16 @@ from typing import Annotated, Any, cast
 import typer
 
 from wildcamtools.lib.ai import AbstractAnalyser, Backend
-from wildcamtools.lib.ai.evaluate import (
+from wildcamtools.lib.ai.evaluate import evaluate_frames
+from wildcamtools.lib.ai.llamacpp import LlamaCppAnalyser
+from wildcamtools.lib.ai.ollama import OllamaAnalyser
+from wildcamtools.lib.errors.cli import InputNotDirectoryError
+from wildcamtools.lib.frames import (
     AIEvaluation,
     AIFrameCreation,
     AIFrameCreationResult,
     create_frames,
-    evaluate_frames,
 )
-from wildcamtools.lib.ai.llamacpp import LlamaCppAnalyser
-from wildcamtools.lib.ai.ollama import OllamaAnalyser
-from wildcamtools.lib.errors.cli import InputNotDirectoryError
 from wildcamtools.lib.timing import Timer
 from wildcamtools.lib.web.label import load_labels
 

@@ -1,5 +1,7 @@
 import logging
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Any, Self
 
 import cv2
 import numpy as np
@@ -11,8 +13,9 @@ from wildcamtools.lib.errors.core import (
     InvalidAlphaError,
     InvalidMaxMagnitudeError,
 )
-from wildcamtools.lib.motion import MotionHandler
-from wildcamtools.lib.stats import VideoStats
+from wildcamtools.lib.motion import FlowMotion, MogMotion, MotionHandler
+from wildcamtools.lib.stats import VideoStats, get_video_stats
+from wildcamtools.lib.vidio import VideoReader
 
 from . import BBox, Frame, FrameHandler
 
@@ -426,3 +429,145 @@ class FrameTiler(FrameHandler):
         frame.tiling_width = tile_w_int
         frame.tiling_height = tile_h_int
         return frame
+
+
+@dataclass(kw_only=True)
+class AIFrameCreation:
+    filename: Path
+    video_directory: Path
+    tmpdir: Path
+    history: int = 30
+    threshold: float = 16.0
+    kernel_size: float = 0.02
+    x: int | None = None
+    y: int | None = None
+    fps: float | None = None
+    crop_expansion: float = 0.75
+    crop_inertia: float = 10.0
+    similarity_minimum: float | None = None
+    do_croppan: bool = False
+    motion_type: str = "mog"
+    tiling_cols: int | None = None
+    tiling_rows: int | None = None
+    tiling_overlap: float | None = None
+
+
+@dataclass(kw_only=True)
+class AIFrameCreationResult(AIFrameCreation):
+    frame_count: int
+
+    @classmethod
+    def from_creation(cls, creation: AIFrameCreation, *, frame_count: int) -> Self:
+        return cls(
+            filename=creation.filename,
+            video_directory=creation.video_directory,
+            tmpdir=creation.tmpdir,
+            history=creation.history,
+            threshold=creation.threshold,
+            kernel_size=creation.kernel_size,
+            x=creation.x,
+            y=creation.y,
+            fps=creation.fps,
+            crop_expansion=creation.crop_expansion,
+            crop_inertia=creation.crop_inertia,
+            similarity_minimum=creation.similarity_minimum,
+            do_croppan=creation.do_croppan,
+            motion_type=creation.motion_type,
+            tiling_cols=creation.tiling_cols,
+            tiling_rows=creation.tiling_rows,
+            tiling_overlap=creation.tiling_overlap,
+            frame_count=frame_count,
+        )
+
+
+@dataclass(kw_only=True)
+class AIEvaluation:
+    frame_directory: Path
+    label: str
+    backend: Any
+    url: str
+    model: str
+    api_key: str = "API_KEY"
+    prompt: str | None = None
+
+
+@dataclass(kw_only=True)
+class AIEvaluationResult(AIEvaluation):
+    correct: bool
+    raw_result: str
+
+    @classmethod
+    def from_evaluation(cls, evaluation: AIEvaluation, *, correct: bool, raw_result: str) -> Self:
+        return cls(
+            frame_directory=evaluation.frame_directory,
+            label=evaluation.label,
+            backend=evaluation.backend,
+            url=evaluation.url,
+            model=evaluation.model,
+            api_key=evaluation.api_key,
+            prompt=evaluation.prompt,
+            correct=correct,
+            raw_result=raw_result,
+        )
+
+
+def create_frames(
+    frame_creation: AIFrameCreation,
+) -> AIFrameCreationResult:
+    stats = get_video_stats(frame_creation.video_directory / frame_creation.filename)
+    handlers: list[FrameHandler] = []
+
+    if frame_creation.do_croppan:
+        motion_handler: FlowMotion | MogMotion
+        if frame_creation.motion_type == "flow":
+            motion_handler = FlowMotion(
+                history=frame_creation.history,
+                threshold=frame_creation.threshold,
+                kernel_size=frame_creation.kernel_size,
+            )
+        else:
+            motion_handler = MogMotion(
+                history=frame_creation.history,
+                threshold=int(frame_creation.threshold),
+                kernel_size=frame_creation.kernel_size,
+            )
+        handlers.append(
+            CropPanHandler(
+                motion_handler=motion_handler,
+                expansion=frame_creation.crop_expansion,
+                inertia=frame_creation.crop_inertia,
+            )
+        )
+
+    if frame_creation.similarity_minimum is not None:
+        handlers.append(FilterSSIM(similarity_minimum=frame_creation.similarity_minimum))
+
+    if frame_creation.x or frame_creation.y or frame_creation.fps:
+        handlers.append(
+            Rescaler(
+                stats=stats,
+                x=frame_creation.x,
+                y=frame_creation.y,
+                fps=frame_creation.fps,
+            )
+        )
+
+    if frame_creation.tiling_cols is not None and frame_creation.tiling_rows is not None:
+        handlers.append(
+            FrameTiler(
+                cols=frame_creation.tiling_cols,
+                rows=frame_creation.tiling_rows,
+                overlap=frame_creation.tiling_overlap or 0.0,
+            )
+        )
+
+    handlers.append(FrameImageWriter(frame_creation.tmpdir))
+
+    frame_count = 0
+    with VideoReader(frame_creation.video_directory / frame_creation.filename) as video_input:
+        for _frame in video_input:
+            frame_count += 1
+            for handler in handlers:
+                _frame = handler.handle(_frame)
+
+    return AIFrameCreationResult.from_creation(frame_creation, frame_count=frame_count)

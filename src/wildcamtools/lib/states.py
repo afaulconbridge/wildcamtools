@@ -82,12 +82,18 @@ class Watcher(FrameHandler):
     state: WatcherStateEnum
     transition_metrics: WatcherTransitionMetrics
     transition_window_metrics: dict[WatcherStateEnum, StateTransitionWindowMetrics]
+    amber_start: int | None
+    red_start: int | None
+    red_amber_start: int | None
 
     def __init__(self, motion: MogMotion, transition_metrics: WatcherTransitionMetrics) -> None:
         self.motion = motion
         self.state = WatcherStateEnum.PREPARING
         self.transition_metrics = transition_metrics
         self.transition_window_metrics = {}
+        self.amber_start = None
+        self.red_start = None
+        self.red_amber_start = None
 
     def handle(self, frame: Frame) -> Frame:
         output = self.motion.handle(frame)
@@ -128,7 +134,10 @@ class Watcher(FrameHandler):
             case WatcherStateEnum.AMBER:
                 if frame.motion_proportion < self.transition_metrics.amber_to_green_proportion_max:
                     return WatcherStateEnum.GREEN
-                elif frame.frame_no >= self.amber_start + self.transition_metrics.amber_to_red_duration:
+                elif (
+                    self.amber_start is not None
+                    and frame.frame_no >= self.amber_start + self.transition_metrics.amber_to_red_duration
+                ):
                     self.red_start = frame.frame_no
                     return WatcherStateEnum.RED
 
@@ -144,7 +153,10 @@ class Watcher(FrameHandler):
                 if frame.motion_proportion > self.transition_metrics.red_amber_to_red_proportion_min:
                     self.red_start = frame.frame_no
                     return WatcherStateEnum.RED
-                elif frame.frame_no >= self.red_amber_start + self.transition_metrics.red_amber_to_green_duration:
+                elif (
+                    self.red_amber_start is not None
+                    and frame.frame_no >= self.red_amber_start + self.transition_metrics.red_amber_to_green_duration
+                ):
                     return WatcherStateEnum.GREEN
 
             case WatcherStateEnum.DISABLED:
@@ -159,7 +171,8 @@ def _load_and_resize_mask(mask_path: Path | None, width: int, height: int, scale
     mask = cv2.imread(str(mask_path), cv2.IMREAD_GRAYSCALE)
     if mask is None:
         logger.error(
-            f"Failed to load motion mask from {mask_path}. The file may be corrupted or in an unsupported image format."
+            "Failed to load motion mask from %s. The file may be corrupted or in an unsupported image format.",
+            mask_path,
         )
         return None
 
@@ -174,9 +187,9 @@ def _load_and_resize_mask(mask_path: Path | None, width: int, height: int, scale
 
     if abs(stream_aspect - mask_aspect) > 0.05:
         logger.warning(
-            f"Motion mask aspect ratio ({mask_aspect:.2f}) differs significantly "
-            f"from stream aspect ratio ({stream_aspect:.2f}). "
-            f"The mask will be stretched to fit."
+            "Motion mask aspect ratio (%.2f) differs significantly from stream aspect ratio (%.2f). The mask will be stretched to fit.",
+            mask_aspect,
+            stream_aspect,
         )
 
     # Resize using nearest neighbor to keep binary mask properties

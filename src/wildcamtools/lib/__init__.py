@@ -27,10 +27,10 @@ class Frame:
 
     @property
     def output(self) -> cv2.typing.MatLike:
-        if self.rescale is not None:
-            return self.rescale
         if self.crop is not None:
             return self.crop
+        if self.rescale is not None:
+            return self.rescale
         return self.raw
 
     @property
@@ -61,18 +61,18 @@ class Frame:
 
     @property
     def width_rescaled(self) -> int:
-        if self.rescale is not None:
-            return int(self.rescale.shape[1])
         if self.crop is not None:
             return int(self.crop.shape[1])
+        if self.rescale is not None:
+            return int(self.rescale.shape[1])
         return self.width_raw
 
     @property
     def height_rescaled(self) -> int:
-        if self.rescale is not None:
-            return int(self.rescale.shape[0])
         if self.crop is not None:
             return int(self.crop.shape[0])
+        if self.rescale is not None:
+            return int(self.rescale.shape[0])
         return self.height_raw
 
     def get_tile(self, x: int, y: int) -> cv2.typing.MatLike | None:

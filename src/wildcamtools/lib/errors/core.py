@@ -110,8 +110,8 @@ class BoundingBoxHeightError(ValueError):
 
 
 class MotionMaskNotCreatedError(RuntimeError):
-    def __init__(self) -> None:
-        super().__init__("Motion Mask not created")
+    def __init__(self, message: str = "Motion Mask not created") -> None:
+        super().__init__(message)
 
 
 class InertiaValueError(ValueError):

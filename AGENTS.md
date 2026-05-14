@@ -13,8 +13,8 @@
 - **Purpose**: Motion-detected wildlife clip generation with lookback.
 - **Pipeline**: Camera $\to$ MediaMTX (RTSP) $\to$ FFMPEG Segmenter $\to$ Storage $\to$ Motion Detection $\to$ Clip Concat.
 - **Project Structure**:
-    - `src/wildcamtools/lib`: Core logic (motion, rtsp, segments, etc.).
-    - `src/wildcamtools/cli`: CLI tool implementation.
+    - `src/wildcamtools/lib`: Core business logic (motion, rtsp, segments, etc.).
+    - `src/wildcamtools/cli`: CLI tool implementation. Avoid adding business logic here, try to keep it to only code related to the CLI.
     - `deployment/`: Camera-side setup scripts.
     - `tests/`: Pytest suite with binaries in `tests/bin` (e.g., mediamtx).
 

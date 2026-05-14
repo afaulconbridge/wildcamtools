@@ -118,7 +118,7 @@ class MotionHandler(FrameHandler):
 
     def get_contour_bboxes(self) -> tuple[BBox, ...]:
         if self.motion_mask is None:
-            raise MotionMaskNotCreatedError()
+            raise MotionMaskNotCreatedError("Cannot get bounding boxes: motion mask has not been created yet")
 
         contours = self._get_contours(self.motion_mask)
         rects = [cv2.boundingRect(cv2.approxPolyDP(contour, 3, True)) for contour in contours]

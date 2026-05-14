@@ -1,4 +1,5 @@
 import logging
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Self
@@ -105,9 +106,13 @@ def match_image_sizes(
 
 
 class FrameImageWriter(FrameHandler):
+    outputs: list[Path]
+    output_dir: Path
+
     def __init__(self, output_dir: Path):
         self.output_dir = output_dir
         self.output_dir.mkdir(parents=True, exist_ok=True)
+        self.outputs = []
         super().__init__()
 
     def handle(self, frame: Frame) -> Frame:
@@ -128,6 +133,7 @@ class FrameImageWriter(FrameHandler):
                                 tile.shape[1],
                                 filename,
                             )
+                            self.outputs.append(filename)
                 logger.info(
                     "Wrote %d tiles for frame %s",
                     len(frame.tiles),
@@ -137,6 +143,7 @@ class FrameImageWriter(FrameHandler):
             filename = self.output_dir / f"frame_{frame.frame_no:05d}.jpg"
             cv2.imwrite(str(filename), frame.output)
             logger.debug("Writing %s -> %s", frame.frame_no, filename)
+            self.outputs.append(filename)
         return frame
 
 
@@ -571,3 +578,31 @@ def create_frames(
                 _frame = handler.handle(_frame)
 
     return AIFrameCreationResult.from_creation(frame_creation, frame_count=frame_count)
+
+
+class FrameImageRecreator:
+    def __init__(self, raw_images: Sequence[Path], rescale_images: Sequence[Path]) -> None:
+        if len(rescale_images) != len(raw_images):
+            raise ValueError("image lengths must match")
+        self.raw_images = raw_images
+        self.rescale_images = rescale_images
+        self.i = 0
+
+    def __iter__(self) -> Self:
+        return self
+
+    def __next__(self) -> Frame:
+        if self.i >= len(self.raw_images):
+            raise StopIteration()
+
+        raw = cv2.imread(self.raw_images[self.i])
+        if raw is None:
+            raise ValueError(f"Unable to read {self.raw_images[self.i]}")
+
+        rescale = cv2.imread(self.rescale_images[self.i])
+        if rescale is None:
+            raise ValueError(f"Unable to read {self.rescale_images[self.i]}")
+
+        frame = Frame(raw, self.i, rescale=rescale)
+        self.i += 1
+        return frame

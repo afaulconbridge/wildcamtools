@@ -2,6 +2,7 @@ import json
 import logging
 import multiprocessing
 from collections.abc import Sequence
+from dataclasses import asdict
 from multiprocessing.pool import AsyncResult
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -9,16 +10,17 @@ from typing import Annotated, Any, cast
 
 import typer
 
-from wildcamtools.lib.ai import AbstractAnalyser, Backend
+from wildcamtools.lib.ai import AbstractAnalyser, AIEvaluation, Backend
 from wildcamtools.lib.ai.evaluate import (
-    AIEvaluation,
     evaluate_frames,
 )
 from wildcamtools.lib.ai.llamacpp import LlamaCppAnalyser
 from wildcamtools.lib.ai.ollama import OllamaAnalyser
 from wildcamtools.lib.frames import (
-    AIFrameCreation,
-    AIFrameCreationResult,
+    CropPanConfig,
+    FrameCreation,
+    FrameCreationResult,
+    TilingConfig,
     create_frames,
 )
 from wildcamtools.lib.pipeline import generate_frames_for_video, process_pipeline_result, run_pipeline
@@ -68,8 +70,9 @@ def _build_evaluate_parameters(
     kernel_size: float,
     threshold: int,
     history: int,
-    crop_expansion: float,
-    crop_inertia: float,
+    crop_expansion: float | None,
+    crop_inertia: float | None,
+    enable_croppan: bool,
     x: int | None,
     y: int | None,
     fps: float | None,
@@ -80,19 +83,39 @@ def _build_evaluate_parameters(
 ) -> list[dict[str, Any]]:
     """Build list of parameter dictionaries for frame creation."""
     parameter_dicts: list[dict[str, Any]] = []
+
+    # Build crop_pan config only if explicitly enabled
+    crop_pan = None
+    if enable_croppan:
+        crop_pan = CropPanConfig(
+            history=history,
+            threshold=float(threshold),
+            kernel_size=kernel_size,
+            expansion=crop_expansion or 0.75,
+            inertia=crop_inertia or 10.0,
+            motion_type="mog",
+        )
+
+    # Build tiling config if tiling parameters are set
+    tiling = None
+    if tiling_cols is not None and tiling_rows is not None:
+        tiling = TilingConfig(
+            cols=tiling_cols,
+            rows=tiling_rows,
+            overlap=tiling_overlap or 0.0,
+        )
+
+    # Store config objects for FrameCreation, but convert to dicts for JSON serialization
     parameter_dicts.append({
-        "kernel_size": kernel_size,
-        "threshold": threshold,
-        "history": history,
-        "crop_expansion": crop_expansion,
-        "crop_inertia": crop_inertia,
         "x": x,
         "y": y,
         "fps": fps,
         "similarity_minimum": similarity_minimum,
-        "tiling_cols": tiling_cols,
-        "tiling_rows": tiling_rows,
-        "tiling_overlap": tiling_overlap,
+        "crop_pan": crop_pan,
+        "tiling": tiling,
+        # For JSON serialization, store dict versions
+        "_crop_pan_dict": asdict(crop_pan) if crop_pan is not None else None,
+        "_tiling_dict": asdict(tiling) if tiling is not None else None,
     })
     return parameter_dicts
 
@@ -109,7 +132,7 @@ def _process_frame_result(
 ) -> None:
     """Process a single frame result, evaluate it, and write to result file."""
     future_result, filename, frame_directory, parameter_dict = future
-    frame_creation_result = cast(AIFrameCreationResult, future_result.get())
+    frame_creation_result = cast(FrameCreationResult, future_result.get())
 
     label = labelled_data[filename]
     evaluated_result = evaluate_frames(
@@ -132,9 +155,17 @@ def _process_frame_result(
     counters[counter_key][1] += 1
 
     with open("result.jsonl", "a") as result_file:
-        output_parameter_dict = dict(parameter_dict)
-        output_parameter_dict["filename"] = filename
-        output_parameter_dict["model"] = model
+        # Use the serialized dict versions for JSON output
+        output_parameter_dict = {
+            "x": parameter_dict["x"],
+            "y": parameter_dict["y"],
+            "fps": parameter_dict["fps"],
+            "similarity_minimum": parameter_dict["similarity_minimum"],
+            "crop_pan": parameter_dict["_crop_pan_dict"],
+            "tiling": parameter_dict["_tiling_dict"],
+            "filename": filename,
+            "model": model,
+        }
         result_dict = {
             "result": evaluated_result.correct,
             "raw_result": evaluated_result.raw_result,
@@ -328,9 +359,10 @@ def evaluate(
     x: int | None = None,
     y: int | None = None,
     fps: float | None = None,
-    crop_expansion: float = 0.75,
-    crop_inertia: float = 10.0,
+    crop_expansion: float | None = None,
+    crop_inertia: float | None = None,
     similarity_minimum: float | None = None,
+    enable_croppan: Annotated[bool, typer.Option(help="Enable crop and pan")] = False,
     tiling_cols: Annotated[int | None, typer.Option(help="Number of horizontal tiles per frame")] = None,
     tiling_rows: Annotated[int | None, typer.Option(help="Number of vertical tiles per frame")] = None,
     tiling_overlap: Annotated[float | None, typer.Option(help="Overlap proportion between tiles (0.0-1.0)")] = None,
@@ -348,6 +380,7 @@ def evaluate(
         history=history,
         crop_expansion=crop_expansion,
         crop_inertia=crop_inertia,
+        enable_croppan=enable_croppan,
         x=x,
         y=y,
         fps=fps,
@@ -363,7 +396,7 @@ def evaluate(
         for parameter_dict in parameter_dicts:
             for filename in labelled_data:
                 frame_directory = TemporaryDirectory()
-                frame_creation = AIFrameCreation(
+                frame_creation = FrameCreation(
                     filename=Path(filename),
                     video_directory=video_directory,
                     tmpdir=Path(frame_directory.name),

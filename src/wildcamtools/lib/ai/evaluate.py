@@ -2,13 +2,9 @@ from __future__ import annotations
 
 import logging
 
-from wildcamtools.lib.ai import AbstractAnalyser, Backend
+from wildcamtools.lib.ai import AbstractAnalyser, AIEvaluation, AIEvaluationResult, Backend
 from wildcamtools.lib.ai.llamacpp import LlamaCppAnalyser
 from wildcamtools.lib.ai.ollama import OllamaAnalyser
-from wildcamtools.lib.frames import (
-    AIEvaluation,
-    AIEvaluationResult,
-)
 
 logger = logging.getLogger(__name__)
 

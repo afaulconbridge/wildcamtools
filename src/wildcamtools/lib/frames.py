@@ -2,7 +2,7 @@ import logging
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Self
+from typing import Self
 
 import cv2
 import numpy as np
@@ -439,110 +439,211 @@ class FrameTiler(FrameHandler):
 
 
 @dataclass(kw_only=True)
-class AIFrameCreation:
-    filename: Path
-    video_directory: Path
-    tmpdir: Path
+class CropPanConfig:
+    """Configuration for crop and pan features."""
+
+    expansion: float = 0.75
+    inertia: float = 10.0
+    motion_type: str = "mog"
     history: int = 30
     threshold: float = 16.0
     kernel_size: float = 0.02
-    x: int | None = None
-    y: int | None = None
-    fps: float | None = None
-    crop_expansion: float = 0.75
-    crop_inertia: float = 10.0
-    similarity_minimum: float | None = None
-    do_croppan: bool = False
-    motion_type: str = "mog"
-    tiling_cols: int | None = None
-    tiling_rows: int | None = None
-    tiling_overlap: float | None = None
+
+    def __post_init__(self) -> None:
+        if self.inertia < 0.0:
+            raise InertiaValueError()
+        if self.expansion < 0.0:
+            raise ExpansionValueError()
 
 
 @dataclass(kw_only=True)
-class AIFrameCreationResult(AIFrameCreation):
+class TilingConfig:
+    """Configuration for tiling features."""
+
+    cols: int = 2
+    rows: int = 2
+    overlap: float = 0.0
+
+    def __post_init__(self) -> None:
+        if self.cols < 1:
+            raise ValueError(f"cols must be at least 1, got {self.cols}")
+        if self.rows < 1:
+            raise ValueError(f"rows must be at least 1, got {self.rows}")
+        if self.overlap < 0.0 or self.overlap >= 1.0:
+            raise ValueError(f"overlap must be between 0.0 and 1.0, got {self.overlap}")
+
+
+@dataclass(kw_only=True)
+class FrameCreation:
+    filename: Path
+    video_directory: Path
+    tmpdir: Path
+    x: int | None = None
+    y: int | None = None
+    fps: float | None = None
+    similarity_minimum: float | None = None
+    crop_pan: CropPanConfig | None = None
+    tiling: TilingConfig | None = None
+
+    @classmethod
+    def with_crop_pan(
+        cls,
+        filename: Path,
+        video_directory: Path,
+        tmpdir: Path,
+        *,
+        expansion: float = 0.75,
+        inertia: float = 10.0,
+        motion_type: str = "mog",
+        history: int = 30,
+        threshold: float = 16.0,
+        kernel_size: float = 0.02,
+        x: int | None = None,
+        y: int | None = None,
+        fps: float | None = None,
+        similarity_minimum: float | None = None,
+    ) -> Self:
+        """Create a FrameCreation instance with crop and pan enabled."""
+        return cls(
+            filename=filename,
+            video_directory=video_directory,
+            tmpdir=tmpdir,
+            x=x,
+            y=y,
+            fps=fps,
+            similarity_minimum=similarity_minimum,
+            crop_pan=CropPanConfig(
+                expansion=expansion,
+                inertia=inertia,
+                motion_type=motion_type,
+                history=history,
+                threshold=threshold,
+                kernel_size=kernel_size,
+            ),
+        )
+
+    @classmethod
+    def with_tiling(
+        cls,
+        filename: Path,
+        video_directory: Path,
+        tmpdir: Path,
+        *,
+        cols: int = 2,
+        rows: int = 2,
+        overlap: float = 0.0,
+        x: int | None = None,
+        y: int | None = None,
+        fps: float | None = None,
+        similarity_minimum: float | None = None,
+    ) -> Self:
+        """Create a FrameCreation instance with tiling enabled."""
+        return cls(
+            filename=filename,
+            video_directory=video_directory,
+            tmpdir=tmpdir,
+            x=x,
+            y=y,
+            fps=fps,
+            similarity_minimum=similarity_minimum,
+            tiling=TilingConfig(
+                cols=cols,
+                rows=rows,
+                overlap=overlap,
+            ),
+        )
+
+    @classmethod
+    def with_crop_pan_and_tiling(
+        cls,
+        filename: Path,
+        video_directory: Path,
+        tmpdir: Path,
+        *,
+        expansion: float = 0.75,
+        inertia: float = 10.0,
+        motion_type: str = "mog",
+        history: int = 30,
+        threshold: float = 16.0,
+        kernel_size: float = 0.02,
+        cols: int = 2,
+        rows: int = 2,
+        overlap: float = 0.0,
+        x: int | None = None,
+        y: int | None = None,
+        fps: float | None = None,
+        similarity_minimum: float | None = None,
+    ) -> Self:
+        """Create a FrameCreation instance with both crop/pan and tiling enabled."""
+        return cls(
+            filename=filename,
+            video_directory=video_directory,
+            tmpdir=tmpdir,
+            x=x,
+            y=y,
+            fps=fps,
+            similarity_minimum=similarity_minimum,
+            crop_pan=CropPanConfig(
+                expansion=expansion,
+                inertia=inertia,
+                motion_type=motion_type,
+                history=history,
+                threshold=threshold,
+                kernel_size=kernel_size,
+            ),
+            tiling=TilingConfig(
+                cols=cols,
+                rows=rows,
+                overlap=overlap,
+            ),
+        )
+
+
+@dataclass(kw_only=True)
+class FrameCreationResult(FrameCreation):
     frame_count: int
 
     @classmethod
-    def from_creation(cls, creation: AIFrameCreation, *, frame_count: int) -> Self:
+    def from_creation(cls, creation: FrameCreation, *, frame_count: int) -> Self:
         return cls(
             filename=creation.filename,
             video_directory=creation.video_directory,
             tmpdir=creation.tmpdir,
-            history=creation.history,
-            threshold=creation.threshold,
-            kernel_size=creation.kernel_size,
             x=creation.x,
             y=creation.y,
             fps=creation.fps,
-            crop_expansion=creation.crop_expansion,
-            crop_inertia=creation.crop_inertia,
             similarity_minimum=creation.similarity_minimum,
-            do_croppan=creation.do_croppan,
-            motion_type=creation.motion_type,
-            tiling_cols=creation.tiling_cols,
-            tiling_rows=creation.tiling_rows,
-            tiling_overlap=creation.tiling_overlap,
+            crop_pan=creation.crop_pan,
+            tiling=creation.tiling,
             frame_count=frame_count,
         )
 
 
-@dataclass(kw_only=True)
-class AIEvaluation:
-    frame_directory: Path
-    label: str
-    backend: Any
-    url: str
-    model: str
-    api_key: str = "API_KEY"
-    prompt: str | None = None
-
-
-@dataclass(kw_only=True)
-class AIEvaluationResult(AIEvaluation):
-    correct: bool
-    raw_result: str
-
-    @classmethod
-    def from_evaluation(cls, evaluation: AIEvaluation, *, correct: bool, raw_result: str) -> Self:
-        return cls(
-            frame_directory=evaluation.frame_directory,
-            label=evaluation.label,
-            backend=evaluation.backend,
-            url=evaluation.url,
-            model=evaluation.model,
-            api_key=evaluation.api_key,
-            prompt=evaluation.prompt,
-            correct=correct,
-            raw_result=raw_result,
-        )
-
-
 def create_frames(
-    frame_creation: AIFrameCreation,
-) -> AIFrameCreationResult:
+    frame_creation: FrameCreation,
+) -> FrameCreationResult:
     stats = get_video_stats(frame_creation.video_directory / frame_creation.filename)
     handlers: list[FrameHandler] = []
 
-    if frame_creation.do_croppan:
+    if frame_creation.crop_pan is not None:
         motion_handler: FlowMotion | MogMotion
-        if frame_creation.motion_type == "flow":
+        if frame_creation.crop_pan.motion_type == "flow":
             motion_handler = FlowMotion(
-                history=frame_creation.history,
-                threshold=frame_creation.threshold,
-                kernel_size=frame_creation.kernel_size,
+                history=frame_creation.crop_pan.history,
+                threshold=frame_creation.crop_pan.threshold,
+                kernel_size=frame_creation.crop_pan.kernel_size,
             )
         else:
             motion_handler = MogMotion(
-                history=frame_creation.history,
-                threshold=int(frame_creation.threshold),
-                kernel_size=frame_creation.kernel_size,
+                history=frame_creation.crop_pan.history,
+                threshold=int(frame_creation.crop_pan.threshold),
+                kernel_size=frame_creation.crop_pan.kernel_size,
             )
         handlers.append(
             CropPanHandler(
                 motion_handler=motion_handler,
-                expansion=frame_creation.crop_expansion,
-                inertia=frame_creation.crop_inertia,
+                expansion=frame_creation.crop_pan.expansion,
+                inertia=frame_creation.crop_pan.inertia,
             )
         )
 
@@ -559,12 +660,12 @@ def create_frames(
             )
         )
 
-    if frame_creation.tiling_cols is not None and frame_creation.tiling_rows is not None:
+    if frame_creation.tiling is not None:
         handlers.append(
             FrameTiler(
-                cols=frame_creation.tiling_cols,
-                rows=frame_creation.tiling_rows,
-                overlap=frame_creation.tiling_overlap or 0.0,
+                cols=frame_creation.tiling.cols,
+                rows=frame_creation.tiling.rows,
+                overlap=frame_creation.tiling.overlap,
             )
         )
 
@@ -577,7 +678,7 @@ def create_frames(
             for handler in handlers:
                 _frame = handler.handle(_frame)
 
-    return AIFrameCreationResult.from_creation(frame_creation, frame_count=frame_count)
+    return FrameCreationResult.from_creation(frame_creation, frame_count=frame_count)
 
 
 class FrameImageRecreator:

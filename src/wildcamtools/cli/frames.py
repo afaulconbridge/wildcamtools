@@ -4,7 +4,7 @@ from typing import Annotated
 import typer
 
 from wildcamtools.lib.errors.cli import OutputNotDirectoryError
-from wildcamtools.lib.frames import AIFrameCreation, create_frames
+from wildcamtools.lib.frames import CropPanConfig, FrameCreation, create_frames
 from wildcamtools.lib.timing import Timer
 
 app = typer.Typer()
@@ -25,7 +25,7 @@ def ssim(
     if output.exists() and not output.is_dir():
         raise OutputNotDirectoryError()
 
-    frame_creation = AIFrameCreation(
+    frame_creation = FrameCreation(
         filename=Path(input_.name),
         video_directory=input_.parent,
         tmpdir=output,
@@ -63,21 +63,22 @@ def flow(
     if output.exists() and not output.is_dir():
         raise OutputNotDirectoryError()
 
-    frame_creation = AIFrameCreation(
+    frame_creation = FrameCreation(
         filename=Path(input_.name),
         video_directory=input_.parent,
         tmpdir=output,
-        history=history,
-        threshold=threshold,
-        kernel_size=kernel_size,
         x=x,
         y=y,
         fps=fps,
-        crop_expansion=crop_expansion,
-        crop_inertia=crop_inertia,
         similarity_minimum=similarity_minimum,
-        do_croppan=True,
-        motion_type="flow",
+        crop_pan=CropPanConfig(
+            history=history,
+            threshold=threshold,
+            kernel_size=kernel_size,
+            expansion=crop_expansion,
+            inertia=crop_inertia,
+            motion_type="flow",
+        ),
     )
     timer = Timer()
     with timer:

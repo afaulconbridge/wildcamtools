@@ -91,8 +91,8 @@ def _build_evaluate_parameters(
             history=history,
             threshold=float(threshold),
             kernel_size=kernel_size,
-            expansion=crop_expansion or 0.75,
-            inertia=crop_inertia or 10.0,
+            expansion=crop_expansion if crop_expansion is not None else 0.75,
+            inertia=crop_inertia if crop_inertia is not None else 10.0,
             motion_type="mog",
         )
 
@@ -102,10 +102,9 @@ def _build_evaluate_parameters(
         tiling = TilingConfig(
             cols=tiling_cols,
             rows=tiling_rows,
-            overlap=tiling_overlap or 0.0,
+            overlap=tiling_overlap if tiling_overlap is not None else 0.0,
         )
 
-    # Store config objects for FrameCreation, but convert to dicts for JSON serialization
     parameter_dicts.append({
         "x": x,
         "y": y,
@@ -113,9 +112,6 @@ def _build_evaluate_parameters(
         "similarity_minimum": similarity_minimum,
         "crop_pan": crop_pan,
         "tiling": tiling,
-        # For JSON serialization, store dict versions
-        "_crop_pan_dict": asdict(crop_pan) if crop_pan is not None else None,
-        "_tiling_dict": asdict(tiling) if tiling is not None else None,
     })
     return parameter_dicts
 
@@ -148,21 +144,22 @@ def _process_frame_result(
     )
     logger.info("File %s correct? %s", filename, evaluated_result.correct)
 
-    counter_key = tuple(sorted(parameter_dict.items()))
+    counter_key = tuple(
+        sorted((k, v) for k, v in parameter_dict.items() if v is None or isinstance(v, int | float | str | bool))
+    )
     if counter_key not in counters:
         counters[counter_key] = [0, 0]
     counters[counter_key][0] += 1 if evaluated_result.correct else 0
     counters[counter_key][1] += 1
 
     with open("result.jsonl", "a") as result_file:
-        # Use the serialized dict versions for JSON output
         output_parameter_dict = {
             "x": parameter_dict["x"],
             "y": parameter_dict["y"],
             "fps": parameter_dict["fps"],
             "similarity_minimum": parameter_dict["similarity_minimum"],
-            "crop_pan": parameter_dict["_crop_pan_dict"],
-            "tiling": parameter_dict["_tiling_dict"],
+            "crop_pan": asdict(parameter_dict["crop_pan"]) if parameter_dict["crop_pan"] is not None else None,
+            "tiling": asdict(parameter_dict["tiling"]) if parameter_dict["tiling"] is not None else None,
             "filename": filename,
             "model": model,
         }

@@ -20,7 +20,7 @@ jobs:
       - name: Install package dependencies
         uses: awalsh128/cache-apt-pkgs-action@latest
         with:
-          packages: ffmpeg
+          packages: ffmpeg libblas-dev
           version: 1.0
 
       - name: Install project and python dependencies

@@ -1,6 +1,6 @@
 import logging
 import os
-from collections.abc import Generator
+from collections.abc import Callable, Generator, Iterator
 from pathlib import Path
 
 import pytest
@@ -33,7 +33,7 @@ def fixture_video_path(data_directory: Path) -> Path:
 
 
 @pytest.fixture(name="video_frame_generator")
-def fixture_video_frame_generator(video_path: Path) -> Generator[Generator[Frame]]:
+def fixture_video_frame_generator(video_path: Path) -> Generator[Callable[[], Generator[Frame]]]:
     def internal_generator() -> Generator[Frame]:
         with VideoReader(video_path) as video_source:
             yield from video_source
@@ -42,6 +42,6 @@ def fixture_video_frame_generator(video_path: Path) -> Generator[Generator[Frame
 
 
 @pytest.fixture(name="rtsp_server", scope="session")
-def fixture_rtsp_server(video_path: Path) -> Generator[str]:
+def fixture_rtsp_server(video_path: Path) -> Iterator[str]:
     with BackgroundMediaMTX(), BackgroundFFMPEGBroadcast("tests/data/test.mp4"):
         yield "rtsp://localhost:8554/stream"

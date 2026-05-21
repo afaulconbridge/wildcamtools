@@ -264,7 +264,7 @@ class TestHandlerChainIntegration:
 
         frame = Frame(raw=raw, frame_no=10, crop=crop, rescale=rescale, crop_bbox=bbox)
 
-        motion_handler = MogMotion(history=1, threshold=16, detect_shadows=False, kernel_size=3)
+        motion_handler = MogMotion(history=1, threshold=16, detect_shadows=False, kernel_size=0.005)
         result = motion_handler.handle(frame)
 
         assert result.crop is crop

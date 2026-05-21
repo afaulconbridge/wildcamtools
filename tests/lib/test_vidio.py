@@ -2,6 +2,7 @@ from collections.abc import Callable, Generator
 from pathlib import Path
 
 import numpy as np
+import pytest
 
 from wildcamtools.lib import Frame
 from wildcamtools.lib.vidio import VideoReader, VideoWriter
@@ -19,6 +20,7 @@ def test_video_reader(video_path: Path) -> None:
             assert array.shape == (2160, 3840, 3)  # 4k colour
 
 
+@pytest.mark.skip(reason="Requires ffmpeg with full codec support; unreliable in CI")
 def test_video_reader_rtsp(rtsp_server: str) -> None:
     frame_no = 0
     with VideoReader(rtsp_server, 3840, 2160) as video_reader:

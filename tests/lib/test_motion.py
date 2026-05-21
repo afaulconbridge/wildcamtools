@@ -1,12 +1,11 @@
-from collections.abc import Generator
+from collections.abc import Callable, Generator
 
-import numpy as np
-
+from wildcamtools.lib import Frame
 from wildcamtools.lib.motion import MogMotion
 
 
-def test_motion_mog(video_frame_generator: Generator[np.ndarray]):
-    motion_mog = MogMotion(history=1, threshold=16, detect_shadows=False, kernel_size=3)
+def test_motion_mog(video_frame_generator: Callable[[], Generator[Frame]]):
+    motion_mog = MogMotion(history=1, threshold=16, detect_shadows=False, kernel_size=0.005)
 
     for frame in video_frame_generator():
         frame = motion_mog.handle(frame)

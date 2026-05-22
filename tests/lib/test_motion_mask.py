@@ -40,13 +40,12 @@ def test_motion_multiple_lowest_points_masked():
 
 
 def test_motion_mask_intersects_bottom_edge():
-    # Initialize motion handler
-    motion = MogMotion(history=1)
-
     # Create a mask that only covers the MIDDLE of the bottom edge
     mask = np.zeros((100, 100), dtype=np.uint8)
     mask[70, 45:55] = 255  # Small mask in the center of the bottom edge
-    motion.motion_mask = mask
+
+    # Initialize motion handler with exclusion mask
+    motion = MogMotion(history=1, motion_mask=mask)
 
     # Create a blob whose bottom edge is at Y=70 from X=30 to X=70
     # The endpoints (30, 70) and (70, 70) are NOT masked

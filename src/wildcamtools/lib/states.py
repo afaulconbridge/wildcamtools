@@ -13,9 +13,39 @@ from pydantic import BaseModel
 from wildcamtools.lib import Frame, FrameHandler
 from wildcamtools.lib.motion import MogMotion
 from wildcamtools.lib.stats import VideoStats, get_video_stats
+from wildcamtools.lib.utils import is_stream_url
 from wildcamtools.lib.vidio import VideoReader
 
 logger = logging.getLogger(__name__)
+
+
+class MotionProcessWrapper:
+    """Typed wrapper for multiprocessing Process with restart_on_exit attribute."""
+
+    restart_on_exit: bool
+
+    def __init__(self, process: Process, restart_on_exit: bool) -> None:
+        self._process = process
+        self.restart_on_exit = restart_on_exit
+
+    @property
+    def pid(self) -> int | None:
+        return self._process.pid
+
+    def is_alive(self) -> bool:
+        return self._process.is_alive()
+
+    def start(self) -> None:
+        self._process.start()
+
+    def terminate(self) -> None:
+        self._process.terminate()
+
+    def join(self, timeout: float | None = None) -> None:
+        self._process.join(timeout=timeout)
+
+    def kill(self) -> None:
+        self._process.terminate()
 
 
 class WatcherStateEnum(StrEnum):
@@ -115,53 +145,73 @@ class Watcher(FrameHandler):
         else:
             self.transition_window_metrics[next_state].update(frame.motion_proportion)
 
-    def _get_next_state(self, frame: Frame) -> WatcherStateEnum:  # noqa: C901
+    def _get_next_state(self, frame: Frame) -> WatcherStateEnum:
         logger.debug("Frame no: %s", frame.frame_no)
         logger.debug("Motion proportion: %s", frame.motion_proportion)
         match self.state:
             case WatcherStateEnum.PREPARING:
-                if frame.frame_no >= self.transition_metrics.preparing_duration:
-                    return WatcherStateEnum.GREEN
-
+                return self._handle_preparing_state(frame)
             case WatcherStateEnum.GREEN:
-                if frame.motion_proportion > self.transition_metrics.green_to_amber_motion_min:
-                    if self.transition_metrics.amber_to_red_duration == 0:
-                        return WatcherStateEnum.RED
-                    else:
-                        self.amber_start = frame.frame_no
-                        return WatcherStateEnum.AMBER
-
+                return self._handle_green_state(frame)
             case WatcherStateEnum.AMBER:
-                if frame.motion_proportion < self.transition_metrics.amber_to_green_proportion_max:
-                    return WatcherStateEnum.GREEN
-                elif (
-                    self.amber_start is not None
-                    and frame.frame_no >= self.amber_start + self.transition_metrics.amber_to_red_duration
-                ):
-                    self.red_start = frame.frame_no
-                    return WatcherStateEnum.RED
-
+                return self._handle_amber_state(frame)
             case WatcherStateEnum.RED:
-                if frame.motion_proportion < self.transition_metrics.red_to_red_amber_proportion_max:
-                    if self.transition_metrics.red_amber_to_green_duration == 0:
-                        return WatcherStateEnum.GREEN
-                    else:
-                        self.red_amber_start = frame.frame_no
-                        return WatcherStateEnum.RED_AMBER
-
+                return self._handle_red_state(frame)
             case WatcherStateEnum.RED_AMBER:
-                if frame.motion_proportion > self.transition_metrics.red_amber_to_red_proportion_min:
-                    self.red_start = frame.frame_no
-                    return WatcherStateEnum.RED
-                elif (
-                    self.red_amber_start is not None
-                    and frame.frame_no >= self.red_amber_start + self.transition_metrics.red_amber_to_green_duration
-                ):
-                    return WatcherStateEnum.GREEN
-
+                return self._handle_red_amber_state(frame)
             case WatcherStateEnum.DISABLED:
                 pass
         return self.state
+
+    def _handle_preparing_state(self, frame: Frame) -> WatcherStateEnum:
+        """Handle transition from PREPARING state."""
+        if frame.frame_no >= self.transition_metrics.preparing_duration:
+            return WatcherStateEnum.GREEN
+        return WatcherStateEnum.PREPARING
+
+    def _handle_green_state(self, frame: Frame) -> WatcherStateEnum:
+        """Handle transition from GREEN state."""
+        if frame.motion_proportion > self.transition_metrics.green_to_amber_motion_min:
+            if self.transition_metrics.amber_to_red_duration == 0:
+                return WatcherStateEnum.RED
+            else:
+                self.amber_start = frame.frame_no
+                return WatcherStateEnum.AMBER
+        return WatcherStateEnum.GREEN
+
+    def _handle_amber_state(self, frame: Frame) -> WatcherStateEnum:
+        """Handle transition from AMBER state."""
+        if frame.motion_proportion < self.transition_metrics.amber_to_green_proportion_max:
+            return WatcherStateEnum.GREEN
+        if (
+            self.amber_start is not None
+            and frame.frame_no >= self.amber_start + self.transition_metrics.amber_to_red_duration
+        ):
+            self.red_start = frame.frame_no
+            return WatcherStateEnum.RED
+        return WatcherStateEnum.AMBER
+
+    def _handle_red_state(self, frame: Frame) -> WatcherStateEnum:
+        """Handle transition from RED state."""
+        if frame.motion_proportion < self.transition_metrics.red_to_red_amber_proportion_max:
+            if self.transition_metrics.red_amber_to_green_duration == 0:
+                return WatcherStateEnum.GREEN
+            else:
+                self.red_amber_start = frame.frame_no
+                return WatcherStateEnum.RED_AMBER
+        return WatcherStateEnum.RED
+
+    def _handle_red_amber_state(self, frame: Frame) -> WatcherStateEnum:
+        """Handle transition from RED_AMBER state."""
+        if frame.motion_proportion > self.transition_metrics.red_amber_to_red_proportion_min:
+            self.red_start = frame.frame_no
+            return WatcherStateEnum.RED
+        if (
+            self.red_amber_start is not None
+            and frame.frame_no >= self.red_amber_start + self.transition_metrics.red_amber_to_green_duration
+        ):
+            return WatcherStateEnum.GREEN
+        return WatcherStateEnum.RED_AMBER
 
 
 def _load_and_resize_mask(mask_path: Path | None, width: int, height: int, scale: float) -> np.ndarray | None:
@@ -202,7 +252,7 @@ def enqueue_motion_windows(
     queue: Queue,
     history: int,
     threshold: int,
-    kernel_size: int,
+    kernel_size: float,
     scale: float,
     fps: float,
     hwaccel: str,
@@ -212,6 +262,7 @@ def enqueue_motion_windows(
     def _find_motion_times(source: str, stats: VideoStats, watcher: Watcher) -> Generator[MotionWindow]:
         start_frame: int | None = None
         start_time: datetime | None = None
+        logger.debug("Reading %s at %sx%s@%s (%s)", source, stats.x, stats.y, fps, scale)
         with VideoReader(
             source,
             width=stats.x,
@@ -274,13 +325,14 @@ def create_motion_process(
     rtsp_stream: str,
     msg_queue: Queue,
     threshold: float,
-    kernel_size: int,
+    kernel_size: float,
     scale: float,
     fps: float,
     hwaccel: str,
     transition_metrics: WatcherTransitionMetrics,
     motion_mask: Path | None = None,
-) -> Process:
+    restart_on_exit: bool | None = None,
+) -> MotionProcessWrapper:
     motion_process = Process(
         target=enqueue_motion_windows,
         kwargs={
@@ -298,6 +350,8 @@ def create_motion_process(
         daemon=True,
         name="wildcamtools-motion",
     )
-    motion_process.start()
+    restart_on_exit_value = restart_on_exit if restart_on_exit is not None else is_stream_url(rtsp_stream)
+    wrapper = MotionProcessWrapper(motion_process, restart_on_exit_value)
+    wrapper.start()
 
-    return motion_process
+    return wrapper

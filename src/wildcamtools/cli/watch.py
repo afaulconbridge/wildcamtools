@@ -4,12 +4,11 @@ import logging
 import os
 from datetime import datetime, timedelta
 from enum import StrEnum
-from multiprocessing import Process, Queue
+from multiprocessing import Queue
 from pathlib import Path
 from queue import Empty
-from subprocess import Popen
 from time import sleep
-from typing import Annotated
+from typing import TYPE_CHECKING, Annotated
 
 import typer
 from typer_config import use_yaml_config
@@ -22,7 +21,11 @@ from wildcamtools.lib.errors import (
     MotionMaskNotReadableError,
 )
 from wildcamtools.lib.segment import create_segment_process
+
+if TYPE_CHECKING:
+    from wildcamtools.lib.segment import _PyAVSegmentProcess
 from wildcamtools.lib.states import (
+    MotionProcessWrapper,
     MotionWindow,
     WatcherTransitionMetrics,
     create_motion_process,
@@ -76,7 +79,7 @@ class WatcherManager:
     offset_end: float
     history: int
     threshold: int
-    kernel_size: int
+    kernel_size: float
     scale: float
     fps: float
     hwaccel: str
@@ -85,8 +88,12 @@ class WatcherManager:
     motion_mask: Path | None
     msg_queue: Queue
     stat: WatcherManagerStateEnum
-    motion_process: Process | None = None
-    segment_process: Popen | None = None
+    motion_process: MotionProcessWrapper | None
+    segment_process: "_PyAVSegmentProcess | None"
+    _segment_process_completed: bool
+    _motion_process_completed: bool
+    _segment_restart_count: int
+    _MAX_RESTART_ATTEMPTS: int = 3
 
     def __init__(
         self,
@@ -98,7 +105,7 @@ class WatcherManager:
         offset_end: float,
         history: int,
         threshold: int,
-        kernel_size: int,
+        kernel_size: float,
         scale: float,
         fps: float,
         hwaccel: str,
@@ -124,14 +131,70 @@ class WatcherManager:
 
         self.msg_queue = Queue()
         self.state = WatcherManagerStateEnum.WAITING
+        self.motion_process = None
+        self.segment_process = None
+        self._segment_process_completed = False
+        self._motion_process_completed = False
+        self._segment_restart_count = 0
+
+    def _handle_motion_process_restart(self) -> None:
+        """Handle restarting the motion process.
+
+        Called when motion process terminates and should_restart=True.
+        Resets _motion_process_completed to False to allow future restarts.
+        """
+        self.motion_process = create_motion_process(
+            rtsp_stream=self.rtsp_stream,
+            msg_queue=self.msg_queue,
+            threshold=self.threshold,
+            kernel_size=self.kernel_size,
+            scale=self.scale,
+            fps=self.fps,
+            hwaccel=self.hwaccel,
+            transition_metrics=self.transition_metrics,
+            motion_mask=self.motion_mask,
+            restart_on_exit=None,  # Auto-detect
+        )
+        self._motion_process_completed = False
+
+    def _handle_segment_process_restart(self) -> None:
+        """Handle restarting the segment process with restart attempt limiting.
+
+        Called when segment process terminates and should_restart=True.
+        Resets _segment_process_completed to False to allow future restarts.
+        Returns early if max restart attempts exceeded.
+        """
+        if self._segment_restart_count >= self._MAX_RESTART_ATTEMPTS:
+            logger.error("Segmentation process exceeded max restart attempts (%d)", self._MAX_RESTART_ATTEMPTS)
+            self.segment_process = None
+            return
+
+        logger.warning(
+            "Segmentation process terminated, restarting... (attempt %d/%d)",
+            self._segment_restart_count + 1,
+            self._MAX_RESTART_ATTEMPTS,
+        )
+        self.segment_process = create_segment_process(
+            input_=self.rtsp_stream,
+            output=self.segments_dir,
+            duration=self.segment_duration,
+        )
+        self._segment_restart_count += 1
+        self._segment_process_completed = False
 
     def check_and_start_processes(self) -> None:
         # check and create motion process
         if self.motion_process and not self.motion_process.is_alive():
-            logger.warning("Motion Process is dead")
-            self.motion_process = None
-        if not self.motion_process:
-            logger.info("Creating Motion process...")
+            should_restart = getattr(self.motion_process, "restart_on_exit", True)
+
+            if should_restart:
+                logger.warning("Motion Process terminated, restarting...")
+                self._handle_motion_process_restart()
+            else:
+                logger.info("Motion Process completed successfully")
+                self._motion_process_completed = True
+                self.motion_process = None
+        elif self.motion_process is None and not self._motion_process_completed:
             self.motion_process = create_motion_process(
                 rtsp_stream=self.rtsp_stream,
                 msg_queue=self.msg_queue,
@@ -142,18 +205,34 @@ class WatcherManager:
                 hwaccel=self.hwaccel,
                 transition_metrics=self.transition_metrics,
                 motion_mask=self.motion_mask,
+                restart_on_exit=None,  # Auto-detect
             )
 
         # check and create segment process
         if self.segment_process and self.segment_process.poll() is not None:
-            logger.warning("Segmentation process is dead")
-            self.segment_process = None
-        if not self.segment_process:
+            should_restart = self.segment_process.restart_on_exit
+
+            if self.segment_process.returncode != 0:
+                logger.error(
+                    "Segmentation process terminated with error (returncode %d)", self.segment_process.returncode
+                )
+
+            if should_restart:
+                self._handle_segment_process_restart()
+            else:
+                logger.info("Segmentation process completed successfully")
+                self._segment_restart_count = 0
+                self._segment_process_completed = True
+                self.segment_process = None
+
+        # Create segment process if not running and hasn't completed yet
+        if self.segment_process is None and not self._segment_process_completed:
             logger.info("Creating Segmentation process...")
             self.segment_process = create_segment_process(
                 input_=self.rtsp_stream,
                 output=self.segments_dir,
                 duration=self.segment_duration,
+                # Auto-detect: RTSP URL will default to restart_on_exit=True
             )
 
     def get_message(self) -> MotionWindow | None:
@@ -169,10 +248,18 @@ class WatcherManager:
             raise CannotCombineOpenWindowError()
         end_time = motion_window.end_time + timedelta(seconds=self.offset_end)
 
+        max_wait_time = self.segment_duration * 10  # Wait for at most 10 segment durations
+        wait_time = 0
+
         while (to_merge := find_segments_for_timespan(start_time, end_time, self.segments_dir)) is None:
             # inner loop waiting for enough segments to be made
             self.check_and_start_processes()
             sleep(self.segment_duration)
+            wait_time += self.segment_duration
+
+            if wait_time >= max_wait_time:
+                logger.error("Timeout waiting for segments (waited %ds)", wait_time)
+                return  # Exit early to prevent infinite loop
         output_file = self.output_dir / start_time.strftime("out_%Y_%m_%d__%H_%M_%S.mp4")
         logger.info("Joining %s segments into %s", len(to_merge), output_file)
         concat_videos(to_merge, output_file)
@@ -180,6 +267,10 @@ class WatcherManager:
         # also output a JSON summary
         with open(self.output_dir / start_time.strftime("out_%Y_%m_%d__%H_%M_%S.json"), "w") as json_out:
             json_out.write(motion_window.model_dump_json())
+
+    def _all_processes_completed(self) -> bool:
+        """Check if all processes have completed (for file inputs)."""
+        return self._motion_process_completed and self._segment_process_completed
 
     def cleanup_old_segments(self, *, keep_override: int = -1) -> None:
         keep = keep_override if keep_override >= 0 else self.keep_count
@@ -200,6 +291,11 @@ class WatcherManager:
 
         try:
             while True:
+                # check if all processes have completed (file input)
+                if self._all_processes_completed():
+                    logger.info("All processes completed, exiting...")
+                    break
+
                 # check subprocesses while checking queue for a message
                 msg = None
                 msg = self.get_message()
@@ -241,7 +337,7 @@ def watch(
     offset_end: Annotated[float, typer.Option(metavar="FLOAT", envvar="WCT_OFFSET_END")] = 10.0,  # seconds
     history: Annotated[int, typer.Option(metavar="INT", envvar="WCT_HISTORY")] = 30,  # frames
     threshold: Annotated[int, typer.Option(metavar="INT", envvar="WCT_THRESHOLD")] = 16,  # < 128?
-    kernel_size: Annotated[int, typer.Option(metavar="INT", envvar="WCT_KERNEL_SIZE")] = 3,  # pixels
+    kernel_size: Annotated[float, typer.Option(metavar="FLOAT", envvar="WCT_KERNEL_SIZE")] = 0.005,  # proportion
     scale: Annotated[float, typer.Option(metavar="FLOAT", envvar="WCT_SCALE")] = 0.25,  # <1.0
     fps: Annotated[float, typer.Option(metavar="FLOAT", envvar="WCT_FPS")] = 5.0,  # >=1.0
     hwaccel: Annotated[
@@ -282,6 +378,9 @@ def watch(
     output = output.resolve()
     if not output.is_dir() or not output.exists():
         raise typer.BadParameter("output must be an existing directory")
+    if kernel_size < 0 or kernel_size > 1:
+        raise typer.BadParameter("kernel_size must be a float proportion between 0 and 1")
+
     transition_metrics = WatcherTransitionMetrics(
         preparing_duration=history,
         green_to_amber_motion_min=green_to_amber_motion_min,

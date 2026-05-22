@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import logging
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -696,13 +698,13 @@ class FrameImageRecreator:
         if self.i >= len(self.raw_images):
             raise StopIteration()
 
-        raw = cv2.imread(self.raw_images[self.i])
+        raw = cv2.imread(str(self.raw_images[self.i]))
         if raw is None:
-            raise ValueError(f"Unable to read {self.raw_images[self.i]}")
+            raise FileNotFoundError(f"Unable to read image: {self.raw_images[self.i]}")
 
-        rescale = cv2.imread(self.rescale_images[self.i])
+        rescale = cv2.imread(str(self.rescale_images[self.i]))
         if rescale is None:
-            raise ValueError(f"Unable to read {self.rescale_images[self.i]}")
+            raise FileNotFoundError(f"Unable to read image: {self.rescale_images[self.i]}")
 
         frame = Frame(raw, self.i, rescale=rescale)
         self.i += 1

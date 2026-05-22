@@ -11,6 +11,7 @@ import numpy as np
 from pydantic import BaseModel
 
 from wildcamtools.lib import Frame, FrameHandler
+from wildcamtools.lib.frames import Rescaler
 from wildcamtools.lib.motion import MogMotion
 from wildcamtools.lib.stats import VideoStats, get_video_stats
 from wildcamtools.lib.utils import is_stream_url
@@ -82,6 +83,14 @@ class StateTransitionWindowMetrics(BaseModel):
 
 
 class MotionWindow(BaseModel):
+    """
+    Represents a motion detection window with frame and time boundaries.
+
+    Note: Frame numbers use source video indices (native FPS, e.g., 30 fps),
+    not post-filtering indices. When using Rescaler with fps < native_fps,
+    frame_no values will be spaced (e.g., 0, 6, 12, ... for 30fps source at 5fps).
+    """
+
     start_frame: int
     start_time: datetime
     end_frame: int | None
@@ -259,33 +268,49 @@ def enqueue_motion_windows(
     transition_metrics: WatcherTransitionMetrics,
     motion_mask: Path | None = None,
 ) -> None:
+    """
+    Extract motion windows from video stream.
+
+    Note: Frame numbers in returned MotionWindow objects use source video indices
+    (native FPS), not post-filtering indices. When using Rescaler with fps < native_fps,
+    frame_no values will be spaced (e.g., 0, 6, 12, ... for 30fps source at 5fps).
+    """
+
     def _find_motion_times(source: str, stats: VideoStats, watcher: Watcher) -> Generator[MotionWindow]:
         start_frame: int | None = None
         start_time: datetime | None = None
+        prev_state: WatcherStateEnum | None = None
+        last_frame_no: int | None = None
         logger.debug("Reading %s at %sx%s@%s (%s)", source, stats.x, stats.y, fps, scale)
-        with VideoReader(
-            source,
-            width=stats.x,
-            height=stats.y,
-            scale=scale,
-            fps=fps,
-            hwaccel=hwaccel if hwaccel else None,
-        ) as video_input:
+        rescaler = Rescaler(stats, int(stats.x * scale), int(stats.y * scale), fps)
+        with VideoReader(source, hwaccel=hwaccel if hwaccel else None) as video_input:
             for frame in video_input:
+                frame = rescaler.handle(frame)
+                if not frame.filter_keep:
+                    continue
                 frame = watcher.handle(frame)
-                # TODO include both amber and red-amber states in window
-                if start_frame is None and start_time is None and watcher.state == WatcherStateEnum.RED:
-                    start_frame = frame.frame_no
-                    start_time = datetime.now(UTC)
-                    yield MotionWindow(
-                        start_frame=start_frame,
-                        start_time=start_time,
-                        end_frame=None,
-                        end_time=None,
-                        transition_metrics=watcher.transition_metrics,
-                        transition_window_metrics=watcher.transition_window_metrics,
+                last_frame_no = frame.frame_no
+                # Start tracking when transitioning from GREEN to any motion state (AMBER or RED)
+                # This handles both normal transitions (GREEN->AMBER) and zero-duration transitions (GREEN->RED)
+                if start_frame is None and start_time is None:
+                    if prev_state == WatcherStateEnum.GREEN and watcher.state in (
+                        WatcherStateEnum.AMBER,
+                        WatcherStateEnum.RED,
+                    ):
+                        start_frame = frame.frame_no
+                        start_time = datetime.now(UTC)
+                # End tracking when returning to GREEN from any motion state
+                elif (
+                    start_frame is not None
+                    and start_time is not None
+                    and watcher.state == WatcherStateEnum.GREEN
+                    and prev_state
+                    in (
+                        WatcherStateEnum.AMBER,
+                        WatcherStateEnum.RED,
+                        WatcherStateEnum.RED_AMBER,
                     )
-                elif start_frame is not None and start_time is not None and watcher.state == WatcherStateEnum.GREEN:
+                ):
                     end_frame = frame.frame_no
                     end_time = datetime.now(UTC)
                     yield MotionWindow(
@@ -298,6 +323,19 @@ def enqueue_motion_windows(
                     )
                     start_frame = None
                     start_time = None
+
+                prev_state = watcher.state
+
+            # Yield any pending window if video ended during motion
+            if start_frame is not None and start_time is not None and last_frame_no is not None:
+                yield MotionWindow(
+                    start_frame=start_frame,
+                    start_time=start_time,
+                    end_frame=last_frame_no,
+                    end_time=datetime.now(UTC),
+                    transition_metrics=watcher.transition_metrics,
+                    transition_window_metrics=watcher.transition_window_metrics,
+                )
 
     stats = get_video_stats(rtsp_stream)
     processed_mask = _load_and_resize_mask(

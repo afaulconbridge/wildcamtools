@@ -18,6 +18,7 @@ class MotionHandler(FrameHandler):
     kernel_size: float
     kernel: np.ndarray | None = None
     background_subtractor: cv2.BackgroundSubtractor
+    exclusion_mask: np.ndarray | None = None
     motion_mask: np.ndarray | None = None
 
     def __init__(
@@ -28,7 +29,8 @@ class MotionHandler(FrameHandler):
     ):
         self.history = history
         self.kernel_size = kernel_size
-        self.motion_mask = motion_mask
+        self.exclusion_mask = motion_mask
+        self.motion_mask = None
 
     def handle(self, frame: Frame) -> Frame:
         frame_out = self.update_background(frame.raw)
@@ -60,14 +62,14 @@ class MotionHandler(FrameHandler):
     def _get_contours(self, mask: MatLike) -> Sequence[MatLike]:
         contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
-        if self.motion_mask is None:
+        if self.exclusion_mask is None:
             return contours
         # Filter out contours whose lowest point (max Y coordinate) is within a masked area.
         # If a contour has multiple points with the same maximum Y coordinate,
         # we consider it masked if ANY of those points are in a masked area.
         # This prevents motion in specifically excluded regions (like moving foliage at the top)
         # from triggering a motion detection.
-        mh, mw = self.motion_mask.shape
+        mh, mw = self.exclusion_mask.shape
         filtered_contours = []
         for cnt in contours:
             # Find the maximum Y coordinate among all points in the contour
@@ -84,7 +86,7 @@ class MotionHandler(FrameHandler):
 
             # Check the points themselves
             for x, y in pts:
-                if 0 <= y < mh and 0 <= x < mw and self.motion_mask[y, x] != 0:
+                if 0 <= y < mh and 0 <= x < mw and self.exclusion_mask[y, x] != 0:
                     is_masked = True
                     break
 
@@ -97,7 +99,7 @@ class MotionHandler(FrameHandler):
                 x_end, _ = pts[-1]
                 # Scan along the horizontal segment at max_y
                 for x_sample in range(x_start, x_end + 1):
-                    if 0 <= y_start < mh and 0 <= x_sample < mw and self.motion_mask[y_start, x_sample] != 0:
+                    if 0 <= y_start < mh and 0 <= x_sample < mw and self.exclusion_mask[y_start, x_sample] != 0:
                         is_masked = True
                         break
 
@@ -106,7 +108,7 @@ class MotionHandler(FrameHandler):
         return filtered_contours
 
     def get_motion_proportion(self, frame: MatLike) -> float:
-        if self.motion_mask is None:
+        if self.exclusion_mask is None:
             return cv2.countNonZero(frame) / (float(frame.shape[0]) * float(frame.shape[1]))
         areas = (cv2.contourArea(cnt) for cnt in self._get_contours(frame))
         area_total = sum(areas)
@@ -116,11 +118,47 @@ class MotionHandler(FrameHandler):
     @abstractmethod
     def update_background(self, frame: MatLike) -> MatLike: ...
 
+    def _filter_contours(self, contours: Sequence[MatLike]) -> Sequence[MatLike]:
+        """Filter out contours that overlap with the exclusion mask."""
+        if self.exclusion_mask is None:
+            return contours
+
+        mh, mw = self.exclusion_mask.shape
+        filtered_contours = []
+        for cnt in contours:
+            max_y = np.max(cnt[:, 0, 1])
+            lowest_points = cnt[cnt[:, 0, 1] == max_y]
+
+            is_masked = False
+            pts = [(int(p[0, 0]), int(p[0, 1])) for p in lowest_points]
+
+            for x, y in pts:
+                if 0 <= y < mh and 0 <= x < mw and self.exclusion_mask[y, x] != 0:
+                    is_masked = True
+                    break
+
+            if not is_masked and len(pts) >= 2:
+                pts.sort()
+                x_start, y_start = pts[0]
+                x_end, _ = pts[-1]
+                for x_sample in range(x_start, x_end + 1):
+                    if 0 <= y_start < mh and 0 <= x_sample < mw and self.exclusion_mask[y_start, x_sample] != 0:
+                        is_masked = True
+                        break
+
+            if not is_masked:
+                filtered_contours.append(cnt)
+        return filtered_contours
+
     def get_contour_bboxes(self) -> tuple[BBox, ...]:
         if self.motion_mask is None:
             raise MotionMaskNotCreatedError("Cannot get bounding boxes: motion mask has not been created yet")
 
-        contours = self._get_contours(self.motion_mask)
+        contours, _ = cv2.findContours(self.motion_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+        if self.exclusion_mask is not None:
+            contours = self._filter_contours(contours)
+
         rects = [cv2.boundingRect(cv2.approxPolyDP(contour, 3, True)) for contour in contours]
         # Convert cv2 bounding boxes (x, y, w, h) to BBox (x1, y1, x2, y2)
         merged_rects = [BBox(r[0], r[1], r[0] + r[2], r[1] + r[3]) for r in rects]

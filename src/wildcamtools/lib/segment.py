@@ -1,16 +1,15 @@
 import logging
-from datetime import datetime
+import threading
+from datetime import UTC, datetime
 from pathlib import Path
-from subprocess import Popen
 from typing import Any, Literal, Self
 
 import av
 import av.container
-import ffmpeg
-import ffmpeg.formats.muxers
 
 from wildcamtools.lib import Frame
-from wildcamtools.lib.errors.core import ProcessTypeMismatchError, VideoNotInContextError
+from wildcamtools.lib.errors.core import VideoNotInContextError
+from wildcamtools.lib.utils import is_stream_url
 
 logger = logging.getLogger(__name__)
 
@@ -111,7 +110,7 @@ class VideoSegmenter:
             raise VideoNotInContextError()
 
         segment_path = str(self.segment_dir / self.segment_pattern)
-        segment_path = datetime.now().strftime(segment_path)
+        segment_path = datetime.now(UTC).strftime(segment_path)
 
         self._segment_container = av.open(segment_path, mode="w", options=self.format_options)
         output_stream = self._segment_container.add_stream(
@@ -195,24 +194,259 @@ class VideoSegmenter:
         return self._frame_no
 
 
-def create_segment_process(*, input_: str | Path, output: str | Path, duration: float) -> Popen:
-    f = ffmpeg.input(
-        input_,
-        # demuxer_options=ffmpeg.formats.demuxers.rtsp(rtsp_transport="tcp"),
-    ).output(
-        codec="copy",
-        f="segment",
-        muxer_options=ffmpeg.formats.muxers.segment(
-            segment_time=str(duration),  # seconds
-            segment_format="mp4",
-            segment_format_options="movflags=+faststart",
-            segment_atclocktime=True,
-            reset_timestamps=True,
-            strftime=True,
-        ),
-        filename=f"{output}/seg_%Y_%m_%d__%H_%M_%S.mp4",
+class _PyAVSegmentProcess:
+    """
+    Popen-like wrapper for PyAV-based stream segmenter.
+
+    Runs segmentation in a background thread to mimic subprocess behavior.
+    Uses stream copy (no re-encoding) for efficiency.
+
+    Attributes:
+        stdin: Always None (not used for segmenting)
+        stdout: Always None (not used for segmenting)
+        stderr: Always None (not used for segmenting)
+        returncode: Exit code (0 for success, 1 for error, 2 for no segments, None for running)
+        pid: Fake PID (thread identifier)
+        restart_on_exit: Whether process should restart on successful completion
+    """
+
+    stdin = None
+    stdout = None
+    stderr = None
+    returncode: int | None
+    pid: int
+    restart_on_exit: bool
+
+    def __init__(
+        self,
+        input_: str | Path,
+        output: str | Path,
+        duration: float,
+        restart_on_exit: bool | None = None,
+    ) -> None:
+        self._input = str(input_)
+        self._output = Path(output)
+        self._duration = duration
+        self._thread: threading.Thread | None = None
+        self._stop_event = threading.Event()
+        self.returncode = None
+        self.pid = id(self) & 0xFFFF
+        # Auto-detect restart behavior if not explicitly specified
+        # Stream URLs (rtsp://, http://, etc.) default to restart_on_exit=True
+        # File paths default to restart_on_exit=False
+        self.restart_on_exit = restart_on_exit if restart_on_exit is not None else is_stream_url(input_)
+
+    def _run(self) -> None:
+        """Main segmentation loop running in background thread."""
+        input_container: av.container.InputContainer | None = None
+
+        try:
+            self._output.mkdir(parents=True, exist_ok=True)
+
+            input_container = av.open(self._input, mode="r")
+
+            video_stream, audio_stream = self._get_streams(input_container)
+
+            segment_count = self._process_packets(input_container, video_stream, audio_stream)
+
+            if segment_count == 0:
+                msg = "Segmentation completed without producing any segments"
+                logger.error(msg)
+                self.returncode = 2
+            else:
+                logger.info("Segmentation completed: %d segments created", segment_count)
+                self.returncode = 0
+
+        except Exception:
+            logger.exception("Segmentation error")
+            self.returncode = 1
+
+        finally:
+            if input_container:
+                try:
+                    input_container.close()
+                except Exception:
+                    logger.exception("Error closing input container")
+
+    def _process_packets(
+        self,
+        input_container: av.container.InputContainer,
+        video_stream: av.VideoStream,
+        audio_stream: av.AudioStream | None,
+    ) -> int:
+        """Process packets and create segments. Returns segment count."""
+        segment_start_time: float | None = None
+        segment_index = 0
+        segment_count = 0
+        output_streams: dict[int, av.stream.Stream] = {}
+        output_container: av.container.OutputContainer | None = None
+
+        for packet in input_container.demux():
+            if self._stop_event.is_set():
+                break
+
+            if not self._should_process_packet(packet):
+                continue
+
+            packet_time = self._get_packet_time(packet)
+            if packet_time is None:
+                continue
+
+            if segment_start_time is None:
+                segment_start_time = packet_time
+
+            if self._should_rotate_segment(packet_time, segment_start_time):
+                if output_container:
+                    self._close_output_container(output_container)
+                    segment_count += 1
+                    output_container = None
+                    output_streams = {}
+                segment_start_time = packet_time
+                segment_index += 1
+
+            if output_container is None:
+                output_container, output_streams = self._create_output_container(
+                    video_stream, audio_stream, segment_index
+                )
+
+            self._mux_packet(output_container, packet, output_streams)
+
+        if output_container:
+            self._close_output_container(output_container)
+            segment_count += 1
+
+        return segment_count
+
+    def _should_process_packet(self, packet: av.Packet) -> bool:
+        """Check if packet should be processed."""
+        return packet.stream.type in ("video", "audio") and packet.dts is not None
+
+    def _should_rotate_segment(self, packet_time: float, segment_start_time: float) -> bool:
+        """Check if a new segment should be started."""
+        return packet_time - segment_start_time >= self._duration
+
+    def _get_streams(
+        self, input_container: av.container.InputContainer
+    ) -> tuple[av.VideoStream, av.AudioStream | None]:
+        """Extract video and audio streams from input container."""
+        if not input_container.streams.video:
+            msg = f"No video streams found in {self._input}"
+            raise ValueError(msg)
+
+        video_stream = input_container.streams.video[0]
+        audio_stream = input_container.streams.audio[0] if input_container.streams.audio else None
+        return video_stream, audio_stream
+
+    def _get_packet_time(self, packet: av.Packet) -> float | None:
+        """Get packet timestamp in seconds."""
+        if packet.dts is None or packet.stream.time_base is None:
+            return None
+        return float(packet.dts * packet.stream.time_base)
+
+    def _mux_packet(
+        self,
+        container: av.container.OutputContainer,
+        packet: av.Packet,
+        output_streams: dict[int, av.stream.Stream],
+    ) -> None:
+        """Assign packet to output stream and mux it."""
+        if packet.stream.index not in output_streams:
+            return
+        packet.stream = output_streams[packet.stream.index]
+        container.mux(packet)
+
+    def _create_output_container(
+        self,
+        video_stream: av.VideoStream,
+        audio_stream: av.AudioStream | None,
+        segment_index: int,
+    ) -> tuple[av.container.OutputContainer, dict[int, av.stream.Stream]]:
+        """Create a new output segment file and return stream mapping."""
+        segment_path = self._output / f"seg_{datetime.now(UTC):%Y_%m_%d__%H_%M_%S}_{segment_index:04d}.mp4"
+
+        output_container = av.open(
+            str(segment_path),
+            mode="w",
+            options={"movflags": "+faststart"},
+        )
+
+        output_streams: dict[int, av.stream.Stream] = {}
+        output_streams[video_stream.index] = output_container.add_stream_from_template(video_stream)
+        if audio_stream:
+            output_streams[audio_stream.index] = output_container.add_stream_from_template(audio_stream)
+
+        logger.debug("Created segment %s", segment_path)
+        return output_container, output_streams
+
+    def _close_output_container(
+        self,
+        container: av.container.OutputContainer,
+    ) -> None:
+        """Flush and close output container."""
+        try:
+            container.close()
+            logger.debug("Closed segment container")
+        except Exception:
+            logger.exception("Error closing output container")
+
+    def start(self) -> None:
+        """Start the background thread."""
+        self._thread = threading.Thread(target=self._run, daemon=True)
+        self._thread.start()
+
+    def poll(self) -> int | None:
+        """Check if process has terminated. Returns returncode if done, None if running."""
+        if self._thread and not self._thread.is_alive():
+            return self.returncode
+        return None
+
+    def wait(self, timeout: float | None = None) -> int:
+        """Wait for process to terminate. Returns returncode."""
+        if self._thread:
+            self._thread.join(timeout=timeout)
+        return self.returncode or 0
+
+    def terminate(self) -> None:
+        """Signal the thread to stop."""
+        self._stop_event.set()
+
+    def kill(self) -> None:
+        """Alias for terminate."""
+        self.terminate()
+
+
+def create_segment_process(
+    *,
+    input_: str | Path,
+    output: str | Path,
+    duration: float,
+    restart_on_exit: bool | None = None,
+) -> _PyAVSegmentProcess:
+    """
+    Create a segmenter process using PyAV (no subprocess).
+
+    Uses stream copy (no re-encoding) for efficiency.
+    Runs in a background thread to mimic subprocess behavior.
+
+    Parameters:
+        input_: Path to input video file or RTSP URL
+        output: Directory to write segment files
+        duration: Duration of each segment in seconds
+        restart_on_exit: If True, process should restart on successful completion.
+                        If False, process terminates on completion.
+                        If None (default), auto-detects from input type:
+                        - Stream URLs (rtsp://, http://, etc.) → True
+                        - File paths → False
+
+    Returns:
+        _PyAVSegmentProcess object with poll(), wait(), terminate() methods.
+        The object has a `restart_on_exit` attribute indicating the configured behavior.
+    """
+    process = _PyAVSegmentProcess(
+        input_=input_,
+        output=output,
+        duration=duration,
+        restart_on_exit=restart_on_exit,
     )
-    res = f.global_args(hide_banner=True, loglevel="error").overwrite_output().run_async()
-    if not isinstance(res, Popen):
-        raise ProcessTypeMismatchError()
-    return res
+    process.start()
+    return process

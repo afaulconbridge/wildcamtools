@@ -1,16 +1,18 @@
-import bisect
+from __future__ import annotations
+
 import contextlib
 import logging
 import os
-from datetime import datetime, timedelta
+from datetime import datetime
 from enum import StrEnum
 from multiprocessing import Queue
 from pathlib import Path
 from queue import Empty
 from time import sleep
-from typing import TYPE_CHECKING, Annotated
+from typing import Annotated
 
 import typer
+from pydantic import BaseModel
 from typer_config import use_yaml_config
 
 from wildcamtools.lib.concat import concat_videos
@@ -20,54 +22,104 @@ from wildcamtools.lib.errors import (
     MotionMaskNotFileError,
     MotionMaskNotReadableError,
 )
-from wildcamtools.lib.segment import create_segment_process
-
-if TYPE_CHECKING:
-    from wildcamtools.lib.segment import _PyAVSegmentProcess
+from wildcamtools.lib.segment import _PyAVSegmentProcess, create_segment_process
+from wildcamtools.lib.segment_metadata import SegmentMetadata
 from wildcamtools.lib.states import (
     MotionProcessWrapper,
     MotionWindow,
     WatcherTransitionMetrics,
     create_motion_process,
 )
+from wildcamtools.lib.utils import is_stream_url
 
 app = typer.Typer()
 logger = logging.getLogger(__name__)
 
 
-def find_segments_for_timespan(start_time: datetime, end_time: datetime, segments_dir: Path) -> tuple[Path, ...] | None:
-    logger.info("Finding segments from %s to %s", start_time, end_time)
-    # given a directory
+def find_segments_for_framerange(
+    start_frame: int, end_frame: int, segments_dir: Path, is_segmenting: bool = True
+) -> tuple[Path, ...] | None:
+    """Find segment files that overlap with the given frame range.
 
-    # build a list of files in segment directory
-    segments_files = tuple(sorted(segments_dir.iterdir()))
+    Args:
+        start_frame: First frame number to include
+        end_frame: Last frame number to include
+        segments_dir: Directory containing segment files and metadata
+        is_segmenting: If True, wait for all segments to be complete.
+                      If False, accept the last segment even if incomplete.
 
-    # turn the time into a path to a non-existant file
-    ftime_string = "seg_%Y_%m_%d__%H_%M_%S.mp4"
-    start_time_path = segments_dir / start_time.strftime(ftime_string)
-    end_time_path = segments_dir / end_time.strftime(ftime_string)
-    logger.info("Finding segments from %s to %s", start_time_path, end_time_path)
+    Returns:
+        Tuple of segment file paths to merge, or None if not all segments are ready
+    """
+    logger.info("Finding segments for frames %d to %d", start_frame, end_frame)
 
-    # work out where in the list the start and end filenames would be inserted
-    start_position = bisect.bisect_left(segments_files, start_time_path)
-    end_position = bisect.bisect_right(segments_files, end_time_path)
-    logger.info("Segment positions from %s to %s", start_position, end_position)
+    # Find all metadata files
+    metadata_files = sorted(segments_dir.glob("*.meta.json"))
 
-    if end_position == len(segments_files):
-        # if we would cover the last file, beware
-        # it might not be complete and parseable yet.
-        # signal to caller to try again soon
-        logger.info("Potentially incomplete file detected")
+    if not metadata_files:
+        logger.warning("No segment metadata files found in %s", segments_dir)
         return None
-    else:
-        # files that should be merged
-        # TODO also offsets to trim
-        return segments_files[max(start_position - 1, 0) : end_position]
+
+    # Load metadata and find overlapping segments
+    matching_segments: list[Path] = []
+    for metadata_path in metadata_files:
+        metadata = SegmentMetadata.load(metadata_path)
+        if metadata is None:
+            logger.debug("Skipping invalid metadata file: %s", metadata_path)
+            continue
+
+        # Check if segment overlaps with requested frame range
+        if metadata.end_frame < start_frame or metadata.start_frame > end_frame:
+            continue
+
+        # Get the corresponding segment file
+        segment_path = SegmentMetadata.get_segment_path(metadata_path)
+        if not segment_path.exists():
+            logger.warning("Segment file missing: %s", segment_path)
+            continue
+
+        matching_segments.append(segment_path)
+
+    if not matching_segments:
+        logger.info("No segments found for frame range %d-%d", start_frame, end_frame)
+        return ()
+
+    # Check if the last segment might be incomplete (only if still segmenting)
+    if is_segmenting:
+        last_segment = matching_segments[-1]
+        last_metadata_path = SegmentMetadata.get_metadata_path(last_segment)
+        if last_metadata_path in metadata_files:
+            last_metadata = SegmentMetadata.load(last_metadata_path)
+            if last_metadata and last_metadata.end_frame < end_frame:
+                # The last segment doesn't cover the full range, wait for more
+                logger.info("Potentially incomplete segment range, waiting for more segments")
+                return None
+
+    logger.info("Found %d segments for frame range %d-%d", len(matching_segments), start_frame, end_frame)
+    return tuple(sorted(matching_segments))
 
 
 class WatcherManagerStateEnum(StrEnum):
     WAITING = "WAITING"
     RECORDING = "RECORDING"
+
+
+class OutputClipMetadata(BaseModel):
+    """Metadata for an output clip file.
+
+    Attributes:
+        start_frame: First frame number in the clip
+        end_frame: Last frame number in the clip
+        start_time: Start timestamp (for streams)
+        end_time: End timestamp (for streams)
+        motion_window: Original motion window that triggered the clip
+    """
+
+    start_frame: int
+    end_frame: int
+    start_time: datetime | None = None
+    end_time: datetime | None = None
+    motion_window: MotionWindow
 
 
 class WatcherManager:
@@ -89,11 +141,12 @@ class WatcherManager:
     msg_queue: Queue
     stat: WatcherManagerStateEnum
     motion_process: MotionProcessWrapper | None
-    segment_process: "_PyAVSegmentProcess | None"
+    segment_process: _PyAVSegmentProcess | None
     _segment_process_completed: bool
     _motion_process_completed: bool
     _segment_restart_count: int
     _MAX_RESTART_ATTEMPTS: int = 3
+    _is_stream: bool
 
     def __init__(
         self,
@@ -128,6 +181,7 @@ class WatcherManager:
         self.segment_duration = segment_duration
         self.transition_metrics = transition_metrics
         self.motion_mask = motion_mask
+        self._is_stream = is_stream_url(rtsp_stream)
 
         self.msg_queue = Queue()
         self.state = WatcherManagerStateEnum.WAITING
@@ -167,6 +221,7 @@ class WatcherManager:
         if self._segment_restart_count >= self._MAX_RESTART_ATTEMPTS:
             logger.error("Segmentation process exceeded max restart attempts (%d)", self._MAX_RESTART_ATTEMPTS)
             self.segment_process = None
+            self._segment_process_completed = True
             return
 
         logger.warning(
@@ -216,14 +271,17 @@ class WatcherManager:
                 logger.error(
                     "Segmentation process terminated with error (returncode %d)", self.segment_process.returncode
                 )
+                should_restart = False
 
             if should_restart:
                 self._handle_segment_process_restart()
             else:
-                logger.info("Segmentation process completed successfully")
+                if self.segment_process.returncode != 0:
+                    logger.info("Segmentation process terminated (returncode %d)", self.segment_process.returncode)
+                else:
+                    logger.info("Segmentation process completed successfully")
                 self._segment_restart_count = 0
                 self._segment_process_completed = True
-                self.segment_process = None
 
         # Create segment process if not running and hasn't completed yet
         if self.segment_process is None and not self._segment_process_completed:
@@ -242,16 +300,39 @@ class WatcherManager:
             msg = self.msg_queue.get_nowait()
         return msg
 
+    def _seconds_to_frames(self, seconds: float, fps: float) -> int:
+        """Convert seconds to frame count."""
+        return int(seconds * fps)
+
     def combine_segments(self, motion_window: MotionWindow) -> None:
-        start_time = motion_window.start_time - timedelta(seconds=self.offset_start)
-        if motion_window.end_time is None:
+        if motion_window.end_frame is None:
             raise CannotCombineOpenWindowError()
-        end_time = motion_window.end_time + timedelta(seconds=self.offset_end)
+
+        # Get FPS from the first available segment metadata or use default
+        fps = self._get_fps_from_segments()
+        if fps is None:
+            logger.warning("Could not determine FPS, using default 30.0")
+            fps = 30.0
+
+        # Convert offsets from seconds to frames for segment selection
+        offset_start_frames = self._seconds_to_frames(self.offset_start, fps)
+        offset_end_frames = self._seconds_to_frames(self.offset_end, fps)
+
+        # Use offset-adjusted frames for selecting segments to merge
+        segment_start_frame = max(0, motion_window.start_frame - offset_start_frames)
+        segment_end_frame = motion_window.end_frame + offset_end_frames
 
         max_wait_time = self.segment_duration * 10  # Wait for at most 10 segment durations
         wait_time = 0
 
-        while (to_merge := find_segments_for_timespan(start_time, end_time, self.segments_dir)) is None:
+        while (
+            to_merge := find_segments_for_framerange(
+                segment_start_frame,
+                segment_end_frame,
+                self.segments_dir,
+                is_segmenting=not self._segment_process_completed,
+            )
+        ) is None:
             # inner loop waiting for enough segments to be made
             self.check_and_start_processes()
             sleep(self.segment_duration)
@@ -260,13 +341,48 @@ class WatcherManager:
             if wait_time >= max_wait_time:
                 logger.error("Timeout waiting for segments (waited %ds)", wait_time)
                 return  # Exit early to prevent infinite loop
-        output_file = self.output_dir / start_time.strftime("out_%Y_%m_%d__%H_%M_%S.mp4")
+
+        if not to_merge:
+            logger.warning("No segments found for frame range %d-%d", segment_start_frame, segment_end_frame)
+            return
+
+        # Generate output filename based on input type using actual motion window frames
+        if self._is_stream:
+            # Timestamp-based naming for streams
+            timestamp = motion_window.start_time
+            output_base = f"out_{timestamp:%Y_%m_%d__%H_%M_%S}"
+            output_metadata = OutputClipMetadata(
+                start_frame=motion_window.start_frame,
+                end_frame=motion_window.end_frame,
+                start_time=motion_window.start_time,
+                end_time=motion_window.end_time,
+                motion_window=motion_window,
+            )
+        else:
+            # Frame-based naming for files (use actual motion window frames, not offset-adjusted)
+            output_base = f"out_frame{motion_window.start_frame:06d}_{motion_window.end_frame:06d}"
+            output_metadata = OutputClipMetadata(
+                start_frame=motion_window.start_frame,
+                end_frame=motion_window.end_frame,
+                motion_window=motion_window,
+            )
+
+        output_file = self.output_dir / f"{output_base}.mp4"
         logger.info("Joining %s segments into %s", len(to_merge), output_file)
         concat_videos(to_merge, output_file)
 
         # also output a JSON summary
-        with open(self.output_dir / start_time.strftime("out_%Y_%m_%d__%H_%M_%S.json"), "w") as json_out:
-            json_out.write(motion_window.model_dump_json())
+        with open(self.output_dir / f"{output_base}.json", "w") as json_out:
+            json_out.write(output_metadata.model_dump_json(indent=2))
+
+    def _get_fps_from_segments(self) -> float | None:
+        """Get FPS from the first available segment metadata file."""
+        metadata_files = sorted(self.segments_dir.glob("*.meta.json"))
+        for metadata_path in metadata_files:
+            metadata = SegmentMetadata.load(metadata_path)
+            if metadata is not None:
+                return metadata.fps
+        return None
 
     def _all_processes_completed(self) -> bool:
         """Check if all processes have completed (for file inputs)."""

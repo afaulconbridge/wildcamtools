@@ -29,11 +29,17 @@ jobs:
           echo "fc3c1b2123f49b6df545a7622e5127d21cd794b15134fc3b66e1ca49f7fb297e  install.sh" | sha256sum -c -
           bash install.sh
 
+      - name: Setup Ollama Cloud auth
+        run: |
+          mkdir -p ~/.local/share/opencode
+          echo '{"ollama-cloud":{"type":"api","key":"${{ secrets.OLLAMA_CLOUD_API_KEY }}"}}' > ~/.local/share/opencode/auth.json
+
       - name: Run AI Review
         env:
           OLLAMA_CLOUD_API_KEY: ${{ secrets.OLLAMA_CLOUD_API_KEY }}
         run: |
-          OUTPUT=$(opencode run --agent code-reviewer "This is a diff of changes in this pull request compared to the target main branch, review it." --file diff.txt) || {
+          opencode models --provider ollama-cloud
+          OUTPUT=$(opencode run --model 'ollama-cloud/gemma4:31b' --agent code-reviewer "This is a diff of changes in this pull request compared to the target main branch, review it." --file diff.txt) || {
             echo "OpenCode failed to execute."
             exit 1
           }

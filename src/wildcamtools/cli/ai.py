@@ -1,29 +1,17 @@
 import json
 import logging
-import multiprocessing
-from collections.abc import Sequence
-from dataclasses import asdict
-from multiprocessing.pool import AsyncResult
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from typing import Annotated, Any, cast
+from typing import Annotated
 
 import typer
 
-from wildcamtools.lib.ai import AbstractAnalyser, AIEvaluation, Backend
-from wildcamtools.lib.ai.evaluate import (
-    evaluate_frames,
-)
-from wildcamtools.lib.ai.llamacpp import LlamaCppAnalyser
-from wildcamtools.lib.ai.ollama import OllamaAnalyser
-from wildcamtools.lib.frames import (
-    CropPanConfig,
-    FrameCreation,
-    FrameCreationResult,
-    TilingConfig,
-    create_frames,
-)
-from wildcamtools.lib.pipeline import generate_frames_for_video, process_pipeline_result, run_pipeline
+from wildcamtools.lib.ai import AIEvaluation, Backend, SpeciesResult
+from wildcamtools.lib.ai.evaluate import evaluate_frames
+from wildcamtools.lib.ai.evaluate import evaluate_pipeline as evaluate_pipeline_lib
+from wildcamtools.lib.ai.llm import create_analyser
+from wildcamtools.lib.frames import CropPanConfig, FrameCreation, TilingConfig, create_frames
+from wildcamtools.lib.pipeline import run_pipeline
 from wildcamtools.lib.timing import Timer
 from wildcamtools.lib.web.label import load_labels
 
@@ -31,16 +19,19 @@ app = typer.Typer()
 logger = logging.getLogger(__name__)
 
 
-def _read_prompt_file(prompt_file: Path | None) -> str | None:
+def _read_prompt_file(prompt_file: Path | None) -> str:
     """Read prompt from file if provided, validating existence and content."""
+    prompt_default = (
+        """This is a video image from a UK garden near a river. Is there an animal in this image, if so what?"""
+    )
     if prompt_file is None:
-        return None
+        return prompt_default
     if not prompt_file.exists():
         raise FileNotFoundError(f"Prompt file not found: {prompt_file}")
     prompt = prompt_file.read_text()
     if not prompt.strip():
         logger.warning("Prompt file %s is empty, using default prompt", prompt_file)
-        return None
+        return prompt_default
     return prompt
 
 
@@ -66,179 +57,6 @@ def _validate_tiling_parameters(
     return tiling_cols, tiling_rows, tiling_overlap
 
 
-def _build_evaluate_parameters(
-    kernel_size: float,
-    threshold: int,
-    history: int,
-    crop_expansion: float | None,
-    crop_inertia: float | None,
-    enable_croppan: bool,
-    x: int | None,
-    y: int | None,
-    fps: float | None,
-    similarity_minimum: float | None,
-    tiling_cols: int | None,
-    tiling_rows: int | None,
-    tiling_overlap: float | None,
-) -> list[dict[str, Any]]:
-    """Build list of parameter dictionaries for frame creation."""
-    parameter_dicts: list[dict[str, Any]] = []
-
-    # Build crop_pan config only if explicitly enabled
-    crop_pan = None
-    if enable_croppan:
-        crop_pan = CropPanConfig(
-            history=history,
-            threshold=float(threshold),
-            kernel_size=kernel_size,
-            expansion=crop_expansion if crop_expansion is not None else 0.75,
-            inertia=crop_inertia if crop_inertia is not None else 10.0,
-            motion_type="mog",
-        )
-
-    # Build tiling config if tiling parameters are set
-    tiling = None
-    if tiling_cols is not None and tiling_rows is not None:
-        tiling = TilingConfig(
-            cols=tiling_cols,
-            rows=tiling_rows,
-            overlap=tiling_overlap if tiling_overlap is not None else 0.0,
-        )
-
-    parameter_dicts.append({
-        "x": x,
-        "y": y,
-        "fps": fps,
-        "similarity_minimum": similarity_minimum,
-        "crop_pan": crop_pan,
-        "tiling": tiling,
-    })
-    return parameter_dicts
-
-
-def _process_frame_result(
-    future: tuple[AsyncResult, str, TemporaryDirectory[str], dict[str, Any]],
-    labelled_data: dict[str, Any],
-    backend: Backend,
-    url: str,
-    model: str,
-    api_key: str | None,
-    prompt: str | None,
-    counters: dict[tuple[Any, ...], list[int]],
-) -> None:
-    """Process a single frame result, evaluate it, and write to result file."""
-    future_result, filename, frame_directory, parameter_dict = future
-    frame_creation_result = cast(FrameCreationResult, future_result.get())
-
-    label = labelled_data[filename]
-    evaluated_result = evaluate_frames(
-        AIEvaluation(
-            frame_directory=Path(frame_directory.name),
-            label=label,
-            backend=backend,
-            url=url,
-            model=model,
-            api_key=api_key if api_key else "API_KEY",
-            prompt=prompt,
-        )
-    )
-    logger.info("File %s correct? %s", filename, evaluated_result.correct)
-
-    counter_key = tuple(
-        sorted((k, v) for k, v in parameter_dict.items() if v is None or isinstance(v, int | float | str | bool))
-    )
-    if counter_key not in counters:
-        counters[counter_key] = [0, 0]
-    counters[counter_key][0] += 1 if evaluated_result.correct else 0
-    counters[counter_key][1] += 1
-
-    with open("result.jsonl", "a") as result_file:
-        output_parameter_dict = {
-            "x": parameter_dict["x"],
-            "y": parameter_dict["y"],
-            "fps": parameter_dict["fps"],
-            "similarity_minimum": parameter_dict["similarity_minimum"],
-            "crop_pan": asdict(parameter_dict["crop_pan"]) if parameter_dict["crop_pan"] is not None else None,
-            "tiling": asdict(parameter_dict["tiling"]) if parameter_dict["tiling"] is not None else None,
-            "filename": filename,
-            "model": model,
-        }
-        result_dict = {
-            "result": evaluated_result.correct,
-            "raw_result": evaluated_result.raw_result,
-            "label": label,
-            "frame_count": frame_creation_result.frame_count,
-        }
-        output_dict = (
-            output_parameter_dict,
-            result_dict,
-        )
-        result_file.write(json.dumps(output_dict))
-        result_file.write("\n")
-
-    frame_directory.cleanup()
-
-
-def _process_pipeline_result(
-    frame_result: tuple[str, Sequence[Path], Sequence[Path]],
-    labelled_data: dict[str, Any],
-    crops_output_dir: Path,
-    analyser: AbstractAnalyser,
-    crop_expansion: float,
-    counters: dict[tuple[Any, ...], list[int]],
-) -> None:
-    """Process pipeline result: AI crop detection, evaluation, and output.
-
-    Runs in main process. Creates video subdirectory in crops_output_dir, runs AI detection,
-    applies crops to full-res frames, evaluates result, and writes JSONL entry.
-    """
-    filename, _, _ = frame_result
-    label = labelled_data[filename]
-
-    correct, raw_result, crop_count = process_pipeline_result(
-        frame_result=frame_result,
-        labelled_data=labelled_data,
-        crops_output_dir=crops_output_dir,
-        analyser=analyser,
-        crop_expansion=crop_expansion,
-        filename=filename,
-    )
-
-    counter_key = ("crop_expansion", crop_expansion)
-    if counter_key not in counters:
-        counters[counter_key] = [0, 0]
-    counters[counter_key][0] += 1 if correct else 0
-    counters[counter_key][1] += 1
-
-    with open("result.jsonl", "a") as result_file:
-        output_parameter_dict = {
-            "filename": filename,
-            "model": analyser.model,
-            "backend": analyser.backend.value,
-            "crop_expansion": crop_expansion,
-        }
-        result_dict = {
-            "result": correct,
-            "raw_result": raw_result,
-            "label": label,
-            "crop_count": crop_count,
-        }
-        output_dict = (output_parameter_dict, result_dict)
-        result_file.write(json.dumps(output_dict))
-        result_file.write("\n")
-
-    logger.info("Video %s: correct=%s", filename, correct)
-
-
-def _print_evaluation_summary(counters: dict[tuple[Any, ...], list[int]]) -> None:
-    """Print evaluation summary statistics."""
-    for counter_key in counters:
-        successes = counters[counter_key][0]
-        attempts = counters[counter_key][1]
-        ratio = successes / attempts
-        typer.secho(f"{counter_key}: {successes} / {attempts} = {ratio:.4f}")
-
-
 @app.command()
 def analyze(
     input_: Annotated[Path, typer.Argument(metavar="INPUT")],
@@ -261,17 +79,15 @@ def analyze(
     prompt = _read_prompt_file(prompt_file)
 
     timer = Timer()
-    analyser: AbstractAnalyser
-    match backend:
-        case Backend.LLAMACPP:
-            analyser = LlamaCppAnalyser(model=model, base_url=url, message=prompt)
-        case Backend.OLLAMA:
-            analyser = OllamaAnalyser(model=model, host=url, api_key=api_key, message=prompt)
-        case _:
-            raise ValueError(f"Unsupported backend: {backend}")
+    analyser = create_analyser(backend=backend, model=model, url=url, api_key=api_key)
 
     with timer:
-        result = analyser.analyze_video(images)
+        result_obj = analyser.message_with_schema(
+            message=prompt,
+            images=images,
+            response_class=SpeciesResult,
+        )
+        result = result_obj.species_name
 
     typer.secho(f"Processed {len(images):d} in {timer.elapsed:.2f} sec")
     typer.secho(f"Result: {result}")
@@ -306,7 +122,6 @@ def pipeline(
     backend: Annotated[Backend, typer.Option(help="Backend to use")] = Backend.OLLAMA,
     url: Annotated[str, typer.Option(help="Base URL for the backend")] = "http://localhost:8080/v1",
     api_key: Annotated[str | None, typer.Option(help="API key for ollama backend")] = None,
-    prompt_file: Annotated[Path | None, typer.Option(help="Path to a text file containing the prompt")] = None,
 ) -> None:
     if not input_.exists():
         typer.secho(f"Error: Input file not found: {input_}", err=True)
@@ -318,16 +133,7 @@ def pipeline(
         typer.secho(f"Error: FPS must be positive, got {fps}", err=True)
         raise typer.Exit(code=1)
 
-    prompt = _read_prompt_file(prompt_file)
-
-    analyser: AbstractAnalyser
-    match backend:
-        case Backend.LLAMACPP:
-            analyser = LlamaCppAnalyser(model=model, base_url=url, message=prompt)
-        case Backend.OLLAMA:
-            analyser = OllamaAnalyser(model=model, host=url, api_key=api_key, message=prompt)
-        case _:
-            raise ValueError(f"Unsupported backend: {backend}")
+    analyser = create_analyser(backend=backend, model=model, url=url, api_key=api_key)
 
     run_pipeline(
         video_path=input_,
@@ -365,60 +171,75 @@ def evaluate(
     tiling_overlap: Annotated[float | None, typer.Option(help="Overlap proportion between tiles (0.0-1.0)")] = None,
     prompt_file: Annotated[Path | None, typer.Option(help="Path to a text file containing the prompt")] = None,
 ) -> None:
+    if not labels.exists():
+        typer.secho(f"Error: Labels file not found: {labels}", err=True)
+        raise typer.Exit(code=1)
+
     tiling_cols, tiling_rows, tiling_overlap = _validate_tiling_parameters(tiling_cols, tiling_rows, tiling_overlap)
     prompt = _read_prompt_file(prompt_file)
 
     labelled_data = load_labels(labels)
     video_directory = labels.resolve().parent
 
-    parameter_dicts = _build_evaluate_parameters(
-        kernel_size=kernel_size,
-        threshold=threshold,
-        history=history,
-        crop_expansion=crop_expansion,
-        crop_inertia=crop_inertia,
-        enable_croppan=enable_croppan,
-        x=x,
-        y=y,
-        fps=fps,
-        similarity_minimum=similarity_minimum,
-        tiling_cols=tiling_cols,
-        tiling_rows=tiling_rows,
-        tiling_overlap=tiling_overlap,
-    )
+    crop_pan = None
+    if enable_croppan:
+        crop_pan = CropPanConfig(
+            history=history,
+            threshold=float(threshold),
+            kernel_size=kernel_size,
+            expansion=crop_expansion if crop_expansion is not None else 0.75,
+            inertia=crop_inertia if crop_inertia is not None else 10.0,
+            motion_type="mog",
+        )
 
-    ctx = multiprocessing.get_context("spawn")
-    with ctx.Pool() as pool:
-        futures: list[tuple[AsyncResult, str, TemporaryDirectory[str], dict[str, Any]]] = []
-        for parameter_dict in parameter_dicts:
-            for filename in labelled_data:
-                frame_directory = TemporaryDirectory()
-                frame_creation = FrameCreation(
-                    filename=Path(filename),
-                    video_directory=video_directory,
-                    tmpdir=Path(frame_directory.name),
-                    **parameter_dict,
-                )
-                future = pool.apply_async(
-                    create_frames,
-                    args=(frame_creation,),
-                )
-                futures.append((future, filename, frame_directory, parameter_dict))
+    tiling = None
+    if tiling_cols is not None and tiling_rows is not None:
+        tiling = TilingConfig(
+            cols=tiling_cols,
+            rows=tiling_rows,
+            overlap=tiling_overlap if tiling_overlap is not None else 0.0,
+        )
 
-        counters: dict[tuple[Any, ...], list[int]] = {}
-        for future_tuple in futures:
-            _process_frame_result(
-                future=future_tuple,
-                labelled_data=labelled_data,
+    correct_count = 0
+    total_count = 0
+
+    for filename in labelled_data:
+        frame_directory = TemporaryDirectory()
+        try:
+            frame_creation = FrameCreation(
+                filename=Path(filename),
+                video_directory=video_directory,
+                tmpdir=Path(frame_directory.name),
+                x=x,
+                y=y,
+                fps=fps,
+                similarity_minimum=similarity_minimum,
+                crop_pan=crop_pan,
+                tiling=tiling,
+            )
+            create_frames(frame_creation)
+
+            evaluation = AIEvaluation(
+                frame_directory=Path(frame_directory.name),
+                label=labelled_data[filename],
                 backend=backend,
                 url=url,
                 model=model,
-                api_key=api_key,
+                api_key=api_key if api_key else "API_KEY",
                 prompt=prompt,
-                counters=counters,
             )
+            result = evaluate_frames(evaluation)
+            logger.info("File %s correct? %s", filename, result.correct)
 
-    _print_evaluation_summary(counters)
+            if result.correct:
+                correct_count += 1
+            total_count += 1
+        finally:
+            frame_directory.cleanup()
+
+    if total_count > 0:
+        ratio = correct_count / total_count
+        typer.secho(f"Overall: {correct_count} / {total_count} = {ratio:.4f}")
 
 
 @app.command()
@@ -437,7 +258,6 @@ def evaluate_pipeline(
     crops_output_dir: Annotated[
         Path, typer.Option(help="Directory for cropped frames (subdirectory per video)")
     ] = Path("crops_output/"),
-    prompt_file: Annotated[Path | None, typer.Option(help="Path to a text file containing the prompt")] = None,
 ) -> None:
     if not labels.exists():
         typer.secho(f"Error: Labels file not found: {labels}", err=True)
@@ -446,67 +266,20 @@ def evaluate_pipeline(
         typer.secho(f"Error: Labels is not a file: {labels}", err=True)
         raise typer.Exit(code=1)
 
-    prompt = _read_prompt_file(prompt_file)
-    labelled_data = load_labels(labels)
-    video_directory = labels.resolve().parent
-
     if low_res_size[0] <= 0 or low_res_size[1] <= 0:
         typer.secho("Error: low_res_size must be positive", err=True)
         raise typer.Exit(code=1)
 
-    crops_output_dir.mkdir(parents=True, exist_ok=True)
+    summary = evaluate_pipeline_lib(
+        labels_path=labels,
+        model=model,
+        backend=backend,
+        url=url,
+        api_key=api_key,
+        fps=fps,
+        low_res_size=low_res_size,
+        crop_expansion=crop_expansion,
+        crops_output_dir=crops_output_dir,
+    )
 
-    result_jsonl_path = Path("result.jsonl")
-    result_jsonl_path.unlink(missing_ok=True)
-
-    analyser: AbstractAnalyser
-    match backend:
-        case Backend.LLAMACPP:
-            analyser = LlamaCppAnalyser(model=model, base_url=url, message=prompt)
-        case Backend.OLLAMA:
-            analyser = OllamaAnalyser(model=model, host=url, api_key=api_key, message=prompt)
-        case _:
-            raise ValueError(f"Unsupported backend: {backend}")
-
-    ctx = multiprocessing.get_context("spawn")
-    with ctx.Pool() as pool:
-        frame_tmpdirs: list[TemporaryDirectory] = []
-        futures: list[tuple[AsyncResult, str, TemporaryDirectory]] = []
-        for filename in labelled_data:
-            video_path = video_directory / filename
-            if not video_path.exists():
-                logger.warning("Video not found: %s", filename)
-                continue
-            frame_tmpdir = TemporaryDirectory()
-            frame_tmpdirs.append(frame_tmpdir)
-            future = pool.apply_async(
-                generate_frames_for_video,
-                args=(
-                    filename,
-                    video_directory,
-                    fps,
-                    low_res_size,
-                    Path(frame_tmpdir.name),
-                ),
-            )
-            futures.append((future, filename, frame_tmpdir))
-
-        counters: dict[tuple[Any, ...], list[int]] = {}
-        for future, _, frame_tmpdir in futures:
-            try:
-                frame_result = future.get()
-                _process_pipeline_result(
-                    frame_result=frame_result,
-                    labelled_data=labelled_data,
-                    crops_output_dir=crops_output_dir,
-                    analyser=analyser,
-                    crop_expansion=crop_expansion,
-                    counters=counters,
-                )
-            except Exception:
-                logger.exception("Worker failed")
-                raise
-            finally:
-                frame_tmpdir.cleanup()
-
-    _print_evaluation_summary(counters)
+    summary.print_summary()

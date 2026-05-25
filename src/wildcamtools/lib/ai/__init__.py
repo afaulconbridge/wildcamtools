@@ -1,6 +1,3 @@
-import abc
-import base64
-from collections.abc import Iterable
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
@@ -17,7 +14,7 @@ class AIEvaluation:
     url: str
     model: str
     api_key: str = "API_KEY"
-    prompt: str | None = None
+    prompt: str
 
 
 @dataclass(kw_only=True)
@@ -62,20 +59,9 @@ class ResultList(BaseModel):
     results: list[Result]
 
 
-class AbstractAnalyser(abc.ABC):
-    model: str
-    backend: Backend
-    url: str
-    api_key: str | None = None
-    message: str | None = None
+class StringResponse(BaseModel):
+    message: str
 
-    @abc.abstractmethod
-    def analyze_video(self, images: Iterable[Path]) -> str: ...
 
-    @abc.abstractmethod
-    def detect(self, images: Iterable[Path]) -> ResultList: ...
-
-    @staticmethod
-    def path_jpeg_to_base64(input_: Path) -> str:
-        with input_.open("rb") as infile:
-            return base64.b64encode(infile.read()).decode()
+class SpeciesResult(BaseModel):
+    species_name: str

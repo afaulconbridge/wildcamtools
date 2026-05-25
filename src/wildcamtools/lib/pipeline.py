@@ -4,9 +4,9 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
-from wildcamtools.lib.ai import AbstractAnalyser
 from wildcamtools.lib.ai.crop import AICropFinder
 from wildcamtools.lib.ai.evaluate import AIEvaluation, evaluate_frames
+from wildcamtools.lib.ai.llm.abstract import AbstractLlm
 from wildcamtools.lib.frames import FrameImageRecreator, FrameImageWriter, Rescaler
 from wildcamtools.lib.stats import get_video_stats
 from wildcamtools.lib.vidio import VideoReader
@@ -54,7 +54,7 @@ def process_pipeline_result(
     frame_result: tuple[str, Sequence[Path], Sequence[Path]],
     labelled_data: dict[str, Any],
     crops_output_dir: Path,
-    analyser: AbstractAnalyser,
+    analyser: AbstractLlm,
     crop_expansion: float,
     filename: str,
 ) -> tuple[bool, str, int]:
@@ -86,6 +86,9 @@ def process_pipeline_result(
         raw_result = "no"
         correct = label.lower() == raw_result.lower()
     else:
+        default_prompt = """These are images from a video taken in a UK garden near a river.
+Identify any animals you are highly confident of in the images.
+Return only the species name as a single word."""
         evaluation = AIEvaluation(
             frame_directory=video_crop_dir,
             label=label,
@@ -93,7 +96,7 @@ def process_pipeline_result(
             url=analyser.url,
             model=analyser.model,
             api_key=getattr(analyser, "api_key", "API_KEY"),
-            prompt=analyser.message,
+            prompt=default_prompt,
         )
         evaluated_result = evaluate_frames(evaluation)
         raw_result = evaluated_result.raw_result
@@ -109,7 +112,7 @@ def run_pipeline(
     cropped_frames_dir: Path,
     fps: float,
     low_res_size: tuple[int, int],
-    analyser: AbstractAnalyser,
+    analyser: AbstractLlm,
     crop_expansion: float,
 ) -> None:
     """Run the complete pipeline on a single video.

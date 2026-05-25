@@ -3,20 +3,30 @@ import math
 from collections.abc import Sequence
 from pathlib import Path
 
+from pydantic import ValidationError
+
 from wildcamtools.lib import BBox, Frame
-from wildcamtools.lib.ai import AbstractAnalyser, ResultList
+from wildcamtools.lib.ai import ResultList
+from wildcamtools.lib.ai.llm.abstract import AbstractLlm
 
 logger = logging.getLogger(__name__)
 
 
 class AICropFinder:
-    analyser: AbstractAnalyser
+    DETECTION_PROMPT = """These are images from a video taken in a UK garden near a river.
+Identify any animals you are highly confident of in the images.
+Return JSON only with this exact structure:
+{"results": [{"species_name": "string", "frames": [{"frame_no":0,"left": 0.0, "right": 1.0, "top": 1.0, "bottom": 0.0}]}]}
+Note that the bounding box coordinates are proportional to the image dimensions and therefore must be between 0.0 and 1.0.
+If no animals are detected, return {"results": []}."""
+
+    analyser: AbstractLlm
     detections: ResultList | None = None
     expansion: float = 0.25
 
     def __init__(
         self,
-        analyser: AbstractAnalyser,
+        analyser: AbstractLlm,
         expansion: float,
     ):
         self.analyser = analyser
@@ -26,7 +36,15 @@ class AICropFinder:
         """Run AI detection on low-resolution frames."""
         logger.info("Starting detection on %d low-res frames", len(images))
 
-        self.detections = self.analyser.detect(images)
+        try:
+            self.detections = self.analyser.message_with_schema(
+                message=self.DETECTION_PROMPT,
+                images=sorted(images),
+                response_class=ResultList,
+            )
+        except ValidationError:
+            logger.exception("Unable to validate")
+            self.detections = ResultList(results=[])
 
         logger.info("Detection complete: found %d species results", len(self.detections.results))
 
@@ -57,7 +75,7 @@ class AICropFinder:
                 # double check for validity
                 if x1 >= x2 or y1 >= y2:
                     logger.warning(
-                        "Invalid bounding box detected on %s : (%s,%s)-(%s,%s)",
+                        "Invalid bounding box detected on frame %d : (%d,%d)-(%d,%d)",
                         frame.frame_no,
                         x1,
                         y1,

@@ -1,0 +1,475 @@
+import json
+from pathlib import Path
+from unittest.mock import MagicMock, patch
+
+import pytest
+from typer.testing import CliRunner
+
+from wildcamtools.cli.ai import app as ai_app
+from wildcamtools.lib.ai import PipelineEvaluationResult, PipelineEvaluationSummary
+
+runner = CliRunner()
+
+
+@pytest.fixture
+def sample_config_file(tmp_path: Path) -> Path:
+    config = {
+        "llm": {
+            "model": "test-model",
+            "backend": "ollama",
+            "url": "http://localhost:8080/v1",
+        },
+        "query": {
+            "prompt": "Test prompt",
+        },
+    }
+    config_file = tmp_path / "config.json"
+    config_file.write_text(json.dumps(config))
+    return config_file
+
+
+@pytest.fixture
+def sample_comparison_config_file(tmp_path: Path) -> Path:
+    comparison_config = {
+        "comparator_type": "exact",
+    }
+    config_file = tmp_path / "comparison_config.json"
+    config_file.write_text(json.dumps(comparison_config))
+    return config_file
+
+
+@pytest.fixture
+def sample_video_file(tmp_path: Path) -> Path:
+    video_file = tmp_path / "test_video.mp4"
+    video_file.write_bytes(b"fake video content")
+    return video_file
+
+
+class TestRunCommand:
+    def test_run_missing_config(self, sample_video_file: Path) -> None:
+        result = runner.invoke(ai_app, ["run", "nonexistent.json", str(sample_video_file)])
+        assert result.exit_code == 1
+        assert "Error: Config file not found" in result.stderr or "Error: Config file not found" in result.stdout
+
+    def test_run_missing_video(self, sample_config_file: Path) -> None:
+        result = runner.invoke(ai_app, ["run", str(sample_config_file), "nonexistent.mp4"])
+        assert result.exit_code == 1
+        assert "Error: Video file not found" in result.stderr or "Error: Video file not found" in result.stdout
+
+    def test_run_config_not_file(self, tmp_path: Path, sample_video_file: Path) -> None:
+        result = runner.invoke(ai_app, ["run", str(tmp_path), str(sample_video_file)])
+        assert result.exit_code == 1
+        assert (
+            "Error: Config path is not a file" in result.stderr or "Error: Config path is not a file" in result.stdout
+        )
+
+    def test_run_video_not_file(self, tmp_path: Path, sample_config_file: Path) -> None:
+        result = runner.invoke(ai_app, ["run", str(sample_config_file), str(tmp_path)])
+        assert result.exit_code == 1
+        assert "Error: Video path is not a file" in result.stderr or "Error: Video path is not a file" in result.stdout
+
+    def test_run_invalid_json_config(self, tmp_path: Path, sample_video_file: Path) -> None:
+        invalid_config = tmp_path / "invalid.json"
+        invalid_config.write_text("not valid json {{{")
+        result = runner.invoke(ai_app, ["run", "-c", str(invalid_config), str(sample_video_file)])
+        assert result.exit_code != 0
+
+    def test_run_missing_required_fields(self, tmp_path: Path, sample_video_file: Path) -> None:
+        incomplete_config = tmp_path / "incomplete.json"
+        incomplete_config.write_text("{}")
+        result = runner.invoke(ai_app, ["run", "-c", str(incomplete_config), str(sample_video_file)])
+        assert result.exit_code != 0
+
+    def test_run_with_output_file(self, sample_config_file: Path, sample_video_file: Path, tmp_path: Path) -> None:
+        output_file = tmp_path / "output.json"
+        result = runner.invoke(
+            ai_app,
+            ["run", str(sample_config_file), "--output", str(output_file), str(sample_video_file)],
+        )
+        assert result.exit_code != 0
+
+    def test_run_without_output_file(self, sample_config_file: Path, sample_video_file: Path) -> None:
+        result = runner.invoke(ai_app, ["run", str(sample_config_file), str(sample_video_file)])
+        assert result.exit_code != 0
+
+    def test_run_short_options(self, sample_config_file: Path, sample_video_file: Path, tmp_path: Path) -> None:
+        output_file = tmp_path / "out.json"
+        result = runner.invoke(ai_app, ["run", str(sample_config_file), "-o", str(output_file), str(sample_video_file)])
+        # Short options still work
+        assert result.exit_code != 0
+
+    def test_run_success_with_mocked_pipeline(
+        self, sample_config_file: Path, sample_video_file: Path, tmp_path: Path
+    ) -> None:
+        mock_result = MagicMock()
+        mock_result.model_dump_json.return_value = '{"species_name": "test"}'
+
+        with patch("wildcamtools.cli.ai.AiPipelineConfig") as mock_config_class:
+            mock_config = MagicMock()
+            mock_pipeline = MagicMock()
+            mock_pipeline.run.return_value = mock_result
+            mock_config.create_pipeline.return_value = mock_pipeline
+            mock_config_class.from_json.return_value = mock_config
+
+            output_file = tmp_path / "output.json"
+            result = runner.invoke(
+                ai_app,
+                ["run", str(sample_config_file), "--output", str(output_file), str(sample_video_file)],
+            )
+            assert result.exit_code == 0
+            assert output_file.exists()
+            assert output_file.read_text() == '{"species_name": "test"}'
+            mock_pipeline.run.assert_called_once_with(sample_video_file)
+
+    def test_run_success_prints_to_console(self, sample_config_file: Path, sample_video_file: Path) -> None:
+        mock_result = MagicMock()
+        mock_result.model_dump_json.return_value = '{"species_name": "badger"}'
+
+        with patch("wildcamtools.cli.ai.AiPipelineConfig") as mock_config_class:
+            mock_config = MagicMock()
+            mock_pipeline = MagicMock()
+            mock_pipeline.run.return_value = mock_result
+            mock_config.create_pipeline.return_value = mock_pipeline
+            mock_config_class.from_json.return_value = mock_config
+
+            result = runner.invoke(ai_app, ["run", str(sample_config_file), str(sample_video_file)])
+            assert result.exit_code == 0
+            assert '{"species_name": "badger"}' in result.stdout
+
+
+class TestRunCommandIntegration:
+    def test_run_config_with_env_var(
+        self, tmp_path: Path, sample_video_file: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("TEST_API_KEY", "secret-key")
+
+        config = {
+            "llm": {
+                "model": "test-model",
+                "backend": "ollama",
+                "url": "http://localhost:8080/v1",
+                "api_key": "${TEST_API_KEY}",
+            },
+            "query": {
+                "prompt": "Test prompt",
+            },
+        }
+        config_file = tmp_path / "config_with_env.json"
+        config_file.write_text(json.dumps(config))
+
+        result = runner.invoke(ai_app, ["run", "-c", str(config_file), str(sample_video_file)])
+        assert result.exit_code != 0
+
+    @pytest.mark.parametrize("fps_value", [0.5, 1.0, 5.0, 10.0])
+    def test_run_with_different_fps_configs(self, fps_value: float, tmp_path: Path, sample_video_file: Path) -> None:
+        config = {
+            "frame_selector": {
+                "selector_type": "fps_rescaling",
+                "fps": fps_value,
+            },
+            "llm": {
+                "model": "test-model",
+                "backend": "ollama",
+                "url": "http://localhost:8080/v1",
+            },
+            "query": {
+                "prompt": "Test prompt",
+            },
+        }
+        config_file = tmp_path / f"config_fps_{fps_value}.json"
+        config_file.write_text(json.dumps(config))
+
+        result = runner.invoke(ai_app, ["run", "-c", str(config_file), str(sample_video_file)])
+        assert result.exit_code != 0
+
+    @pytest.mark.parametrize("resolution", [[640, 360], [1280, 720], [320, 240]])
+    def test_run_with_different_resolutions(
+        self, resolution: list[int], tmp_path: Path, sample_video_file: Path
+    ) -> None:
+        config = {
+            "frame_extractor": {
+                "resolution": resolution,
+            },
+            "llm": {
+                "model": "test-model",
+                "backend": "ollama",
+                "url": "http://localhost:8080/v1",
+            },
+            "query": {
+                "prompt": "Test prompt",
+            },
+        }
+        config_file = tmp_path / f"config_res_{resolution[0]}x{resolution[1]}.json"
+        config_file.write_text(json.dumps(config))
+
+        result = runner.invoke(ai_app, ["run", "-c", str(config_file), str(sample_video_file)])
+        assert result.exit_code != 0
+
+    def test_run_with_all_config_options(self, tmp_path: Path, sample_video_file: Path) -> None:
+        config = {
+            "frame_selector": {
+                "selector_type": "fps_rescaling",
+                "fps": 2.0,
+            },
+            "frame_extractor": {
+                "resolution": [800, 600],
+            },
+            "llm": {
+                "backend": "llamacpp",
+                "model": "custom-model",
+                "url": "http://example.com:8080/v1",
+            },
+            "query": {
+                "prompt": "Custom prompt for testing",
+                "response_schema": "SpeciesResult",
+            },
+            "reconciler": {
+                "reconciler_type": "majority",
+            },
+        }
+        config_file = tmp_path / "full_config.json"
+        config_file.write_text(json.dumps(config))
+
+        result = runner.invoke(ai_app, ["run", "-c", str(config_file), str(sample_video_file)])
+        assert result.exit_code != 0
+
+    def test_run_with_different_response_schemas(self, tmp_path: Path, sample_video_file: Path) -> None:
+        for schema in ["SpeciesResult", "Result", "StringResponse"]:
+            config = {
+                "llm": {
+                    "model": "test-model",
+                    "backend": "ollama",
+                    "url": "http://localhost:8080/v1",
+                },
+                "query": {
+                    "prompt": "Test prompt",
+                    "response_schema": schema,
+                },
+            }
+            config_file = tmp_path / f"config_schema_{schema}.json"
+            config_file.write_text(json.dumps(config))
+
+            result = runner.invoke(ai_app, ["run", "-c", str(config_file), str(sample_video_file)])
+            assert result.exit_code != 0
+
+    def test_run_output_file_created(self, sample_config_file: Path, sample_video_file: Path, tmp_path: Path) -> None:
+        output_file = tmp_path / "result.json"
+        result = runner.invoke(
+            ai_app,
+            ["run", "-c", str(sample_config_file), "-o", str(output_file), str(sample_video_file)],
+        )
+        assert result.exit_code != 0
+
+    def test_run_error_bubbles_up(self, tmp_path: Path, sample_video_file: Path) -> None:
+        config = {
+            "llm": {
+                "model": "invalid-model",
+                "backend": "ollama",
+                "url": "http://invalid-url:9999",
+            },
+            "query": {
+                "prompt": "Test prompt",
+            },
+        }
+        config_file = tmp_path / "bad_config.json"
+        config_file.write_text(json.dumps(config))
+
+        result = runner.invoke(ai_app, ["run", "-c", str(config_file), str(sample_video_file)])
+        assert result.exit_code != 0
+
+
+class TestRunEvaluateCommand:
+    @pytest.fixture
+    def sample_labels_file(self, tmp_path: Path) -> Path:
+        labels = [
+            {"video": "test.mp4", "label": "otter"},
+            {"video": "short.mp4", "label": "cat"},
+        ]
+        labels_file = tmp_path / "labels.jsonl"
+        with open(labels_file, "w") as f:
+            for label in labels:
+                f.write(json.dumps(label) + "\n")
+        return labels_file
+
+    def test_run_evaluate_missing_config(self, sample_comparison_config_file: Path, sample_labels_file: Path) -> None:
+        result = runner.invoke(
+            ai_app, ["run-evaluate", "nonexistent.json", str(sample_comparison_config_file), str(sample_labels_file)]
+        )
+        assert result.exit_code == 1
+        assert "Error: Config file not found" in result.stderr or "Error: Config file not found" in result.stdout
+
+    def test_run_evaluate_missing_labels(self, sample_config_file: Path, sample_comparison_config_file: Path) -> None:
+        result = runner.invoke(
+            ai_app, ["run-evaluate", str(sample_config_file), str(sample_comparison_config_file), "nonexistent.jsonl"]
+        )
+        assert result.exit_code == 1
+        assert "Error: Labels file not found" in result.stderr or "Error: Labels file not found" in result.stdout
+
+    def test_run_evaluate_config_not_file(
+        self, tmp_path: Path, sample_comparison_config_file: Path, sample_labels_file: Path
+    ) -> None:
+        result = runner.invoke(
+            ai_app, ["run-evaluate", str(tmp_path), str(sample_comparison_config_file), str(sample_labels_file)]
+        )
+        assert result.exit_code == 1
+        assert (
+            "Error: Config path is not a file" in result.stderr or "Error: Config path is not a file" in result.stdout
+        )
+
+    def test_run_evaluate_labels_not_file(
+        self, tmp_path: Path, sample_config_file: Path, sample_comparison_config_file: Path
+    ) -> None:
+        result = runner.invoke(
+            ai_app, ["run-evaluate", str(sample_config_file), str(sample_comparison_config_file), str(tmp_path)]
+        )
+        assert result.exit_code == 1
+        assert (
+            "Error: Labels path is not a file" in result.stderr or "Error: Labels path is not a file" in result.stdout
+        )
+
+    def test_run_evaluate_video_dir_not_found(
+        self, sample_config_file: Path, sample_comparison_config_file: Path, sample_labels_file: Path
+    ) -> None:
+        result = runner.invoke(
+            ai_app,
+            [
+                "run-evaluate",
+                str(sample_config_file),
+                str(sample_comparison_config_file),
+                str(sample_labels_file),
+                "-v",
+                "/nonexistent/dir",
+            ],
+        )
+        assert result.exit_code == 1
+        assert (
+            "Error: Video directory not found" in result.stderr or "Error: Video directory not found" in result.stdout
+        )
+
+    def test_run_evaluate_video_dir_not_directory(
+        self, sample_config_file: Path, sample_comparison_config_file: Path, sample_labels_file: Path
+    ) -> None:
+        result = runner.invoke(
+            ai_app,
+            [
+                "run-evaluate",
+                str(sample_config_file),
+                str(sample_comparison_config_file),
+                str(sample_labels_file),
+                "-v",
+                str(sample_config_file),
+            ],
+        )
+        assert result.exit_code == 1
+        assert (
+            "Error: Video path is not a directory" in result.stderr
+            or "Error: Video path is not a directory" in result.stdout
+        )
+
+    def test_run_evaluate_invalid_max_workers(
+        self, sample_config_file: Path, sample_comparison_config_file: Path, sample_labels_file: Path
+    ) -> None:
+        result = runner.invoke(
+            ai_app,
+            [
+                "run-evaluate",
+                str(sample_config_file),
+                str(sample_comparison_config_file),
+                str(sample_labels_file),
+                "-w",
+                "0",
+            ],
+        )
+        assert result.exit_code == 1
+        assert (
+            "Error: --max-workers must be at least 1" in result.stderr
+            or "Error: --max-workers must be at least 1" in result.stdout
+        )
+
+    def test_run_evaluate_success_with_mocked(
+        self,
+        sample_config_file: Path,
+        sample_comparison_config_file: Path,
+        sample_labels_file: Path,
+        tmp_path: Path,
+    ) -> None:
+        mock_summary = PipelineEvaluationSummary(
+            results=[
+                PipelineEvaluationResult(
+                    filename="test.mp4",
+                    correct=True,
+                    raw_result="otter",
+                    label="otter",
+                    comparison_method="exact",
+                ),
+            ],
+            correct_count=1,
+            total_count=1,
+            error_count=0,
+        )
+
+        with patch("wildcamtools.cli.ai.evaluate_ai_pipeline") as mock_eval:
+            mock_eval.return_value = mock_summary
+
+            output_file = tmp_path / "results.jsonl"
+            result = runner.invoke(
+                ai_app,
+                [
+                    "run-evaluate",
+                    str(sample_config_file),
+                    str(sample_comparison_config_file),
+                    str(sample_labels_file),
+                    "-o",
+                    str(output_file),
+                    "-w",
+                    "2",
+                ],
+            )
+            assert result.exit_code == 0
+            mock_eval.assert_called_once_with(
+                config_path=sample_config_file,
+                labels_path=sample_labels_file,
+                video_dir=None,
+                max_workers=2,
+                result_jsonl_path=output_file,
+                comparison_config_path=sample_comparison_config_file,
+            )
+
+    def test_run_evaluate_with_label_comparison_config(
+        self,
+        sample_config_file: Path,
+        sample_comparison_config_file: Path,
+        sample_labels_file: Path,
+        tmp_path: Path,
+    ) -> None:
+        mock_summary = PipelineEvaluationSummary(
+            results=[
+                PipelineEvaluationResult(
+                    filename="test.mp4",
+                    correct=True,
+                    raw_result="domestic cat",
+                    label="cat",
+                    comparison_method="llm",
+                ),
+            ],
+            correct_count=1,
+            total_count=1,
+            error_count=0,
+        )
+
+        with patch("wildcamtools.cli.ai.evaluate_ai_pipeline") as mock_eval:
+            mock_eval.return_value = mock_summary
+
+            result = runner.invoke(
+                ai_app,
+                [
+                    "run-evaluate",
+                    str(sample_config_file),
+                    str(sample_comparison_config_file),
+                    str(sample_labels_file),
+                ],
+            )
+            assert result.exit_code == 0
+            mock_eval.assert_called_once()
+            call_kwargs = mock_eval.call_args.kwargs
+            assert call_kwargs["comparison_config_path"] == sample_comparison_config_file

@@ -10,14 +10,14 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Any
 
-from wildcamtools.lib.ai import (
+from wildcamtools.lib.ai.llm import create_analyser
+from wildcamtools.lib.ai.llm.abstract import AbstractLlm
+from wildcamtools.lib.ai.types import (
     AIEvaluation,
     AIEvaluationResult,
     Backend,
     SpeciesResult,
 )
-from wildcamtools.lib.ai.llm import create_analyser
-from wildcamtools.lib.ai.llm.abstract import AbstractLlm
 
 logger = logging.getLogger(__name__)
 

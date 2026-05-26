@@ -6,9 +6,16 @@ from typing import TypeVar
 
 from pydantic import BaseModel
 
-from wildcamtools.lib.ai import Backend, StringResponse
+from wildcamtools.lib.ai.types import Backend, StringResponse
 
 T = TypeVar("T", bound=BaseModel)
+
+DEFAULT_SYSTEM_MESSAGE = (
+    "You must respond with valid JSON that matches the provided schema exactly. "
+    "Do not include any markdown formatting, code blocks, or explanations. "
+    "Only output the raw JSON object.\n\n"
+    "Expected JSON schema:\n{schema}"
+)
 
 
 class AbstractLlm(abc.ABC):

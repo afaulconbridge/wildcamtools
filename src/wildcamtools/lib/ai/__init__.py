@@ -1,67 +1,51 @@
-from dataclasses import dataclass
-from enum import StrEnum
-from pathlib import Path
-from typing import Annotated, Any, Self
+from wildcamtools.lib.ai.pipeline_config import (
+    AiPipelineConfig,
+    FrameExtractorConfig,
+    FrameSelectorConfig,
+    FrameSelectorType,
+    LlmConfig,
+    QueryConfig,
+    ReconcilerConfig,
+    ReconcilerType,
+    ResponseSchemaType,
+)
+from wildcamtools.lib.ai.pipeline_evaluation import (
+    PipelineEvaluationResult,
+    PipelineEvaluationSummary,
+    evaluate_ai_pipeline,
+)
+from wildcamtools.lib.ai.types import (
+    AIEvaluation,
+    AIEvaluationResult,
+    Backend,
+    BoolResponse,
+    FrameResult,
+    Result,
+    ResultList,
+    SpeciesResult,
+    StringResponse,
+)
 
-from pydantic import BaseModel, Field
-
-
-@dataclass(kw_only=True)
-class AIEvaluation:
-    frame_directory: Path
-    label: str
-    backend: Any
-    url: str
-    model: str
-    api_key: str = "API_KEY"
-    prompt: str
-
-
-@dataclass(kw_only=True)
-class AIEvaluationResult(AIEvaluation):
-    correct: bool
-    raw_result: str
-
-    @classmethod
-    def from_evaluation(cls, evaluation: AIEvaluation, *, correct: bool, raw_result: str) -> Self:
-        return cls(
-            frame_directory=evaluation.frame_directory,
-            label=evaluation.label,
-            backend=evaluation.backend,
-            url=evaluation.url,
-            model=evaluation.model,
-            api_key=evaluation.api_key,
-            prompt=evaluation.prompt,
-            correct=correct,
-            raw_result=raw_result,
-        )
-
-
-class Backend(StrEnum):
-    LLAMACPP = "llamacpp"
-    OLLAMA = "ollama"
-
-
-class FrameResult(BaseModel):
-    frame_no: int
-    left: Annotated[float, Field(strict=True, ge=0.0, le=1.0)]
-    right: Annotated[float, Field(strict=True, ge=0.0, le=1.0)]
-    top: Annotated[float, Field(strict=True, ge=0.0, le=1.0)]
-    bottom: Annotated[float, Field(strict=True, ge=0.0, le=1.0)]
-
-
-class Result(BaseModel):
-    species_name: str
-    frames: list[FrameResult]
-
-
-class ResultList(BaseModel):
-    results: list[Result]
-
-
-class StringResponse(BaseModel):
-    message: str
-
-
-class SpeciesResult(BaseModel):
-    species_name: str
+__all__ = [
+    "AIEvaluation",
+    "AIEvaluationResult",
+    "AiPipelineConfig",
+    "Backend",
+    "BoolResponse",
+    "FrameExtractorConfig",
+    "FrameResult",
+    "FrameSelectorConfig",
+    "FrameSelectorType",
+    "LlmConfig",
+    "PipelineEvaluationResult",
+    "PipelineEvaluationSummary",
+    "QueryConfig",
+    "ReconcilerConfig",
+    "ReconcilerType",
+    "ResponseSchemaType",
+    "Result",
+    "ResultList",
+    "SpeciesResult",
+    "StringResponse",
+    "evaluate_ai_pipeline",
+]

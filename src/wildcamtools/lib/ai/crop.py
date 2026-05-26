@@ -6,8 +6,8 @@ from pathlib import Path
 from pydantic import ValidationError
 
 from wildcamtools.lib import BBox, Frame
-from wildcamtools.lib.ai import ResultList
 from wildcamtools.lib.ai.llm.abstract import AbstractLlm
+from wildcamtools.lib.ai.types import ResultList
 
 logger = logging.getLogger(__name__)
 

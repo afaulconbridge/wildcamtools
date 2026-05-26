@@ -25,13 +25,13 @@
 - **Dependencies**: Managed via `uv` (checked via `uv.lock`).
     - AI dependencies (openai, ollama) can be used only in `src/wildcamtools/lib/ai`.
     - CLI dependencies (typer, click) can be used only in `src/wildcamtools/cli`.
-
+    - persistence dependencies (sqlalchemy, sqlmodel) can be used only in `src/wildcamtools/lib/persistence`.
 - **Verification Order**: `ruff format` $\to$ `ruff check` $\to$ `mypy` $\to$ `pytest`.
 - **Logging**: Use python logging module and %-string formatting.
+- **Tests**: Write tests to ensure new functionallity is mainitained in future. When tests fail, assume the test is the correct behaviour modify the code rather than test unnless you can see that the test is flawed.
+- **Code review**: After each significant change, Use a code-review subagent to review changes, then use another sub-agent to fix any problems identified, then repeat until review passes.
+
 
 ## Best practices
-
+- **Lazy imports**: Imports that are not at the top of a python file are to be avoided. Prefer to create additional files and refactor code to avoid circular dependency issues, rather than creating lazy imports.
 - **After editing a python file**: Use `uv run ruff format {filename}` after each edit to ensure that python files are correctly formatted.
-- **Before commit**:
-  - Use `uv run prek` after staging but before committing to catch small problems.
-  - Use a code-review subagent to review changes, then use another sub-agent to fix any problems identified. Repeat until review passes, or the issues are not fixable.

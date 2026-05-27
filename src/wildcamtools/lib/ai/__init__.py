@@ -15,8 +15,6 @@ from wildcamtools.lib.ai.pipeline_evaluation import (
     evaluate_ai_pipeline,
 )
 from wildcamtools.lib.ai.types import (
-    AIEvaluation,
-    AIEvaluationResult,
     Backend,
     BoolResponse,
     FrameResult,
@@ -27,8 +25,6 @@ from wildcamtools.lib.ai.types import (
 )
 
 __all__ = [
-    "AIEvaluation",
-    "AIEvaluationResult",
     "AiPipelineConfig",
     "Backend",
     "BoolResponse",

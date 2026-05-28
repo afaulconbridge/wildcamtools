@@ -401,17 +401,19 @@ class TestRunEvaluateCommand:
                     raw_result="otter",
                     label="otter",
                     comparison_method="exact",
+                    processing_time_seconds=1.0,
                 ),
             ],
             correct_count=1,
             total_count=1,
             error_count=0,
+            average_processing_time_seconds=1.0,
         )
 
         with patch("wildcamtools.cli.ai.evaluate_ai_pipeline") as mock_eval:
             mock_eval.return_value = mock_summary
 
-            output_file = tmp_path / "results.jsonl"
+            output_file = tmp_path / "results.json"
             result = runner.invoke(
                 ai_app,
                 [
@@ -431,9 +433,13 @@ class TestRunEvaluateCommand:
                 labels_path=sample_labels_file,
                 video_dir=None,
                 max_workers=2,
-                result_jsonl_path=output_file,
                 comparison_config_path=sample_comparison_config_file,
             )
+            assert output_file.exists()
+            json_content = json.loads(output_file.read_text())
+            assert "results" in json_content
+            assert "correct_count" in json_content
+            assert "average_processing_time_seconds" in json_content
 
     def test_run_evaluate_with_label_comparison_config(
         self,
@@ -450,11 +456,13 @@ class TestRunEvaluateCommand:
                     raw_result="domestic cat",
                     label="cat",
                     comparison_method="llm",
+                    processing_time_seconds=1.0,
                 ),
             ],
             correct_count=1,
             total_count=1,
             error_count=0,
+            average_processing_time_seconds=1.0,
         )
 
         with patch("wildcamtools.cli.ai.evaluate_ai_pipeline") as mock_eval:
@@ -473,3 +481,91 @@ class TestRunEvaluateCommand:
             mock_eval.assert_called_once()
             call_kwargs = mock_eval.call_args.kwargs
             assert call_kwargs["comparison_config_path"] == sample_comparison_config_file
+
+    def test_run_evaluate_json_output_to_stdout(
+        self,
+        sample_config_file: Path,
+        sample_comparison_config_file: Path,
+        sample_labels_file: Path,
+    ) -> None:
+        mock_summary = PipelineEvaluationSummary(
+            results=[
+                PipelineEvaluationResult(
+                    filename="test.mp4",
+                    correct=True,
+                    raw_result="otter",
+                    label="otter",
+                    comparison_method="exact",
+                    processing_time_seconds=1.5,
+                ),
+            ],
+            correct_count=1,
+            total_count=1,
+            error_count=0,
+            average_processing_time_seconds=1.5,
+        )
+
+        with patch("wildcamtools.cli.ai.evaluate_ai_pipeline") as mock_eval:
+            mock_eval.return_value = mock_summary
+
+            result = runner.invoke(
+                ai_app,
+                [
+                    "run-evaluate",
+                    str(sample_config_file),
+                    str(sample_comparison_config_file),
+                    str(sample_labels_file),
+                ],
+            )
+            assert result.exit_code == 0
+            json_output = json.loads(result.stdout)
+            assert "results" in json_output
+            assert json_output["correct_count"] == 1
+            assert json_output["average_processing_time_seconds"] == 1.5
+
+    def test_run_evaluate_json_output_to_file(
+        self,
+        sample_config_file: Path,
+        sample_comparison_config_file: Path,
+        sample_labels_file: Path,
+        tmp_path: Path,
+    ) -> None:
+        mock_summary = PipelineEvaluationSummary(
+            results=[
+                PipelineEvaluationResult(
+                    filename="test.mp4",
+                    correct=True,
+                    raw_result="otter",
+                    label="otter",
+                    comparison_method="exact",
+                    processing_time_seconds=2.0,
+                ),
+            ],
+            correct_count=1,
+            total_count=1,
+            error_count=0,
+            average_processing_time_seconds=2.0,
+        )
+
+        with patch("wildcamtools.cli.ai.evaluate_ai_pipeline") as mock_eval:
+            mock_eval.return_value = mock_summary
+
+            output_file = tmp_path / "evaluation_result.json"
+            result = runner.invoke(
+                ai_app,
+                [
+                    "run-evaluate",
+                    str(sample_config_file),
+                    str(sample_comparison_config_file),
+                    str(sample_labels_file),
+                    "-o",
+                    str(output_file),
+                ],
+            )
+            assert result.exit_code == 0
+            assert output_file.exists()
+            json_content = json.loads(output_file.read_text())
+            assert json_content["correct_count"] == 1
+            assert json_content["average_processing_time_seconds"] == 2.0
+            assert len(json_content["results"]) == 1
+            assert json_content["results"][0]["processing_time_seconds"] == 2.0

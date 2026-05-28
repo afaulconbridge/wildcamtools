@@ -95,15 +95,15 @@ def run_evaluate(
             "-o",
             "--output",
             metavar="OUTPUT",
-            help="Optional output JSONL file for results (defaults to ./pipeline_evaluation_result.jsonl)",
+            help="Optional output JSON file for results)",
         ),
     ] = None,
 ) -> None:
     """Evaluate AiPipeline against labeled videos using a JSON configuration file.
 
     Runs the configured pipeline on each video in the labels file and compares
-    results against ground truth labels. Outputs summary statistics and optional
-    detailed results to JSONL file.
+    results against ground truth labels. Outputs summary statistics and detailed
+    results as a single JSON object.
 
     By default, uses exact string matching for comparison. Provide --label-comparison-config
     to enable semantic matching using an LLM.
@@ -120,8 +120,14 @@ def run_evaluate(
         labels_path=labels,
         video_dir=video_dir,
         max_workers=max_workers,
-        result_jsonl_path=output,
         comparison_config_path=comparison_config_path,
     )
+
+    json_output = summary.model_dump_json(indent=2)
+
+    if output:
+        output.write_text(json_output)
+    else:
+        typer.secho(json_output)
 
     summary.print_summary()

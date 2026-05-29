@@ -36,3 +36,15 @@ class StringResponse(BaseModel):
 
 class SpeciesResult(BaseModel):
     species_name: str
+
+
+class ConfidenceLevel(StrEnum):
+    LOW = "low"
+    MEDIUM = "medium"
+    HIGH = "high"
+
+
+class VerificationResult(BaseModel):
+    species_name: str
+    confidence: ConfidenceLevel
+    verified: bool

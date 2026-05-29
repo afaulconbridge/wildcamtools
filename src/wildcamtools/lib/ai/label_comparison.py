@@ -70,6 +70,7 @@ class LLMLabelComparator(AbstractLabelComparator):
             "- If result is the same as the label, answer True\n"
             "- If result is too general or unrelated, answer False (e.g., 'cat' is NOT specifically 'domestic cat')\n"
             "- If result is a different category, answer False\n"
+            "- If both result and label is missing, empty, or contains only 'none', 'no', answer True\n"
             "\n"
             "result is '{result}'"
             "label is '{label}'"

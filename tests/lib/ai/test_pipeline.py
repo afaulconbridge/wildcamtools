@@ -17,7 +17,9 @@ from wildcamtools.lib.ai.pipeline import (
     LlmImageBatchQuery,
     MajorityResultReconciler,
     RescaledFrameImageExtractor,
+    VerifiedImageBatchQuery,
 )
+from wildcamtools.lib.ai.types import ConfidenceLevel, VerificationResult
 
 T = TypeVar("T", bound=BaseModel)
 
@@ -123,6 +125,59 @@ class MockAbstractLlm(AbstractLlm):
         self.last_prompt = message
         result = MockSpeciesResult(species_name=self.response_to_return)
         return result  # type: ignore[return-value]
+
+
+class MockVerifiedLlm(AbstractLlm):
+    """Mock LLM for testing VerifiedImageBatchQuery with two-stage responses."""
+
+    model: str
+    backend: Backend
+    url: str
+    api_key: str | None = None
+
+    def __init__(
+        self,
+        model: str = "test-model",
+        backend: Backend = Backend.OLLAMA,
+        url: str = "http://test",
+        initial_species: str = "fox",
+        verification_confidence: ConfidenceLevel = ConfidenceLevel.HIGH,
+        verification_verified: bool = True,
+        verification_corrected_species: str | None = None,
+    ) -> None:
+        self.model = model
+        self.backend = backend
+        self.url = url
+        self.initial_species = initial_species
+        self.verification_confidence = verification_confidence
+        self.verification_verified = verification_verified
+        self.verification_corrected_species = verification_corrected_species
+        self.call_count = 0
+        self.last_images: list[Path] = []
+        self.last_prompt: str = ""
+        self.verification_prompt: str = ""
+
+    def message_with_schema[T](
+        self,
+        message: str,
+        images: Sequence[Path] = (),
+        response_class: type[T] = MockSpeciesResult,  # type: ignore[assignment]
+    ) -> T:
+        self.call_count += 1
+        self.last_images = list(images)
+
+        if response_class is VerificationResult:
+            self.verification_prompt = message
+            result = VerificationResult(
+                species_name=self.verification_corrected_species or self.initial_species,
+                confidence=self.verification_confidence,
+                verified=self.verification_verified,
+            )
+            return result  # type: ignore[return-value]
+        else:
+            self.last_prompt = message
+            result = MockSpeciesResult(species_name=self.initial_species)
+            return result  # type: ignore[return-value]
 
 
 class TestFpsRescalingFrameSelector:
@@ -657,3 +712,292 @@ class TestMajorityResultReconciler:
         results = ["A", "A", "B", "A", "B"]
         result = reconciler.reconcile_results(results)
         assert result == "A"
+
+
+class TestVerifiedImageBatchQuery:
+    """Tests for VerifiedImageBatchQuery two-stage verification."""
+
+    def test_verified_query_initializes_with_params(self) -> None:
+        """Test constructor stores parameters."""
+        mock_llm = MockVerifiedLlm()
+        prompt = "Test prompt"
+        query = VerifiedImageBatchQuery(
+            llm=mock_llm,
+            prompt=prompt,
+            response_class=MockSpeciesResult,
+        )
+        assert query.llm is mock_llm
+        assert query.prompt == prompt
+        assert query.response_class is MockSpeciesResult
+        assert query.min_confidence == ConfidenceLevel.MEDIUM
+
+    def test_verified_query_with_custom_min_confidence(self) -> None:
+        """Test constructor accepts custom min_confidence."""
+        mock_llm = MockVerifiedLlm()
+        query = VerifiedImageBatchQuery(
+            llm=mock_llm,
+            prompt="Test prompt",
+            response_class=MockSpeciesResult,
+            min_confidence=ConfidenceLevel.HIGH,
+        )
+        assert query.min_confidence == ConfidenceLevel.HIGH
+
+    def test_verified_query_with_custom_verification_prompt(self) -> None:
+        """Test constructor accepts custom verification prompt."""
+        mock_llm = MockVerifiedLlm()
+        custom_prompt = "Custom verification: {initial_species}"
+        query = VerifiedImageBatchQuery(
+            llm=mock_llm,
+            prompt="Test prompt",
+            response_class=MockSpeciesResult,
+            verification_prompt=custom_prompt,
+        )
+        assert query.verification_prompt == custom_prompt
+
+    def test_verified_query_images_makes_two_calls(
+        self,
+        sample_image_paths: list[Path],
+    ) -> None:
+        """Test query_images makes two LLM calls (initial + verification)."""
+        mock_llm = MockVerifiedLlm()
+        query = VerifiedImageBatchQuery(
+            llm=mock_llm,
+            prompt="Test prompt",
+            response_class=MockSpeciesResult,
+        )
+        query.query_images(sample_image_paths)
+        assert mock_llm.call_count == 2
+
+    def test_verified_query_returns_verification_result(
+        self,
+        sample_image_paths: list[Path],
+    ) -> None:
+        """Test query_images returns VerificationResult."""
+        mock_llm = MockVerifiedLlm()
+        query = VerifiedImageBatchQuery(
+            llm=mock_llm,
+            prompt="Test prompt",
+            response_class=MockSpeciesResult,
+        )
+        result = query.query_images(sample_image_paths)
+        assert isinstance(result, VerificationResult)
+        assert result.species_name == "fox"
+        assert result.confidence == ConfidenceLevel.HIGH
+        assert result.verified is True
+
+    def test_verified_query_passes_initial_species_to_verification(
+        self,
+        sample_image_paths: list[Path],
+    ) -> None:
+        """Test initial species is passed to verification prompt."""
+        mock_llm = MockVerifiedLlm(initial_species="badger")
+        query = VerifiedImageBatchQuery(
+            llm=mock_llm,
+            prompt="Test prompt",
+            response_class=MockSpeciesResult,
+        )
+        query.query_images(sample_image_paths)
+        assert "badger" in mock_llm.verification_prompt
+
+    def test_verified_query_low_confidence_becomes_unknown(
+        self,
+        sample_image_paths: list[Path],
+    ) -> None:
+        """Test low confidence result is marked as unknown."""
+        mock_llm = MockVerifiedLlm(
+            initial_species="fox",
+            verification_confidence=ConfidenceLevel.LOW,
+        )
+        query = VerifiedImageBatchQuery(
+            llm=mock_llm,
+            prompt="Test prompt",
+            response_class=MockSpeciesResult,
+            min_confidence=ConfidenceLevel.MEDIUM,
+        )
+        result = query.query_images(sample_image_paths)
+        assert result.species_name == "unknown"
+        assert result.verified is False
+        assert result.confidence == ConfidenceLevel.LOW
+
+    def test_verified_query_medium_confidence_passes_with_medium_threshold(
+        self,
+        sample_image_paths: list[Path],
+    ) -> None:
+        """Test medium confidence passes when threshold is medium."""
+        mock_llm = MockVerifiedLlm(
+            verification_confidence=ConfidenceLevel.MEDIUM,
+        )
+        query = VerifiedImageBatchQuery(
+            llm=mock_llm,
+            prompt="Test prompt",
+            response_class=MockSpeciesResult,
+            min_confidence=ConfidenceLevel.MEDIUM,
+        )
+        result = query.query_images(sample_image_paths)
+        assert result.species_name == "fox"
+        assert result.verified is True
+
+    def test_verified_query_medium_confidence_fails_with_high_threshold(
+        self,
+        sample_image_paths: list[Path],
+    ) -> None:
+        """Test medium confidence fails when threshold is high."""
+        mock_llm = MockVerifiedLlm(
+            verification_confidence=ConfidenceLevel.MEDIUM,
+        )
+        query = VerifiedImageBatchQuery(
+            llm=mock_llm,
+            prompt="Test prompt",
+            response_class=MockSpeciesResult,
+            min_confidence=ConfidenceLevel.HIGH,
+        )
+        result = query.query_images(sample_image_paths)
+        assert result.species_name == "unknown"
+        assert result.verified is False
+
+    def test_verified_query_high_confidence_passes_all_thresholds(
+        self,
+        sample_image_paths: list[Path],
+    ) -> None:
+        """Test high confidence passes all threshold levels."""
+        for threshold in [ConfidenceLevel.LOW, ConfidenceLevel.MEDIUM, ConfidenceLevel.HIGH]:
+            mock_llm = MockVerifiedLlm(
+                verification_confidence=ConfidenceLevel.HIGH,
+            )
+            query = VerifiedImageBatchQuery(
+                llm=mock_llm,
+                prompt="Test prompt",
+                response_class=MockSpeciesResult,
+                min_confidence=threshold,
+            )
+            result = query.query_images(sample_image_paths)
+            assert result.species_name == "fox"
+            assert result.verified is True
+
+    def test_verified_query_empty_batch_raises_error(self) -> None:
+        """Test empty batch raises ValueError."""
+        mock_llm = MockVerifiedLlm()
+        query = VerifiedImageBatchQuery(
+            llm=mock_llm,
+            prompt="Test prompt",
+            response_class=MockSpeciesResult,
+        )
+        with pytest.raises(ValueError, match="Empty image batch"):
+            query.query_images([])
+
+    def test_verified_query_sorts_images(
+        self,
+        sample_image_paths: list[Path],
+    ) -> None:
+        """Test images are sorted before sending to LLM."""
+        mock_llm = MockVerifiedLlm()
+        query = VerifiedImageBatchQuery(
+            llm=mock_llm,
+            prompt="Test prompt",
+            response_class=MockSpeciesResult,
+        )
+        query.query_images(list(reversed(sample_image_paths)))
+        assert mock_llm.last_images == sorted(sample_image_paths)
+
+    def test_verified_query_uses_corrected_species_when_provided(
+        self,
+        sample_image_paths: list[Path],
+    ) -> None:
+        """Test corrected species is used when verification provides one."""
+        mock_llm = MockVerifiedLlm(
+            initial_species="fox",
+            verification_corrected_species="badger",
+            verification_confidence=ConfidenceLevel.HIGH,
+        )
+        query = VerifiedImageBatchQuery(
+            llm=mock_llm,
+            prompt="Test prompt",
+            response_class=MockSpeciesResult,
+        )
+        result = query.query_images(sample_image_paths)
+        assert result.species_name == "badger"
+        assert result.verified is True
+
+    def test_verified_query_verified_false_becomes_unknown(
+        self,
+        sample_image_paths: list[Path],
+    ) -> None:
+        """Test verified=false results in unknown species."""
+        mock_llm = MockVerifiedLlm(
+            verification_verified=False,
+            verification_confidence=ConfidenceLevel.HIGH,
+        )
+        query = VerifiedImageBatchQuery(
+            llm=mock_llm,
+            prompt="Test prompt",
+            response_class=MockSpeciesResult,
+        )
+        result = query.query_images(sample_image_paths)
+        assert result.species_name == "unknown"
+        assert result.verified is False
+
+    def test_query_image_batches_yields_verification_results(
+        self,
+        sample_image_paths: list[Path],
+    ) -> None:
+        """Test query_image_batches yields VerificationResult for each batch."""
+        mock_llm = MockVerifiedLlm()
+        query = VerifiedImageBatchQuery(
+            llm=mock_llm,
+            prompt="Test prompt",
+            response_class=MockSpeciesResult,
+        )
+        batches = [sample_image_paths, sample_image_paths]
+        results = list(query.query_image_batches(batches))
+        assert len(results) == 2
+        assert all(isinstance(r, VerificationResult) for r in results)
+
+    def test_query_image_batches_multiple_batches(
+        self,
+        sample_image_paths: list[Path],
+    ) -> None:
+        """Test query_image_batches processes multiple batches."""
+        mock_llm = MockVerifiedLlm()
+        query = VerifiedImageBatchQuery(
+            llm=mock_llm,
+            prompt="Test prompt",
+            response_class=MockSpeciesResult,
+        )
+        batches = [sample_image_paths, sample_image_paths, sample_image_paths]
+        list(query.query_image_batches(batches))
+        assert mock_llm.call_count == 6
+
+    @pytest.mark.parametrize("batch_count", [1, 3, 5])
+    def test_query_image_batches_parametrized(
+        self,
+        sample_image_paths: list[Path],
+        batch_count: int,
+    ) -> None:
+        """Test various batch counts."""
+        mock_llm = MockVerifiedLlm()
+        query = VerifiedImageBatchQuery(
+            llm=mock_llm,
+            prompt="Test prompt",
+            response_class=MockSpeciesResult,
+        )
+        batches = [sample_image_paths] * batch_count
+        results = list(query.query_image_batches(batches))
+        assert len(results) == batch_count
+        assert mock_llm.call_count == batch_count * 2
+
+    def test_verified_query_with_low_threshold_accepts_all(
+        self,
+        sample_image_paths: list[Path],
+    ) -> None:
+        """Test LOW threshold accepts all confidence levels."""
+        for confidence in [ConfidenceLevel.LOW, ConfidenceLevel.MEDIUM, ConfidenceLevel.HIGH]:
+            mock_llm = MockVerifiedLlm(verification_confidence=confidence)
+            query = VerifiedImageBatchQuery(
+                llm=mock_llm,
+                prompt="Test prompt",
+                response_class=MockSpeciesResult,
+                min_confidence=ConfidenceLevel.LOW,
+            )
+            result = query.query_images(sample_image_paths)
+            assert result.species_name == "fox"
+            assert result.verified is True

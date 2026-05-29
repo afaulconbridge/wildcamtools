@@ -10,11 +10,31 @@ from pydantic import BaseModel
 
 from wildcamtools.lib import Frame
 from wildcamtools.lib.ai.llm.abstract import AbstractLlm
+from wildcamtools.lib.ai.types import ConfidenceLevel, VerificationResult
 from wildcamtools.lib.frames import Rescaler, resize_with_aspect_ratio
 from wildcamtools.lib.stats import get_video_stats
 from wildcamtools.lib.vidio import VideoReader
 
 logger = logging.getLogger(__name__)
+
+CONFIDENCE_ORDER: dict[ConfidenceLevel, int] = {
+    ConfidenceLevel.LOW: 0,
+    ConfidenceLevel.MEDIUM: 1,
+    ConfidenceLevel.HIGH: 2,
+}
+
+DEFAULT_VERIFICATION_PROMPT = (
+    "You are verifying an AI classification of wildlife from camera trap images.\n\n"
+    'Initial classification: "{initial_species}"\n\n'
+    "Your task:\n"
+    "1. Review the images carefully\n"
+    "2. Determine if the initial classification is correct\n"
+    '3. Rate your confidence level as exactly one of: "high", "medium", or "low"\n\n'
+    "Use these guidelines:\n"
+    '- "high": You are highly confident (>80%) the classification is correct\n'
+    '- "medium": You are moderately confident (50-80%) but see some uncertainty\n'
+    '- "low": You have significant doubts (<50%) or cannot verify\n\n'
+)
 
 
 class FrameSelector(ABC):
@@ -104,6 +124,72 @@ class LlmImageBatchQuery[T](ImageBatchQuery[T]):
         )  # type: ignore[type-var]
         logger.info("Received response from analyser")
         return result
+
+
+class VerifiedImageBatchQuery(ImageBatchQuery[VerificationResult]):
+    llm: AbstractLlm
+    prompt: str
+    response_class: type[BaseModel]
+    verification_prompt: str
+    min_confidence: ConfidenceLevel
+
+    def __init__(
+        self,
+        llm: AbstractLlm,
+        prompt: str,
+        response_class: type[BaseModel],
+        verification_prompt: str | None = None,
+        min_confidence: ConfidenceLevel = ConfidenceLevel.MEDIUM,
+    ) -> None:
+        self.llm = llm
+        self.prompt = prompt
+        self.response_class = response_class
+        self.verification_prompt = verification_prompt or DEFAULT_VERIFICATION_PROMPT
+        self.min_confidence = min_confidence
+
+    def query_images(self, images: Sequence[Path]) -> VerificationResult:
+        images_list = sorted(images)
+        if not images_list:
+            logger.warning("Empty image batch received")
+            raise ValueError("Empty image batch")
+
+        logger.info("Sending %d images to analyser for initial classification", len(images_list))
+        initial_result = self.llm.message_with_schema(
+            message=self.prompt,
+            images=images_list,
+            response_class=self.response_class,
+        )
+
+        initial_species = getattr(initial_result, "species_name", str(initial_result))
+        logger.debug("Initial classification: %s", initial_species)
+
+        verification_message = self.verification_prompt.format(initial_species=initial_species)
+        logger.debug("Verifying classification with confidence check")
+        verification_result: VerificationResult = self.llm.message_with_schema(
+            message=verification_message,
+            images=images_list,
+            response_class=VerificationResult,
+        )
+
+        if not self._meets_confidence_threshold(verification_result.confidence) or not verification_result.verified:
+            logger.debug(
+                "Confidence %s below threshold %s or verified=%s, marking as unknown",
+                verification_result.confidence,
+                self.min_confidence,
+                verification_result.verified,
+            )
+            verification_result = verification_result.model_copy(update={"species_name": "unknown", "verified": False})
+
+        logger.info(
+            "Verification complete: species=%s, confidence=%s, verified=%s",
+            verification_result.species_name,
+            verification_result.confidence,
+            verification_result.verified,
+        )
+        return verification_result
+
+    def _meets_confidence_threshold(self, confidence: ConfidenceLevel) -> bool:
+        return CONFIDENCE_ORDER[confidence] >= CONFIDENCE_ORDER[self.min_confidence]
 
 
 class ResultReconciler[T](ABC):

@@ -11,12 +11,14 @@ from wildcamtools.lib.ai.pipeline import (
     AiPipeline,
     FpsRescalingFrameSelector,
     FrameSelector,
+    ImageBatchQuery,
     LlmImageBatchQuery,
     MajorityResultReconciler,
     RescaledFrameImageExtractor,
     ResultReconciler,
+    VerifiedImageBatchQuery,
 )
-from wildcamtools.lib.ai.types import Backend, Result, SpeciesResult, StringResponse
+from wildcamtools.lib.ai.types import Backend, ConfidenceLevel, Result, SpeciesResult, StringResponse
 
 
 class FrameSelectorType(StrEnum):
@@ -31,6 +33,11 @@ class ResponseSchemaType(StrEnum):
     SPECIES_RESULT = "SpeciesResult"
     RESULT = "Result"
     STRING_RESPONSE = "StringResponse"
+
+
+class ImageBatchQueryType(StrEnum):
+    LLM = "llm"
+    VERIFIED = "verified"
 
 
 RESPONSE_SCHEMA_MAP: dict[ResponseSchemaType, type[BaseModel]] = {
@@ -112,9 +119,18 @@ class LlmConfig(BaseModel):
         )
 
 
-class QueryConfig(BaseModel):
+class ImageBatchQueryConfig(BaseModel):
+    query_type: ImageBatchQueryType = ImageBatchQueryType.LLM
     prompt: Annotated[str, Field(strict=True, min_length=1, description="Prompt sent to LLM")]
     response_schema: ResponseSchemaType = ResponseSchemaType.SPECIES_RESULT
+    verification_prompt: Annotated[
+        str | None,
+        Field(
+            description="Custom prompt for verification. Uses {initial_species} placeholder.",
+            min_length=1,
+        ),
+    ] = None
+    min_confidence: ConfidenceLevel = ConfidenceLevel.MEDIUM
 
     def get_response_class(self) -> type[BaseModel]:
         """Get the Pydantic model class for the response schema.
@@ -123,6 +139,34 @@ class QueryConfig(BaseModel):
             type[BaseModel]: The Pydantic model class corresponding to response_schema.
         """
         return RESPONSE_SCHEMA_MAP[self.response_schema]
+
+    def create_image_batch_query(self, llm: AbstractLlm) -> ImageBatchQuery:
+        """Create an ImageBatchQuery instance based on the configuration.
+
+        Args:
+            llm: The LLM instance to use for queries.
+
+        Returns:
+            ImageBatchQuery: The configured image batch query instance (LlmImageBatchQuery or VerifiedImageBatchQuery).
+        """
+        response_class = self.get_response_class()
+        match self.query_type:
+            case ImageBatchQueryType.LLM:
+                return LlmImageBatchQuery(
+                    llm=llm,
+                    prompt=self.prompt,
+                    response_class=response_class,
+                )
+            case ImageBatchQueryType.VERIFIED:
+                return VerifiedImageBatchQuery(
+                    llm=llm,
+                    prompt=self.prompt,
+                    response_class=response_class,
+                    verification_prompt=self.verification_prompt,
+                    min_confidence=self.min_confidence,
+                )
+            case _:
+                raise NotImplementedError(f"Unsupported query type: {self.query_type}")
 
 
 class ReconcilerConfig(BaseModel):
@@ -151,7 +195,7 @@ class AiPipelineConfig(BaseModel):
                 "frame_selector": {"selector_type": "fps_rescaling", "fps": 1.0},
                 "frame_extractor": {"resolution": [640, 360]},
                 "llm": {"backend": "ollama", "model": "qwen3.5:cloud"},
-                "query": {"prompt": "What species is in this image?"},
+                "query": {"query_type": "llm", "prompt": "What species is in this image?"},
                 "reconciler": {"reconciler_type": "majority"},
             }
         }
@@ -160,7 +204,7 @@ class AiPipelineConfig(BaseModel):
     frame_selector: FrameSelectorConfig = Field(default_factory=FrameSelectorConfig)
     frame_extractor: FrameExtractorConfig = Field(default_factory=FrameExtractorConfig)
     llm: LlmConfig
-    query: QueryConfig
+    query: ImageBatchQueryConfig
     reconciler: ReconcilerConfig = Field(default_factory=ReconcilerConfig)
 
     @classmethod
@@ -176,12 +220,7 @@ class AiPipelineConfig(BaseModel):
         frame_selector = self.frame_selector.create_frame_selector()
         frame_extractor = self.frame_extractor.create_frame_extractor()
         llm = self.llm.create_llm()
-        response_class = self.query.get_response_class()
-        image_batch_query = LlmImageBatchQuery(
-            llm=llm,
-            prompt=self.query.prompt,
-            response_class=response_class,
-        )
+        image_batch_query = self.query.create_image_batch_query(llm)
         reconciler = self.reconciler.create_reconciler()
 
         return AiPipeline(

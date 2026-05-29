@@ -10,8 +10,9 @@ from wildcamtools.lib.ai.pipeline_config import (
     FrameExtractorConfig,
     FrameSelectorConfig,
     FrameSelectorType,
+    ImageBatchQueryConfig,
+    ImageBatchQueryType,
     LlmConfig,
-    QueryConfig,
     ReconcilerConfig,
     ReconcilerType,
     ResponseSchemaType,
@@ -158,23 +159,32 @@ class TestLlmConfig:
         assert config.backend == Backend(backend_value)
 
 
-class TestQueryConfig:
+class TestImageBatchQueryConfig:
     def test_default_values(self) -> None:
-        config = QueryConfig(prompt="Test prompt")
+        config = ImageBatchQueryConfig(prompt="Test prompt")
+        assert config.query_type == ImageBatchQueryType.LLM
         assert config.prompt == "Test prompt"
         assert config.response_schema == ResponseSchemaType.SPECIES_RESULT
+        assert config.verification_prompt is None
+        assert config.min_confidence == "medium"
 
     def test_custom_values(self) -> None:
-        config = QueryConfig(
+        config = ImageBatchQueryConfig(
+            query_type=ImageBatchQueryType.VERIFIED,
             prompt="Custom prompt",
             response_schema=ResponseSchemaType.STRING_RESPONSE,
+            verification_prompt="Verify: {initial_species}",
+            min_confidence="high",
         )
+        assert config.query_type == ImageBatchQueryType.VERIFIED
         assert config.prompt == "Custom prompt"
         assert config.response_schema == ResponseSchemaType.STRING_RESPONSE
+        assert config.verification_prompt == "Verify: {initial_species}"
+        assert config.min_confidence == "high"
 
     def test_empty_prompt(self) -> None:
         with pytest.raises(ValidationError) as exc_info:
-            QueryConfig(prompt="")
+            ImageBatchQueryConfig(prompt="")
         assert "min_length=1" in str(exc_info.value) or "at least 1" in str(exc_info.value).lower()
 
     @pytest.mark.parametrize(
@@ -186,34 +196,82 @@ class TestQueryConfig:
         ],
     )
     def test_response_schema_values(self, schema_value: str, expected_class: str) -> None:
-        config = QueryConfig.model_validate({"prompt": "test", "response_schema": schema_value})
+        config = ImageBatchQueryConfig.model_validate({"prompt": "test", "response_schema": schema_value})
         assert config.response_schema.value == expected_class
 
     def test_invalid_response_schema(self) -> None:
         with pytest.raises(ValidationError):
-            QueryConfig.model_validate({"prompt": "test", "response_schema": "InvalidSchema"})
+            ImageBatchQueryConfig.model_validate({"prompt": "test", "response_schema": "InvalidSchema"})
 
     def test_get_response_class_species(self) -> None:
         from wildcamtools.lib.ai import SpeciesResult
 
-        config = QueryConfig(prompt="test", response_schema=ResponseSchemaType.SPECIES_RESULT)
+        config = ImageBatchQueryConfig(prompt="test", response_schema=ResponseSchemaType.SPECIES_RESULT)
         assert config.get_response_class() == SpeciesResult
 
     def test_get_response_class_result(self) -> None:
         from wildcamtools.lib.ai import Result
 
-        config = QueryConfig(prompt="test", response_schema=ResponseSchemaType.RESULT)
+        config = ImageBatchQueryConfig(prompt="test", response_schema=ResponseSchemaType.RESULT)
         assert config.get_response_class() == Result
 
     def test_get_response_class_string(self) -> None:
         from wildcamtools.lib.ai import StringResponse
 
-        config = QueryConfig(prompt="test", response_schema=ResponseSchemaType.STRING_RESPONSE)
+        config = ImageBatchQueryConfig(prompt="test", response_schema=ResponseSchemaType.STRING_RESPONSE)
         assert config.get_response_class() == StringResponse
 
     def test_strict_type_validation(self) -> None:
         with pytest.raises(ValidationError):
-            QueryConfig(prompt=123)
+            ImageBatchQueryConfig(prompt=123)
+
+    def test_invalid_query_type(self) -> None:
+        with pytest.raises(ValidationError):
+            ImageBatchQueryConfig.model_validate({"prompt": "test", "query_type": "invalid"})
+
+    def test_create_llm_image_batch_query(self) -> None:
+        from wildcamtools.lib.ai.llm import create_analyser
+        from wildcamtools.lib.ai.pipeline import LlmImageBatchQuery
+
+        config = ImageBatchQueryConfig(prompt="test prompt")
+        llm = create_analyser(backend=Backend.OLLAMA, model="test", url="http://test", api_key=None)
+        query = config.create_image_batch_query(llm)
+
+        assert isinstance(query, LlmImageBatchQuery)
+        assert query.prompt == "test prompt"
+        assert query.llm is llm
+
+    def test_create_verified_image_batch_query(self) -> None:
+        from wildcamtools.lib.ai.llm import create_analyser
+        from wildcamtools.lib.ai.pipeline import VerifiedImageBatchQuery
+
+        config = ImageBatchQueryConfig(
+            query_type=ImageBatchQueryType.VERIFIED,
+            prompt="test prompt",
+            min_confidence="high",
+        )
+        llm = create_analyser(backend=Backend.OLLAMA, model="test", url="http://test", api_key=None)
+        query = config.create_image_batch_query(llm)
+
+        assert isinstance(query, VerifiedImageBatchQuery)
+        assert query.prompt == "test prompt"
+        assert query.llm is llm
+        assert query.min_confidence == "high"
+
+    def test_create_verified_image_batch_query_with_custom_verification_prompt(self) -> None:
+        from wildcamtools.lib.ai.llm import create_analyser
+        from wildcamtools.lib.ai.pipeline import VerifiedImageBatchQuery
+
+        config = ImageBatchQueryConfig(
+            query_type=ImageBatchQueryType.VERIFIED,
+            prompt="test prompt",
+            verification_prompt="custom verify: {initial_species}",
+        )
+        llm = create_analyser(backend=Backend.OLLAMA, model="test", url="http://test", api_key=None)
+        query = config.create_image_batch_query(llm)
+
+        assert isinstance(query, VerifiedImageBatchQuery)
+        assert query.verification_prompt == "custom verify: {initial_species}"
 
 
 class TestReconcilerConfig:
@@ -244,7 +302,7 @@ class TestReconcilerConfig:
 
 class TestAiPipelineConfig:
     def test_minimal_config(self) -> None:
-        config = AiPipelineConfig(llm=LlmConfig(model="test-model"), query=QueryConfig(prompt="test"))
+        config = AiPipelineConfig(llm=LlmConfig(model="test-model"), query=ImageBatchQueryConfig(prompt="test"))
         assert config.frame_selector.selector_type == FrameSelectorType.FPS_RESCALING
         assert config.frame_extractor.resolution == (640, 360)
         assert config.llm.model == "test-model"
@@ -256,7 +314,7 @@ class TestAiPipelineConfig:
             frame_selector=FrameSelectorConfig(fps=0.5),
             frame_extractor=FrameExtractorConfig(resolution=(1280, 720)),
             llm=LlmConfig(model="llama-3", backend=Backend.LLAMACPP, url="http://localhost:8080/v1"),
-            query=QueryConfig(prompt="Custom prompt", response_schema=ResponseSchemaType.STRING_RESPONSE),
+            query=ImageBatchQueryConfig(prompt="Custom prompt", response_schema=ResponseSchemaType.STRING_RESPONSE),
             reconciler=ReconcilerConfig(reconciler_type=ReconcilerType.MAJORITY),
         )
         assert config.frame_selector.fps == 0.5
@@ -285,7 +343,7 @@ class TestAiPipelineConfig:
         assert config.query.prompt == "Test prompt from JSON"
 
     def test_to_json(self, tmp_path: Path) -> None:
-        config = AiPipelineConfig(llm=LlmConfig(model="test-model"), query=QueryConfig(prompt="test"))
+        config = AiPipelineConfig(llm=LlmConfig(model="test-model"), query=ImageBatchQueryConfig(prompt="test"))
         output_file = tmp_path / "output_config.json"
 
         config.to_json(output_file)
@@ -300,7 +358,7 @@ class TestAiPipelineConfig:
             frame_selector=FrameSelectorConfig(fps=2.0),
             frame_extractor=FrameExtractorConfig(resolution=(800, 600)),
             llm=LlmConfig(model="qwen3.5:cloud"),
-            query=QueryConfig(prompt="Test prompt"),
+            query=ImageBatchQueryConfig(prompt="Test prompt"),
             reconciler=ReconcilerConfig(),
         )
 
@@ -314,30 +372,62 @@ class TestAiPipelineConfig:
         assert restored.query.prompt == original.query.prompt
 
     def test_create_pipeline(self) -> None:
-        from wildcamtools.lib.ai.pipeline import AiPipeline
+        from wildcamtools.lib.ai.pipeline import AiPipeline, LlmImageBatchQuery
 
         config = AiPipelineConfig(
             llm=LlmConfig(model="test-model", url="http://localhost:8080/v1"),
-            query=QueryConfig(prompt="test"),
+            query=ImageBatchQueryConfig(prompt="test"),
         )
 
         pipeline = config.create_pipeline()
         assert isinstance(pipeline, AiPipeline)
         assert pipeline.frame_selector.fps == 1.0
         assert pipeline.frame_image_extractor.resolution == (640, 360)
+        assert isinstance(pipeline.image_batch_query, LlmImageBatchQuery)
 
     def test_create_pipeline_with_custom_params(self) -> None:
         config = AiPipelineConfig(
             frame_selector=FrameSelectorConfig(fps=5.0),
             frame_extractor=FrameExtractorConfig(resolution=(1024, 768)),
             llm=LlmConfig(model="custom-model", url="http://example.com"),
-            query=QueryConfig(prompt="custom prompt", response_schema=ResponseSchemaType.RESULT),
+            query=ImageBatchQueryConfig(prompt="custom prompt", response_schema=ResponseSchemaType.RESULT),
             reconciler=ReconcilerConfig(),
         )
 
         pipeline = config.create_pipeline()
         assert pipeline.frame_selector.fps == 5.0
         assert pipeline.frame_image_extractor.resolution == (1024, 768)
+
+    def test_create_pipeline_with_verified_query(self) -> None:
+        from wildcamtools.lib.ai.pipeline import VerifiedImageBatchQuery
+
+        config = AiPipelineConfig(
+            llm=LlmConfig(model="test-model", url="http://localhost:8080/v1"),
+            query=ImageBatchQueryConfig(query_type=ImageBatchQueryType.VERIFIED, prompt="test"),
+        )
+
+        pipeline = config.create_pipeline()
+        assert isinstance(pipeline.image_batch_query, VerifiedImageBatchQuery)
+        assert pipeline.image_batch_query.min_confidence == "medium"
+
+    def test_create_pipeline_with_verified_query_custom_params(self) -> None:
+        from wildcamtools.lib.ai.pipeline import VerifiedImageBatchQuery
+        from wildcamtools.lib.ai.types import ConfidenceLevel
+
+        config = AiPipelineConfig(
+            llm=LlmConfig(model="test-model", url="http://localhost:8080/v1"),
+            query=ImageBatchQueryConfig(
+                query_type=ImageBatchQueryType.VERIFIED,
+                prompt="test",
+                verification_prompt="custom verify",
+                min_confidence=ConfidenceLevel.HIGH,
+            ),
+        )
+
+        pipeline = config.create_pipeline()
+        assert isinstance(pipeline.image_batch_query, VerifiedImageBatchQuery)
+        assert pipeline.image_batch_query.verification_prompt == "custom verify"
+        assert pipeline.image_batch_query.min_confidence == ConfidenceLevel.HIGH
 
     def test_missing_required_fields(self) -> None:
         with pytest.raises(ValidationError):
@@ -382,7 +472,7 @@ class TestIntegration:
     def test_create_and_run_pipeline_structure(self) -> None:
         config = AiPipelineConfig(
             llm=LlmConfig(model="test", url="http://localhost:8080/v1"),
-            query=QueryConfig(prompt="test"),
+            query=ImageBatchQueryConfig(prompt="test"),
         )
 
         pipeline = config.create_pipeline()

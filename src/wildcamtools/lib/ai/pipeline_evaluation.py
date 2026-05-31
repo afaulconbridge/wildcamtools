@@ -33,6 +33,16 @@ class _FrameSelectorWrapper(FrameSelector):
         return self._frame_ids.copy()
 
 
+class _WorkerResult(BaseModel):
+    """Result from worker process before label comparison."""
+
+    filename: str
+    raw_result: str
+    processing_time_seconds: float = 0.0
+    frame_ids: list[int] = Field(default_factory=list)
+    error: str | None = None
+
+
 class PipelineEvaluationResult(BaseModel):
     filename: str
     classification: ResultClassification
@@ -54,7 +64,6 @@ class PipelineEvaluationSummary(BaseModel):
     correct_count: int = 0
     incorrect_count: int = 0
     unknown_count: int = 0
-    no_animal_count: int = 0
     total_count: int = 0
     error_count: int = 0
     average_processing_time_seconds: float = 0.0
@@ -85,7 +94,7 @@ class PipelineEvaluationSummary(BaseModel):
 
     @property
     def precision_when_confident(self) -> float:
-        confident_total = self.correct_count + self.incorrect_count + self.no_animal_count
+        confident_total = self.correct_count + self.incorrect_count
         if confident_total == 0:
             return 0.0
         return self.correct_count / confident_total
@@ -96,7 +105,6 @@ class PipelineEvaluationSummary(BaseModel):
         logger.info("  Correct: %d", self.correct_count)
         logger.info("  Incorrect: %d", self.incorrect_count)
         logger.info("  Unknown: %d", self.unknown_count)
-        logger.info("  No Animal: %d", self.no_animal_count)
         logger.info("  Errors: %d", self.error_count)
         logger.info("  Accuracy: %.4f", self.accuracy)
         logger.info("  Detection Rate: %.4f", self.detection_rate)
@@ -106,10 +114,8 @@ class PipelineEvaluationSummary(BaseModel):
 
 def _evaluate_video_worker(
     video_path_str: str,
-    ground_truth_label: str,
     pipeline_config: AiPipelineConfig,
-    comparator_config: LabelComparisonConfig,
-) -> PipelineEvaluationResult:
+) -> _WorkerResult:
     video_path = Path(video_path_str)
     try:
         start_time = time.time()
@@ -121,7 +127,6 @@ def _evaluate_video_worker(
         processing_time = end_time - start_time
         frame_ids = wrapper.frame_ids
 
-        # TODO this more cleanly - base class with a abstract method?
         if isinstance(result, SpeciesResult) or hasattr(result, "species_name"):
             raw_result = result.species_name
         elif hasattr(result, "message"):
@@ -129,28 +134,19 @@ def _evaluate_video_worker(
         else:
             raw_result = str(result)
 
-        comparator = comparator_config.create_comparator()
-        is_correct, classification = comparator.compare(raw_result, ground_truth_label)
         logger.info(
-            "Video %s: label=%s, result=%s, classification=%s (method=%s), frames=%s",
+            "Video %s: result=%s, frames=%s",
             video_path.name,
-            ground_truth_label,
             raw_result,
-            classification.value,
-            comparator.method_name,
             frame_ids,
         )
 
-        return PipelineEvaluationResult(
+        return _WorkerResult(
             filename=video_path.name,
-            classification=classification,
             raw_result=raw_result,
-            label=ground_truth_label,
-            error=None,
-            comparison_method=comparator.method_name,
             processing_time_seconds=processing_time,
             frame_ids=frame_ids,
-            is_correct=is_correct,
+            error=None,
         )
     except Exception:
         logger.exception("Worker failed for video %s", video_path.name)
@@ -181,6 +177,7 @@ def _run_worker_pool(
 ) -> list[PipelineEvaluationResult]:
     ctx = multiprocessing.get_context("spawn")
     results: list[PipelineEvaluationResult] = []
+    comparator = comparison_config.create_comparator()
 
     with ctx.Pool(processes=max_workers) as pool:
         futures = []
@@ -191,28 +188,30 @@ def _run_worker_pool(
                 continue
             future = pool.apply_async(
                 _evaluate_video_worker,
-                args=(str(video_path), label, pipeline_config, comparison_config),
+                args=(str(video_path), pipeline_config),
             )
-            futures.append(future)
+            futures.append((label, future))
 
-        for future in futures:
+        for label, future in futures:
             try:
-                result = future.get()
-                results.append(result)
-            except Exception as e:
+                worker_result = future.get()
+            except Exception:
                 logger.exception("Worker task failed")
-                results.append(
-                    PipelineEvaluationResult(
-                        filename="unknown",
-                        classification=ResultClassification.INCORRECT,
-                        raw_result="",
-                        label="unknown",
-                        error=str(e),
-                        comparison_method="exact",
-                        processing_time_seconds=0.0,
-                        frame_ids=[],
-                    )
+                continue
+            is_correct, classification = comparator.compare(worker_result.raw_result, label)
+            results.append(
+                PipelineEvaluationResult(
+                    filename=worker_result.filename,
+                    classification=classification,
+                    raw_result=worker_result.raw_result,
+                    label=label,
+                    error=worker_result.error,
+                    comparison_method=comparator.method_name,
+                    processing_time_seconds=worker_result.processing_time_seconds,
+                    frame_ids=worker_result.frame_ids,
+                    is_correct=is_correct,
                 )
+            )
 
     return results
 
@@ -263,7 +262,6 @@ def evaluate_ai_pipeline(
     correct_count = sum(1 for r in results if r.classification == ResultClassification.CORRECT)
     incorrect_count = sum(1 for r in results if r.classification == ResultClassification.INCORRECT)
     unknown_count = sum(1 for r in results if r.classification == ResultClassification.UNKNOWN)
-    no_animal_count = sum(1 for r in results if r.classification == ResultClassification.NO_ANIMAL)
     error_count = sum(1 for r in results if r.error is not None)
     total_count = len(results)
     total_processing_time = sum(r.processing_time_seconds for r in results)
@@ -274,7 +272,6 @@ def evaluate_ai_pipeline(
         correct_count=correct_count,
         incorrect_count=incorrect_count,
         unknown_count=unknown_count,
-        no_animal_count=no_animal_count,
         total_count=total_count,
         error_count=error_count,
         average_processing_time_seconds=average_processing_time,

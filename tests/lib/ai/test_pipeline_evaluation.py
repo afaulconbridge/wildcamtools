@@ -17,9 +17,49 @@ from wildcamtools.lib.ai.pipeline_config import AiPipelineConfig
 from wildcamtools.lib.ai.pipeline_evaluation import (
     _evaluate_video_worker,
     _FrameSelectorWrapper,
+    _WorkerResult,
     evaluate_ai_pipeline,
 )
 from wildcamtools.lib.ai.types import ResultClassification
+
+
+class TestWorkerResult:
+    def test_worker_result_creation(self) -> None:
+        result = _WorkerResult(
+            filename="test.mp4",
+            raw_result="otter",
+        )
+        assert result.filename == "test.mp4"
+        assert result.raw_result == "otter"
+        assert result.error is None
+        assert result.processing_time_seconds == 0.0
+        assert result.frame_ids == []
+
+    def test_worker_result_with_error(self) -> None:
+        result = _WorkerResult(
+            filename="test.mp4",
+            raw_result="",
+            error="Connection timeout",
+        )
+        assert result.error == "Connection timeout"
+        assert result.processing_time_seconds == 0.0
+        assert result.frame_ids == []
+
+    def test_worker_result_with_processing_time(self) -> None:
+        result = _WorkerResult(
+            filename="test.mp4",
+            raw_result="otter",
+            processing_time_seconds=1.5,
+        )
+        assert result.processing_time_seconds == 1.5
+
+    def test_worker_result_with_frame_ids(self) -> None:
+        result = _WorkerResult(
+            filename="test.mp4",
+            raw_result="otter",
+            frame_ids=[1, 5, 10, 15],
+        )
+        assert result.frame_ids == [1, 5, 10, 15]
 
 
 class TestPipelineEvaluationResult:
@@ -65,18 +105,6 @@ class TestPipelineEvaluationResult:
         )
         assert result.classification == ResultClassification.UNKNOWN
         assert result.correct is False
-
-    def test_result_no_animal_classification(self) -> None:
-        result = PipelineEvaluationResult(
-            filename="test.mp4",
-            classification=ResultClassification.NO_ANIMAL,
-            raw_result="none",
-            label="none",
-            is_correct=True,
-        )
-        assert result.classification == ResultClassification.NO_ANIMAL
-        assert result.is_correct is True
-        assert result.correct is True
 
     def test_result_with_comparison_method(self) -> None:
         result = PipelineEvaluationResult(
@@ -187,7 +215,6 @@ class TestPipelineEvaluationSummary:
             correct_count=1,
             incorrect_count=1,
             unknown_count=0,
-            no_animal_count=0,
             total_count=2,
             error_count=0,
         )
@@ -226,7 +253,6 @@ class TestPipelineEvaluationSummary:
             correct_count=2,
             incorrect_count=1,
             unknown_count=0,
-            no_animal_count=0,
             total_count=3,
             error_count=0,
         )
@@ -261,7 +287,6 @@ class TestPipelineEvaluationSummary:
             correct_count=1,
             incorrect_count=1,
             unknown_count=1,
-            no_animal_count=0,
             total_count=3,
             error_count=0,
         )
@@ -290,7 +315,6 @@ class TestPipelineEvaluationSummary:
             correct_count=1,
             incorrect_count=0,
             unknown_count=0,
-            no_animal_count=0,
             total_count=2,
             error_count=1,
         )
@@ -332,7 +356,6 @@ class TestPipelineEvaluationSummary:
             correct_count=correct,
             incorrect_count=incorrect,
             unknown_count=0,
-            no_animal_count=0,
             total_count=total,
             error_count=0,
         )
@@ -360,7 +383,6 @@ class TestPipelineEvaluationSummary:
             correct_count=2,
             incorrect_count=0,
             unknown_count=0,
-            no_animal_count=0,
             total_count=3,
             error_count=0,
         )
@@ -388,7 +410,6 @@ class TestPipelineEvaluationSummary:
             correct_count=1,
             incorrect_count=1,
             unknown_count=0,
-            no_animal_count=0,
             total_count=3,
             error_count=0,
         )
@@ -423,7 +444,6 @@ class TestPipelineEvaluationSummary:
             correct_count=1,
             incorrect_count=1,
             unknown_count=1,
-            no_animal_count=0,
             total_count=3,
             error_count=0,
         )
@@ -445,24 +465,16 @@ class TestPipelineEvaluationSummary:
                 label="cat",
                 is_correct=False,
             ),
-            PipelineEvaluationResult(
-                filename="test3.mp4",
-                classification=ResultClassification.NO_ANIMAL,
-                raw_result="none",
-                label="otter",
-                is_correct=True,
-            ),
         ]
         summary = PipelineEvaluationSummary(
             results=results,
             correct_count=1,
             incorrect_count=1,
             unknown_count=0,
-            no_animal_count=1,
-            total_count=3,
+            total_count=2,
             error_count=0,
         )
-        assert summary.precision_when_confident == pytest.approx(1 / 3)
+        assert summary.precision_when_confident == pytest.approx(1 / 2)
 
     def test_average_processing_time(self) -> None:
         results = [
@@ -496,7 +508,6 @@ class TestPipelineEvaluationSummary:
             correct_count=3,
             incorrect_count=0,
             unknown_count=0,
-            no_animal_count=0,
             total_count=3,
             error_count=0,
             average_processing_time_seconds=2.0,
@@ -519,7 +530,6 @@ class TestPipelineEvaluationSummary:
             correct_count=1,
             incorrect_count=0,
             unknown_count=0,
-            no_animal_count=0,
             total_count=1,
             error_count=0,
             average_processing_time_seconds=1.5,
@@ -542,20 +552,11 @@ class TestEvaluateVideoWorker:
         mock_pipeline.run.return_value = mock_result
         mock_config.create_pipeline.return_value = mock_pipeline
 
-        mock_comparator = MagicMock()
-        mock_comparator.compare.return_value = (True, ResultClassification.CORRECT)
-        mock_comparator.method_name = "exact"
-        mock_comparison_config = MagicMock()
-        mock_comparison_config.create_comparator.return_value = mock_comparator
-
         video_path = data_directory / "test.mp4"
-        result = _evaluate_video_worker(str(video_path), "otter", mock_config, mock_comparison_config)
+        result = _evaluate_video_worker(str(video_path), mock_config)
 
         assert result.filename == "test.mp4"
-        assert result.classification == ResultClassification.CORRECT
-        assert result.correct is True
         assert result.raw_result == "otter"
-        assert result.label == "otter"
         assert result.error is None
         assert result.processing_time_seconds > 0.0
 
@@ -569,19 +570,10 @@ class TestEvaluateVideoWorker:
         mock_pipeline.run.return_value = mock_result
         mock_config.create_pipeline.return_value = mock_pipeline
 
-        mock_comparator = MagicMock()
-        mock_comparator.compare.return_value = (False, ResultClassification.INCORRECT)
-        mock_comparator.method_name = "exact"
-        mock_comparison_config = MagicMock()
-        mock_comparison_config.create_comparator.return_value = mock_comparator
-
         video_path = data_directory / "test.mp4"
-        result = _evaluate_video_worker(str(video_path), "otter", mock_config, mock_comparison_config)
+        result = _evaluate_video_worker(str(video_path), mock_config)
 
-        assert result.classification == ResultClassification.INCORRECT
-        assert result.correct is False
         assert result.raw_result == "cat"
-        assert result.label == "otter"
 
     def test_worker_unknown_result_with_mock(
         self,
@@ -593,40 +585,10 @@ class TestEvaluateVideoWorker:
         mock_pipeline.run.return_value = mock_result
         mock_config.create_pipeline.return_value = mock_pipeline
 
-        mock_comparator = MagicMock()
-        mock_comparator.compare.return_value = (False, ResultClassification.UNKNOWN)
-        mock_comparator.method_name = "exact"
-        mock_comparison_config = MagicMock()
-        mock_comparison_config.create_comparator.return_value = mock_comparator
-
         video_path = data_directory / "test.mp4"
-        result = _evaluate_video_worker(str(video_path), "otter", mock_config, mock_comparison_config)
+        result = _evaluate_video_worker(str(video_path), mock_config)
 
-        assert result.classification == ResultClassification.UNKNOWN
-        assert result.correct is False
         assert result.raw_result == "unknown"
-
-    def test_worker_case_insensitive_comparison_with_mock(
-        self,
-        data_directory: Path,
-    ) -> None:
-        mock_result = SpeciesResult(species_name="Otter")
-        mock_config = MagicMock()
-        mock_pipeline = MagicMock()
-        mock_pipeline.run.return_value = mock_result
-        mock_config.create_pipeline.return_value = mock_pipeline
-
-        mock_comparator = MagicMock()
-        mock_comparator.compare.return_value = (True, ResultClassification.CORRECT)
-        mock_comparator.method_name = "exact"
-        mock_comparison_config = MagicMock()
-        mock_comparison_config.create_comparator.return_value = mock_comparator
-
-        video_path = data_directory / "test.mp4"
-        result = _evaluate_video_worker(str(video_path), "OTTER", mock_config, mock_comparison_config)
-
-        assert result.classification == ResultClassification.CORRECT
-        assert result.correct is True
 
     def test_worker_error_handling_with_mock(
         self,
@@ -637,14 +599,9 @@ class TestEvaluateVideoWorker:
         mock_pipeline.run.side_effect = RuntimeError("LLM connection failed")
         mock_config.create_pipeline.return_value = mock_pipeline
 
-        mock_comparator = MagicMock()
-        mock_comparator.method_name = "exact"
-        mock_comparison_config = MagicMock()
-        mock_comparison_config.create_comparator.return_value = mock_comparator
-
         video_path = data_directory / "test.mp4"
         with pytest.raises(RuntimeError, match="LLM connection failed"):
-            _evaluate_video_worker(str(video_path), "otter", mock_config, mock_comparison_config)
+            _evaluate_video_worker(str(video_path), mock_config)
 
     def test_worker_with_string_response_result(
         self,
@@ -656,18 +613,10 @@ class TestEvaluateVideoWorker:
         mock_pipeline.run.return_value = mock_result
         mock_config.create_pipeline.return_value = mock_pipeline
 
-        mock_comparator = MagicMock()
-        mock_comparator.compare.return_value = (True, ResultClassification.CORRECT)
-        mock_comparator.method_name = "exact"
-        mock_comparison_config = MagicMock()
-        mock_comparison_config.create_comparator.return_value = mock_comparator
-
         video_path = data_directory / "test.mp4"
-        result = _evaluate_video_worker(str(video_path), "test response", mock_config, mock_comparison_config)
+        result = _evaluate_video_worker(str(video_path), mock_config)
 
         assert result.raw_result == "test response"
-        assert result.classification == ResultClassification.CORRECT
-        assert result.correct is True
 
     def test_worker_captures_frame_ids(
         self,
@@ -693,14 +642,8 @@ class TestEvaluateVideoWorker:
         mock_pipeline.run.side_effect = run_side_effect
         mock_config.create_pipeline.return_value = mock_pipeline
 
-        mock_comparator = MagicMock()
-        mock_comparator.compare.return_value = (True, ResultClassification.CORRECT)
-        mock_comparator.method_name = "exact"
-        mock_comparison_config = MagicMock()
-        mock_comparison_config.create_comparator.return_value = mock_comparator
-
         video_path = data_directory / "test.mp4"
-        result = _evaluate_video_worker(str(video_path), "otter", mock_config, mock_comparison_config)
+        result = _evaluate_video_worker(str(video_path), mock_config)
 
         assert result.frame_ids == [1, 5, 10]
 

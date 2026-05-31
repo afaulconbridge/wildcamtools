@@ -2,7 +2,7 @@ import json
 from pathlib import Path
 
 import pytest
-from pydantic import ValidationError
+from pydantic import AnyHttpUrl, ValidationError
 
 from wildcamtools.lib.ai import Backend
 from wildcamtools.lib.ai.pipeline import MotionFrameSelector
@@ -210,7 +210,7 @@ class TestLlmConfig:
         config = LlmConfig(model="test-model")
         assert config.backend == Backend.OLLAMA
         assert config.model == "test-model"
-        assert config.url == "http://localhost:8080/v1"
+        assert config.url == AnyHttpUrl("http://localhost:8080/v1")
         assert config.api_key is None
 
     def test_custom_values(self) -> None:
@@ -222,7 +222,7 @@ class TestLlmConfig:
         )
         assert config.backend == Backend.LLAMACPP
         assert config.model == "llama-3"
-        assert config.api_key == "test-key"
+        assert config.api_key.get_secret_value() == "test-key"
 
     def test_empty_model_name(self) -> None:
         with pytest.raises(ValidationError) as exc_info:
@@ -237,7 +237,7 @@ class TestLlmConfig:
     def test_env_var_resolution(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("TEST_API_KEY", "secret-key-123")
         config = LlmConfig(model="test", api_key="${TEST_API_KEY}")
-        assert config.api_key == "secret-key-123"
+        assert config.api_key.get_secret_value() == "secret-key-123"
 
     def test_env_var_missing(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.delenv("MISSING_KEY", raising=False)
@@ -246,17 +246,22 @@ class TestLlmConfig:
 
     def test_env_var_not_resolved_plain_string(self) -> None:
         config = LlmConfig(model="test", api_key="plain-api-key")
-        assert config.api_key == "plain-api-key"
+        assert config.api_key.get_secret_value() == "plain-api-key"
 
     def test_env_var_partial_match(self) -> None:
         config = LlmConfig(model="test", api_key="${INCOMPLETE")
-        assert config.api_key == "${INCOMPLETE"
+        assert config.api_key.get_secret_value() == "${INCOMPLETE"
 
     def test_create_llm(self) -> None:
         config = LlmConfig(model="test-model", url="http://localhost:8080/v1")
         llm = config.create_llm()
         assert llm.model == "test-model"
         assert llm.url == "http://localhost:8080/v1"
+
+    def test_url_type(self) -> None:
+        config = LlmConfig(model="test-model")
+        assert isinstance(config.url, AnyHttpUrl)
+        assert str(config.url) == "http://localhost:8080/v1"
 
     @pytest.mark.parametrize("backend_value", ["ollama", "llamacpp"])
     def test_backend_serialization(self, backend_value: str) -> None:
@@ -590,7 +595,7 @@ class TestIntegration:
         config_file.write_text(json_content)
 
         config = AiPipelineConfig.from_json(config_file)
-        assert config.llm.api_key == "super-secret-key"
+        assert config.llm.api_key.get_secret_value() == "super-secret-key"
 
     def test_create_and_run_pipeline_structure(self) -> None:
         config = AiPipelineConfig(

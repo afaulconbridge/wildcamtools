@@ -3,7 +3,7 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Annotated, Self
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import AnyHttpUrl, BaseModel, ConfigDict, Field, SecretStr, field_validator
 
 from wildcamtools.lib.ai.llm import create_analyser
 from wildcamtools.lib.ai.llm.abstract import AbstractLlm
@@ -107,24 +107,21 @@ class FrameExtractorConfig(BaseModel):
 class LlmConfig(BaseModel):
     backend: Backend = Backend.OLLAMA
     model: Annotated[str, Field(strict=True, min_length=1, description="Model name/identifier")]
-    url: Annotated[str, Field(description="Base URL for the LLM service")] = "http://localhost:8080/v1"
-    api_key: str | None = None
+    url: Annotated[AnyHttpUrl, Field(description="Base URL for the LLM service")] = AnyHttpUrl(
+        "http://localhost:8080/v1"
+    )
+    api_key: SecretStr | None = None
 
-    @field_validator("api_key")
+    @field_validator("api_key", mode="before")
     @classmethod
     def resolve_env_var(cls, v: str | None) -> str | None:
         if v is None:
             return None
+        if isinstance(v, SecretStr):
+            v = v.get_secret_value()
         if v.startswith("${") and v.endswith("}"):
             env_var = v[2:-1]
             return os.environ.get(env_var)
-        return v
-
-    @field_validator("url")
-    @classmethod
-    def validate_url(cls, v: str) -> str:
-        if not v.startswith(("http://", "https://")):
-            raise ValueError("URL must start with http:// or https://")
         return v
 
     def create_llm(self) -> AbstractLlm:
@@ -136,8 +133,8 @@ class LlmConfig(BaseModel):
         return create_analyser(
             backend=self.backend,
             model=self.model,
-            url=self.url,
-            api_key=self.api_key,
+            url=str(self.url),
+            api_key=self.api_key.get_secret_value() if self.api_key else None,
         )
 
 

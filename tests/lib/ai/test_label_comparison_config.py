@@ -179,4 +179,4 @@ class TestIntegration:
 
         config = LabelComparisonConfig.from_json(config_file)
         assert config.llm is not None
-        assert config.llm.api_key == "secret-key-123"
+        assert config.llm.api_key.get_secret_value() == "secret-key-123"

@@ -1,0 +1,26 @@
+{
+  "frame_selector": {
+    "selector_type": "motion",
+    "max_fps": 5.0
+  },
+  "frame_extractor": {
+    "resolution": [
+      640,
+      360
+    ]
+  },
+  "llm": {
+    "backend": "ollama",
+    "model": "gemma4:31b-cloud",
+    "url": "https://ollama.com",
+    "api_key": "${WCT_OLLAMA_API_KEY}"
+  },
+  "query": {
+    "query_type": "llm",
+    "prompt": "This is a video image from a UK garden near a river. Is there an animal in this image, if so what?",
+    "response_schema": "SpeciesResult"
+  },
+  "reconciler": {
+    "reconciler_type": "majority"
+  }
+}

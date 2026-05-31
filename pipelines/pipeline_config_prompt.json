@@ -1,0 +1,26 @@
+{
+  "frame_selector": {
+    "selector_type": "fps_rescaling",
+    "fps": 0.5
+  },
+  "frame_extractor": {
+    "resolution": [
+      640,
+      360
+    ]
+  },
+  "llm": {
+    "backend": "ollama",
+    "model": "gemma4:31b-cloud",
+    "url": "https://ollama.com",
+    "api_key": "${WCT_OLLAMA_API_KEY}"
+  },
+  "query": {
+    "query_type": "llm",
+    "prompt": "Analyze this frame from a UK garden surveillance camera located near a river. Your goal is to identify animals with high precision, prioritizing the avoidance of false positives.\nStep 1: Visual Analysis Describe the specific visual evidence of an animal. Identify the shape, color, and distinct anatomical features (e.g., ears, tail, legs) that suggest a living creature is present. If you only see ambiguous shapes, shadows, or foliage, state 'No'\nStep 2: Skeptical Verification Consider if the identified shape could be a non-animal object (e.g., a rock, a garden ornament, a leaf, or a lighting artifact). If there is any significant ambiguity, default to 'no'.\nStep 3: Final Identification If and only if you are confident an animal is present",
+    "response_schema": "SpeciesResult"
+  },
+  "reconciler": {
+    "reconciler_type": "majority"
+  }
+}

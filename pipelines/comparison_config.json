@@ -1,0 +1,11 @@
+{
+  "comparator_type": "llm",
+  "llm": {
+    "backend": "ollama",
+    "model": "gemma4:31b-cloud",
+    "url": "https://ollama.com",
+    "api_key": "${WCT_OLLAMA_API_KEY}"
+  },
+  "prompt": "You are comparing an AI classification result against a ground truth label. Determine if the result qualifies as a specific instance or type of the label.\nRules:\n - If result is a specific type/instance of the label, answer True (e.g., 'domestic cat' IS A 'cat')\n - If result is the same as the label, answer True\n - If result is too general or unrelated, answer False (e.g., 'cat' is NOT specifically 'domestic cat')\n - If both result and label is missing, empty, or contains only 'none', 'no', answer True - If result is a different category, answer False\n\nresult is '{result}'\nlabel is '{label}'",
+  "cache_enabled": true
+}

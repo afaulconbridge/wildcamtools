@@ -12,6 +12,7 @@ from wildcamtools.lib import Frame
 from wildcamtools.lib.ai.llm.abstract import AbstractLlm
 from wildcamtools.lib.ai.types import ConfidenceLevel, VerificationResult
 from wildcamtools.lib.frames import Rescaler, resize_with_aspect_ratio
+from wildcamtools.lib.motion import MogMotion
 from wildcamtools.lib.stats import get_video_stats
 from wildcamtools.lib.vidio import VideoReader
 
@@ -56,6 +57,48 @@ class FpsRescalingFrameSelector(FrameSelector):
                 frame = rescaler.handle(frame)
                 if frame.filter_keep:
                     yield frame
+
+
+class MotionFrameSelector(FrameSelector):
+    max_fps: float
+    motion_threshold: float
+    resolution: tuple[int, int] | None
+    history: int
+
+    def __init__(
+        self,
+        max_fps: float = 5.0,
+        motion_threshold: float = 0.01,
+        resolution: tuple[int, int] | None = None,
+        history: int = 30,
+    ) -> None:
+        self.max_fps = max_fps
+        self.motion_threshold = motion_threshold
+        self.resolution = resolution
+        self.history = history
+
+    def select_frames(self, video: Path) -> Iterator[Frame]:
+        stats = get_video_stats(video)
+        motion_handler = MogMotion(history=self.history, resolution=self.resolution)
+        rescaler = Rescaler(stats, fps=self.max_fps) if self.max_fps > 0 else None
+
+        with VideoReader(video) as video_reader:
+            for frame in video_reader:
+                frame = motion_handler.handle(frame)
+
+                has_motion = frame.frame_no <= self.history or frame.motion_proportion >= self.motion_threshold
+
+                if not has_motion:
+                    frame.filter_keep = False
+                    continue
+
+                if rescaler is not None:
+                    frame = rescaler.handle(frame)
+
+                if not frame.filter_keep:
+                    continue
+
+                yield frame
 
 
 class FrameImageExtractor(ABC):

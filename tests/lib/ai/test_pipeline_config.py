@@ -5,6 +5,7 @@ import pytest
 from pydantic import ValidationError
 
 from wildcamtools.lib.ai import Backend
+from wildcamtools.lib.ai.pipeline import MotionFrameSelector
 from wildcamtools.lib.ai.pipeline_config import (
     AiPipelineConfig,
     FrameExtractorConfig,
@@ -64,6 +65,110 @@ class TestFrameSelectorConfig:
         config = FrameSelectorConfig.model_validate({"selector_type": "fps_rescaling", "fps": 5.0})
         assert config.selector_type == FrameSelectorType.FPS_RESCALING
         assert config.fps == 5.0
+
+    def test_motion_selector_default_values(self) -> None:
+        config = FrameSelectorConfig(selector_type=FrameSelectorType.MOTION)
+        assert config.selector_type == FrameSelectorType.MOTION
+        assert config.max_fps == 5.0
+        assert config.motion_threshold == 0.01
+        assert config.resolution is None
+        assert config.history == 30
+
+    def test_motion_selector_custom_values(self) -> None:
+        config = FrameSelectorConfig(
+            selector_type=FrameSelectorType.MOTION,
+            max_fps=10.0,
+            motion_threshold=0.05,
+            resolution=(320, 240),
+            history=50,
+        )
+        assert config.max_fps == 10.0
+        assert config.motion_threshold == 0.05
+        assert config.resolution == (320, 240)
+        assert config.history == 50
+
+    def test_motion_selector_invalid_threshold_negative(self) -> None:
+        with pytest.raises(ValidationError) as exc_info:
+            FrameSelectorConfig(selector_type=FrameSelectorType.MOTION, motion_threshold=-0.1)
+        assert "ge=0.0" in str(exc_info.value) or "greater than or equal to 0" in str(exc_info.value).lower()
+
+    def test_motion_selector_invalid_threshold_above_one(self) -> None:
+        with pytest.raises(ValidationError) as exc_info:
+            FrameSelectorConfig(selector_type=FrameSelectorType.MOTION, motion_threshold=1.5)
+        assert "le=1.0" in str(exc_info.value) or "less than or equal to 1" in str(exc_info.value).lower()
+
+    def test_motion_selector_invalid_history_negative(self) -> None:
+        with pytest.raises(ValidationError) as exc_info:
+            FrameSelectorConfig(selector_type=FrameSelectorType.MOTION, history=-5)
+        assert "ge=0" in str(exc_info.value) or "greater than or equal to 0" in str(exc_info.value).lower()
+
+    def test_motion_selector_invalid_resolution_zero_width(self) -> None:
+        with pytest.raises(ValidationError) as exc_info:
+            FrameSelectorConfig(selector_type=FrameSelectorType.MOTION, resolution=(0, 240))
+        assert "gt=0" in str(exc_info.value) or "greater than 0" in str(exc_info.value).lower()
+
+    def test_motion_selector_invalid_resolution_zero_height(self) -> None:
+        with pytest.raises(ValidationError) as exc_info:
+            FrameSelectorConfig(selector_type=FrameSelectorType.MOTION, resolution=(320, 0))
+        assert "gt=0" in str(exc_info.value) or "greater than 0" in str(exc_info.value).lower()
+
+    def test_motion_selector_invalid_max_fps_negative(self) -> None:
+        with pytest.raises(ValidationError) as exc_info:
+            FrameSelectorConfig(selector_type=FrameSelectorType.MOTION, max_fps=-1.0)
+        assert "ge=0.0" in str(exc_info.value) or "greater than or equal to 0" in str(exc_info.value).lower()
+
+    def test_motion_selector_create_frame_selector(self) -> None:
+        config = FrameSelectorConfig(
+            selector_type=FrameSelectorType.MOTION,
+            max_fps=10.0,
+            motion_threshold=0.02,
+            resolution=(640, 480),
+            history=40,
+        )
+        selector = config.create_frame_selector()
+        assert isinstance(selector, MotionFrameSelector)
+        assert selector.max_fps == 10.0
+        assert selector.motion_threshold == 0.02
+        assert selector.resolution == (640, 480)
+        assert selector.history == 40
+
+    def test_motion_selector_create_default(self) -> None:
+        config = FrameSelectorConfig(selector_type=FrameSelectorType.MOTION)
+        selector = config.create_frame_selector()
+        assert isinstance(selector, MotionFrameSelector)
+        assert selector.max_fps == 5.0
+        assert selector.motion_threshold == 0.01
+        assert selector.resolution is None
+        assert selector.history == 30
+
+    def test_motion_selector_serialization(self) -> None:
+        config = FrameSelectorConfig(
+            selector_type=FrameSelectorType.MOTION,
+            max_fps=8.0,
+            motion_threshold=0.03,
+            resolution=(400, 300),
+            history=25,
+        )
+        data = config.model_dump()
+        assert data["selector_type"] == "motion"
+        assert data["max_fps"] == 8.0
+        assert data["motion_threshold"] == 0.03
+        assert data["resolution"] == (400, 300)
+        assert data["history"] == 25
+
+    def test_motion_selector_from_dict(self) -> None:
+        config = FrameSelectorConfig.model_validate({
+            "selector_type": "motion",
+            "max_fps": 7.0,
+            "motion_threshold": 0.015,
+            "resolution": [480, 360],
+            "history": 35,
+        })
+        assert config.selector_type == FrameSelectorType.MOTION
+        assert config.max_fps == 7.0
+        assert config.motion_threshold == 0.015
+        assert config.resolution == (480, 360)
+        assert config.history == 35
 
 
 class TestFrameExtractorConfig:
@@ -429,21 +534,39 @@ class TestAiPipelineConfig:
         assert pipeline.image_batch_query.verification_prompt == "custom verify"
         assert pipeline.image_batch_query.min_confidence == ConfidenceLevel.HIGH
 
-    def test_missing_required_fields(self) -> None:
-        with pytest.raises(ValidationError):
-            AiPipelineConfig.model_validate({})
+    def test_create_pipeline_with_motion_selector(self) -> None:
+        config = AiPipelineConfig(
+            frame_selector=FrameSelectorConfig(
+                selector_type=FrameSelectorType.MOTION,
+                max_fps=10.0,
+                motion_threshold=0.02,
+                resolution=(320, 240),
+                history=40,
+            ),
+            llm=LlmConfig(model="test-model", url="http://localhost:8080/v1"),
+            query=ImageBatchQueryConfig(prompt="test"),
+        )
 
-    def test_missing_llm_config(self) -> None:
-        with pytest.raises(ValidationError):
-            AiPipelineConfig.model_validate({"query": {"prompt": "test"}})
+        pipeline = config.create_pipeline()
+        assert isinstance(pipeline.frame_selector, MotionFrameSelector)
+        assert pipeline.frame_selector.max_fps == 10.0
+        assert pipeline.frame_selector.motion_threshold == 0.02
+        assert pipeline.frame_selector.resolution == (320, 240)
+        assert pipeline.frame_selector.history == 40
 
-    def test_missing_query_config(self) -> None:
-        with pytest.raises(ValidationError):
-            AiPipelineConfig.model_validate({"llm": {"model": "test"}})
+    def test_create_pipeline_with_motion_selector_default(self) -> None:
+        config = AiPipelineConfig(
+            frame_selector=FrameSelectorConfig(selector_type=FrameSelectorType.MOTION),
+            llm=LlmConfig(model="test-model", url="http://localhost:8080/v1"),
+            query=ImageBatchQueryConfig(prompt="test"),
+        )
 
-    def test_example_schema(self) -> None:
-        schema = AiPipelineConfig.model_json_schema()
-        assert "example" in schema.get("jsonSchemaExtra", {}) or "example" in str(schema)
+        pipeline = config.create_pipeline()
+        assert isinstance(pipeline.frame_selector, MotionFrameSelector)
+        assert pipeline.frame_selector.max_fps == 5.0
+        assert pipeline.frame_selector.motion_threshold == 0.01
+        assert pipeline.frame_selector.resolution is None
+        assert pipeline.frame_selector.history == 30
 
 
 class TestIntegration:

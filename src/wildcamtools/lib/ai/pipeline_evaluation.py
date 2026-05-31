@@ -1,16 +1,36 @@
 import logging
 import multiprocessing
 import time
+from collections.abc import Iterator
 from pathlib import Path
 
 from pydantic import BaseModel, Field
 
+from wildcamtools.lib import Frame
 from wildcamtools.lib.ai.label_comparison_config import LabelComparisonConfig
+from wildcamtools.lib.ai.pipeline import FrameSelector
 from wildcamtools.lib.ai.pipeline_config import AiPipelineConfig
 from wildcamtools.lib.ai.types import SpeciesResult
 from wildcamtools.lib.labels import load_labels
 
 logger = logging.getLogger(__name__)
+
+
+class _FrameSelectorWrapper(FrameSelector):
+    """Wrapper that captures frame IDs while delegating to the actual frame selector."""
+
+    def __init__(self, wrapped: FrameSelector) -> None:
+        self._wrapped = wrapped
+        self._frame_ids: list[int] = []
+
+    def select_frames(self, video: Path) -> Iterator[Frame]:
+        for frame in self._wrapped.select_frames(video):
+            self._frame_ids.append(frame.frame_no)
+            yield frame
+
+    @property
+    def frame_ids(self) -> list[int]:
+        return self._frame_ids.copy()
 
 
 class PipelineEvaluationResult(BaseModel):
@@ -21,6 +41,7 @@ class PipelineEvaluationResult(BaseModel):
     error: str | None = None
     comparison_method: str = "exact"
     processing_time_seconds: float = 0.0
+    frame_ids: list[int] = Field(default_factory=list)
 
 
 class PipelineEvaluationSummary(BaseModel):
@@ -66,9 +87,12 @@ def _evaluate_video_worker(
     try:
         start_time = time.time()
         pipeline = pipeline_config.create_pipeline()
+        wrapper = _FrameSelectorWrapper(pipeline.frame_selector)
+        pipeline.frame_selector = wrapper
         result = pipeline.run(video_path)
         end_time = time.time()
         processing_time = end_time - start_time
+        frame_ids = wrapper.frame_ids
 
         # TODO this more cleanly - base class with a abstract method?
         if isinstance(result, SpeciesResult) or hasattr(result, "species_name"):
@@ -81,12 +105,13 @@ def _evaluate_video_worker(
         comparator = comparator_config.create_comparator()
         correct = comparator.compare(raw_result, ground_truth_label)
         logger.info(
-            "Video %s: label=%s, result=%s, correct=%s (method=%s)",
+            "Video %s: label=%s, result=%s, correct=%s (method=%s), frames=%s",
             video_path.name,
             ground_truth_label,
             raw_result,
             correct,
             comparator.method_name,
+            frame_ids,
         )
 
         return PipelineEvaluationResult(
@@ -97,6 +122,7 @@ def _evaluate_video_worker(
             error=None,
             comparison_method=comparator.method_name,
             processing_time_seconds=processing_time,
+            frame_ids=frame_ids,
         )
     except Exception:
         logger.exception("Worker failed for video %s", video_path.name)
@@ -156,6 +182,7 @@ def _run_worker_pool(
                         error=str(e),
                         comparison_method="exact",
                         processing_time_seconds=0.0,
+                        frame_ids=[],
                     )
                 )
 

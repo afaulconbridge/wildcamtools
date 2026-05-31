@@ -16,6 +16,7 @@ from wildcamtools.lib.ai.pipeline import (
     FpsRescalingFrameSelector,
     LlmImageBatchQuery,
     MajorityResultReconciler,
+    MotionFrameSelector,
     RescaledFrameImageExtractor,
     VerifiedImageBatchQuery,
 )
@@ -241,6 +242,120 @@ class TestFpsRescalingFrameSelector:
         selector = FpsRescalingFrameSelector(fps=0.0)
         with pytest.raises(ZeroDivisionError):
             list(selector.select_frames(video_path))
+
+
+class TestMotionFrameSelector:
+    """Tests for MotionFrameSelector specific functionality."""
+
+    def test_motion_selector_initializes_with_defaults(self) -> None:
+        """Test constructor with default values."""
+        selector = MotionFrameSelector()
+        assert selector.max_fps == 5.0
+        assert selector.motion_threshold == 0.01
+        assert selector.resolution is None
+        assert selector.history == 30
+
+    def test_motion_selector_initializes_with_custom_values(self) -> None:
+        """Test constructor stores custom parameters."""
+        selector = MotionFrameSelector(
+            max_fps=10.0,
+            motion_threshold=0.05,
+            resolution=(640, 360),
+            history=50,
+        )
+        assert selector.max_fps == 10.0
+        assert selector.motion_threshold == 0.05
+        assert selector.resolution == (640, 360)
+        assert selector.history == 50
+
+    def test_select_frames_returns_generator(self, video_path: Path) -> None:
+        """Verify select_frames returns a Generator."""
+        selector = MotionFrameSelector()
+        result = selector.select_frames(video_path)
+        assert isinstance(result, Generator)
+
+    def test_select_frames_yields_frames(self, video_path: Path) -> None:
+        """Verify yielded items are Frame instances."""
+        selector = MotionFrameSelector()
+        frames = list(selector.select_frames(video_path))
+        assert len(frames) > 0
+        for frame in frames:
+            assert isinstance(frame, Frame)
+            assert hasattr(frame, "raw")
+            assert hasattr(frame, "frame_no")
+
+    def test_motion_selector_respects_max_fps(self, video_path: Path) -> None:
+        """Test that max_fps parameter reduces frame count."""
+        selector_10fps = MotionFrameSelector(max_fps=10.0)
+        selector_2fps = MotionFrameSelector(max_fps=2.0)
+
+        frames_10 = list(selector_10fps.select_frames(video_path))
+        frames_2 = list(selector_2fps.select_frames(video_path))
+
+        assert len(frames_2) < len(frames_10)
+
+    def test_motion_selector_preserves_frame_order(self, video_path: Path) -> None:
+        """Test that frames maintain sequential ordering."""
+        selector = MotionFrameSelector()
+        frames = list(selector.select_frames(video_path))
+
+        frame_numbers = [frame.frame_no for frame in frames]
+        assert frame_numbers == sorted(frame_numbers)
+
+    def test_motion_selector_with_resolution(self, video_path: Path) -> None:
+        """Test that resolution parameter controls motion detection resolution."""
+        selector = MotionFrameSelector(resolution=(320, 240))
+        frames = list(selector.select_frames(video_path))
+
+        assert len(frames) > 0
+        for frame in frames:
+            assert isinstance(frame, Frame)
+            assert hasattr(frame, "motion_proportion")
+
+    def test_motion_selector_with_high_threshold(self, video_path: Path) -> None:
+        """Test that high motion threshold reduces frame count."""
+        selector_low = MotionFrameSelector(motion_threshold=0.001)
+        selector_high = MotionFrameSelector(motion_threshold=0.5)
+
+        frames_low = list(selector_low.select_frames(video_path))
+        frames_high = list(selector_high.select_frames(video_path))
+
+        assert len(frames_high) <= len(frames_low)
+
+    @pytest.mark.parametrize("fps_value", [1.0, 5.0, 10.0])
+    def test_motion_selector_parametrized_fps(self, video_path: Path, fps_value: float) -> None:
+        """Test various FPS values."""
+        selector = MotionFrameSelector(max_fps=fps_value)
+        frames = list(selector.select_frames(video_path))
+        assert len(frames) > 0
+        for frame in frames:
+            assert isinstance(frame, Frame)
+
+    def test_motion_selector_zero_fps(self, video_path: Path) -> None:
+        """Test that max_fps=0 does not apply FPS filtering."""
+        selector = MotionFrameSelector(max_fps=0.0)
+        frames = list(selector.select_frames(video_path))
+        assert len(frames) > 0
+        for frame in frames:
+            assert isinstance(frame, Frame)
+
+    def test_motion_selector_resolution_affects_motion_detection(
+        self,
+        video_path: Path,
+    ) -> None:
+        """Test that resolution parameter is passed to motion handler."""
+        selector_low_res = MotionFrameSelector(resolution=(160, 120), motion_threshold=0.001)
+        selector_full_res = MotionFrameSelector(resolution=None, motion_threshold=0.001)
+
+        frames_low = list(selector_low_res.select_frames(video_path))
+        frames_full = list(selector_full_res.select_frames(video_path))
+
+        assert len(frames_low) > 0
+        assert len(frames_full) > 0
+
+        for frame in frames_low:
+            assert isinstance(frame, Frame)
+            assert frame.motion_proportion >= -1.0
 
 
 class TestRescaledFrameImageExtractor:

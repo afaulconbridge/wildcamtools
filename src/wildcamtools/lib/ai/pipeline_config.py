@@ -14,6 +14,7 @@ from wildcamtools.lib.ai.pipeline import (
     ImageBatchQuery,
     LlmImageBatchQuery,
     MajorityResultReconciler,
+    MotionFrameSelector,
     RescaledFrameImageExtractor,
     ResultReconciler,
     VerifiedImageBatchQuery,
@@ -23,6 +24,7 @@ from wildcamtools.lib.ai.types import Backend, ConfidenceLevel, Result, SpeciesR
 
 class FrameSelectorType(StrEnum):
     FPS_RESCALING = "fps_rescaling"
+    MOTION = "motion"
 
 
 class ReconcilerType(StrEnum):
@@ -50,6 +52,19 @@ RESPONSE_SCHEMA_MAP: dict[ResponseSchemaType, type[BaseModel]] = {
 class FrameSelectorConfig(BaseModel):
     selector_type: FrameSelectorType = FrameSelectorType.FPS_RESCALING
     fps: Annotated[float, Field(strict=True, gt=0.0, description="Target frames per second")] = 1.0
+    max_fps: Annotated[
+        float,
+        Field(strict=True, ge=0.0, description="Max frames per second for motion selector"),
+    ] = 5.0
+    motion_threshold: Annotated[
+        float,
+        Field(strict=True, ge=0.0, le=1.0, description="Motion detection threshold"),
+    ] = 0.01
+    resolution: Annotated[
+        tuple[Annotated[int, Field(strict=True, gt=0)], Annotated[int, Field(strict=True, gt=0)]] | None,
+        Field(description="Motion detection resolution as (width, height)"),
+    ] = None
+    history: Annotated[int, Field(strict=True, ge=0, description="Motion detector warm-up frames")] = 30
 
     def create_frame_selector(self) -> FrameSelector:
         """Create a FrameSelector instance based on the configuration.
@@ -63,6 +78,13 @@ class FrameSelectorConfig(BaseModel):
         match self.selector_type:
             case FrameSelectorType.FPS_RESCALING:
                 return FpsRescalingFrameSelector(fps=self.fps)
+            case FrameSelectorType.MOTION:
+                return MotionFrameSelector(
+                    max_fps=self.max_fps,
+                    motion_threshold=self.motion_threshold,
+                    resolution=self.resolution,
+                    history=self.history,
+                )
             case _:
                 raise NotImplementedError(f"Unsupported frame selector type: {self.selector_type}")
 

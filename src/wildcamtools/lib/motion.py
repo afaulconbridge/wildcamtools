@@ -20,21 +20,42 @@ class MotionHandler(FrameHandler):
     background_subtractor: cv2.BackgroundSubtractor
     exclusion_mask: np.ndarray | None = None
     motion_mask: np.ndarray | None = None
+    resolution: tuple[int, int] | None
+    original_resolution: tuple[int, int] | None = None
 
     def __init__(
         self,
         history: int,
         kernel_size: float = 0.005,
         motion_mask: np.ndarray | None = None,
+        resolution: tuple[int, int] | None = None,
     ):
         self.history = history
         self.kernel_size = kernel_size
-        self.exclusion_mask = motion_mask
         self.motion_mask = None
+        self.resolution = resolution
+        self.original_resolution = None
+
+        if motion_mask is not None and resolution is not None:
+            self.exclusion_mask = cv2.resize(
+                motion_mask,
+                resolution,
+                interpolation=cv2.INTER_NEAREST,
+            )
+        else:
+            self.exclusion_mask = motion_mask
 
     def handle(self, frame: Frame) -> Frame:
-        frame_out = self.update_background(frame.raw)
-        # only set if we've gone through history
+        frame_for_motion = frame.raw
+
+        if self.resolution is not None and self.original_resolution is None:
+            self.original_resolution = (frame.raw.shape[1], frame.raw.shape[0])
+
+        if self.resolution is not None:
+            frame_for_motion = cv2.resize(frame.raw, self.resolution, interpolation=cv2.INTER_AREA)
+
+        frame_out = self.update_background(frame_for_motion)
+
         proportion = self.get_motion_proportion(frame_out) if frame.frame_no > self.history else -1.0
         logger.debug("Motion %d: %03f", frame.frame_no, proportion)
         frame.motion_proportion = proportion
@@ -53,6 +74,8 @@ class MotionHandler(FrameHandler):
         # Calculate kernel size based on longest dimension
         # Round down to nearest odd number, minimum 3
         # TODO make kernel size based on area not length
+        # Note: kernel is computed once on first frame and cached. Resolution should not change
+        # after initialization, otherwise kernel size will be incorrect.
         max_dim = max(frame_raw.shape[:2])
         k_size = int(max_dim * self.kernel_size)
         k_size = k_size if k_size % 2 != 0 else k_size - 1
@@ -118,52 +141,28 @@ class MotionHandler(FrameHandler):
     @abstractmethod
     def update_background(self, frame: MatLike) -> MatLike: ...
 
-    def _filter_contours(self, contours: Sequence[MatLike]) -> Sequence[MatLike]:
-        """Filter out contours that overlap with the exclusion mask."""
-        if self.exclusion_mask is None:
-            return contours
-
-        mh, mw = self.exclusion_mask.shape
-        filtered_contours = []
-        for cnt in contours:
-            max_y = np.max(cnt[:, 0, 1])
-            lowest_points = cnt[cnt[:, 0, 1] == max_y]
-
-            is_masked = False
-            pts = [(int(p[0, 0]), int(p[0, 1])) for p in lowest_points]
-
-            for x, y in pts:
-                if 0 <= y < mh and 0 <= x < mw and self.exclusion_mask[y, x] != 0:
-                    is_masked = True
-                    break
-
-            if not is_masked and len(pts) >= 2:
-                pts.sort()
-                x_start, y_start = pts[0]
-                x_end, _ = pts[-1]
-                for x_sample in range(x_start, x_end + 1):
-                    if 0 <= y_start < mh and 0 <= x_sample < mw and self.exclusion_mask[y_start, x_sample] != 0:
-                        is_masked = True
-                        break
-
-            if not is_masked:
-                filtered_contours.append(cnt)
-        return filtered_contours
-
     def get_contour_bboxes(self) -> tuple[BBox, ...]:
         if self.motion_mask is None:
             raise MotionMaskNotCreatedError("Cannot get bounding boxes: motion mask has not been created yet")
 
-        contours, _ = cv2.findContours(self.motion_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-
-        if self.exclusion_mask is not None:
-            contours = self._filter_contours(contours)
+        contours = self._get_contours(self.motion_mask)
 
         rects = [cv2.boundingRect(cv2.approxPolyDP(contour, 3, True)) for contour in contours]
-        # Convert cv2 bounding boxes (x, y, w, h) to BBox (x1, y1, x2, y2)
         merged_rects = [BBox(r[0], r[1], r[0] + r[2], r[1] + r[3]) for r in rects]
 
-        # merge until cannot merge any more
+        if self.resolution is not None and self.original_resolution is not None:
+            scale_x = self.original_resolution[0] / self.resolution[0]
+            scale_y = self.original_resolution[1] / self.resolution[1]
+            merged_rects = [
+                BBox(
+                    int(r.x1 * scale_x),
+                    int(r.y1 * scale_y),
+                    int(r.x2 * scale_x),
+                    int(r.y2 * scale_y),
+                )
+                for r in merged_rects
+            ]
+
         has_merged = True
         while has_merged:
             has_merged = False
@@ -175,7 +174,6 @@ class MotionHandler(FrameHandler):
 
                 for i in range(len(new_rects)):
                     if current.overlaps(new_rects[i]):
-                        # Merge 'current' into the existing rect in new_rects
                         new_rects[i] = current.merge_with(new_rects[i])
                         merged = True
                         has_merged = True
@@ -201,8 +199,9 @@ class FlowMotion(MotionHandler):
         threshold: float = 1.0,
         kernel_size: float = 0.005,
         motion_mask: np.ndarray | None = None,
+        resolution: tuple[int, int] | None = None,
     ):
-        super().__init__(history=history, kernel_size=kernel_size, motion_mask=motion_mask)
+        super().__init__(history=history, kernel_size=kernel_size, motion_mask=motion_mask, resolution=resolution)
         self.threshold = threshold
 
     def update_background(self, frame: MatLike) -> MatLike:
@@ -256,8 +255,9 @@ class MogMotion(MotionHandler):
         detect_shadows: bool = False,
         kernel_size: float = 0.005,
         motion_mask: np.ndarray | None = None,
+        resolution: tuple[int, int] | None = None,
     ):
-        super().__init__(history=history, kernel_size=kernel_size, motion_mask=motion_mask)
+        super().__init__(history=history, kernel_size=kernel_size, motion_mask=motion_mask, resolution=resolution)
         self.threshold = threshold
         self.detect_shadows = detect_shadows
 
@@ -287,8 +287,9 @@ class AvgMotion(MotionHandler):
         threshold: int = 16,
         kernel_size: float = 0.005,
         motion_mask: np.ndarray | None = None,
+        resolution: tuple[int, int] | None = None,
     ):
-        super().__init__(history=history, kernel_size=kernel_size, motion_mask=motion_mask)
+        super().__init__(history=history, kernel_size=kernel_size, motion_mask=motion_mask, resolution=resolution)
         self.threshold = threshold
 
     def update_background(self, frame: MatLike) -> MatLike:

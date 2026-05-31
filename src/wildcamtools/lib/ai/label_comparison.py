@@ -2,16 +2,45 @@ import logging
 from abc import ABC, abstractmethod
 
 from wildcamtools.lib.ai.llm.abstract import AbstractLlm
-from wildcamtools.lib.ai.types import BoolResponse
+from wildcamtools.lib.ai.types import BoolResponse, ResultClassification
 
 logger = logging.getLogger(__name__)
+
+ABSENCE_MARKERS = {"", "none", "no animal", "missing", "empty", "no", "no detection"}
+UNKNOWN_MARKERS = {"unknown", "uncertain", "unsure"}
 
 
 class AbstractLabelComparator(ABC):
     """Abstract base class for label comparison strategies."""
 
+    @staticmethod
+    def _check_special_cases(result: str, label: str) -> tuple[bool, ResultClassification] | None:
+        """Check for special cases (unknown markers, absence markers).
+
+        Args:
+            result: The raw result string from the pipeline.
+            label: The ground truth label.
+
+        Returns:
+            Tuple of (is_correct, classification) if a special case is detected,
+            None otherwise.
+        """
+        result_lower = result.lower()
+        label_lower = label.lower()
+
+        if result_lower in UNKNOWN_MARKERS:
+            return False, ResultClassification.UNKNOWN
+
+        if result_lower in ABSENCE_MARKERS:
+            if label_lower in ABSENCE_MARKERS:
+                return True, ResultClassification.NO_ANIMAL
+            else:
+                return False, ResultClassification.NO_ANIMAL
+
+        return None
+
     @abstractmethod
-    def compare(self, result: str, label: str) -> bool:
+    def compare(self, result: str, label: str) -> tuple[bool, ResultClassification]:
         """Compare a pipeline result against a ground truth label.
 
         Args:
@@ -19,7 +48,9 @@ class AbstractLabelComparator(ABC):
             label: The ground truth label.
 
         Returns:
-            True if the result semantically matches the label, False otherwise.
+            Tuple of (is_correct, classification) where:
+            - is_correct: True if the result matches the label
+            - classification: The type of result (correct, incorrect, unknown, no_animal)
         """
         ...
 
@@ -33,8 +64,15 @@ class AbstractLabelComparator(ABC):
 class ExactLabelComparator(AbstractLabelComparator):
     """Exact string matching comparator (case-insensitive)."""
 
-    def compare(self, result: str, label: str) -> bool:
-        return result.lower() == label.lower()
+    def compare(self, result: str, label: str) -> tuple[bool, ResultClassification]:
+        special_case = self._check_special_cases(result, label)
+        if special_case is not None:
+            return special_case
+
+        if result.lower() == label.lower():
+            return True, ResultClassification.CORRECT
+        else:
+            return False, ResultClassification.INCORRECT
 
     @property
     def method_name(self) -> str:
@@ -53,7 +91,7 @@ class LLMLabelComparator(AbstractLabelComparator):
         - "animal" vs "cat" → False (too general)
     """
 
-    _cache: dict[tuple[str, str], bool] | None
+    _cache: dict[tuple[str, str], tuple[bool, ResultClassification]] | None
 
     def __init__(
         self,
@@ -77,13 +115,20 @@ class LLMLabelComparator(AbstractLabelComparator):
         )
         self._cache = {} if cache_enabled else None
 
-    def compare(self, result: str, label: str) -> bool:
+    def compare(self, result: str, label: str) -> tuple[bool, ResultClassification]:
+        special_case = self._check_special_cases(result, label)
+        if special_case is not None:
+            return special_case
+
+        result_lower = result.lower()
+        label_lower = label.lower()
 
         if self._cache is not None:
-            cache_key = (result.lower(), label.lower())
+            cache_key = (result_lower, label_lower)
             if cache_key in self._cache:
                 logger.debug("Using cached comparison for (%s, %s)", result, label)
-                return self._cache[cache_key]
+                is_correct, classification = self._cache[cache_key]
+                return is_correct, classification
 
         message = self.prompt.format(result=result, label=label)
         logger.debug("Comparing '%s' vs '%s' using LLM", result, label)
@@ -94,10 +139,12 @@ class LLMLabelComparator(AbstractLabelComparator):
             response_class=BoolResponse,
         )
 
+        classification = ResultClassification.CORRECT if response.answer else ResultClassification.INCORRECT
+
         if self._cache is not None:
-            self._cache[cache_key] = response.answer
+            self._cache[cache_key] = (response.answer, classification)
         logger.info("Comparison result: '%s' vs '%s' = %s", result, label, response.answer)
-        return response.answer
+        return response.answer, classification
 
     @property
     def method_name(self) -> str:

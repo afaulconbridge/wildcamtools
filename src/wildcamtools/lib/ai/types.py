@@ -48,3 +48,10 @@ class VerificationResult(BaseModel):
     species_name: str
     confidence: ConfidenceLevel
     verified: bool
+
+
+class ResultClassification(StrEnum):
+    CORRECT = "correct"
+    INCORRECT = "incorrect"
+    UNKNOWN = "unknown"
+    NO_ANIMAL = "no_animal"

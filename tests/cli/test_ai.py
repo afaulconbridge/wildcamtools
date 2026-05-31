@@ -7,6 +7,7 @@ from typer.testing import CliRunner
 
 from wildcamtools.cli.ai import app as ai_app
 from wildcamtools.lib.ai import PipelineEvaluationResult, PipelineEvaluationSummary
+from wildcamtools.lib.ai.types import ResultClassification
 
 runner = CliRunner()
 
@@ -397,7 +398,8 @@ class TestRunEvaluateCommand:
             results=[
                 PipelineEvaluationResult(
                     filename="test.mp4",
-                    correct=True,
+                    classification=ResultClassification.CORRECT,
+                    is_correct=True,
                     raw_result="otter",
                     label="otter",
                     comparison_method="exact",
@@ -452,7 +454,8 @@ class TestRunEvaluateCommand:
             results=[
                 PipelineEvaluationResult(
                     filename="test.mp4",
-                    correct=True,
+                    classification=ResultClassification.CORRECT,
+                    is_correct=True,
                     raw_result="domestic cat",
                     label="cat",
                     comparison_method="llm",
@@ -492,7 +495,8 @@ class TestRunEvaluateCommand:
             results=[
                 PipelineEvaluationResult(
                     filename="test.mp4",
-                    correct=True,
+                    classification=ResultClassification.CORRECT,
+                    is_correct=True,
                     raw_result="otter",
                     label="otter",
                     comparison_method="exact",
@@ -534,7 +538,8 @@ class TestRunEvaluateCommand:
             results=[
                 PipelineEvaluationResult(
                     filename="test.mp4",
-                    correct=True,
+                    classification=ResultClassification.CORRECT,
+                    is_correct=True,
                     raw_result="otter",
                     label="otter",
                     comparison_method="exact",

@@ -33,9 +33,12 @@ class AbstractLabelComparator(ABC):
 
         if result_lower in ABSENCE_MARKERS:
             if label_lower in ABSENCE_MARKERS:
-                return True, ResultClassification.NO_ANIMAL
+                return True, ResultClassification.CORRECT
             else:
-                return False, ResultClassification.NO_ANIMAL
+                return False, ResultClassification.INCORRECT
+
+        if result_lower == label_lower:
+            return True, ResultClassification.CORRECT
 
         return None
 
@@ -50,7 +53,7 @@ class AbstractLabelComparator(ABC):
         Returns:
             Tuple of (is_correct, classification) where:
             - is_correct: True if the result matches the label
-            - classification: The type of result (correct, incorrect, unknown, no_animal)
+            - classification: The type of result (correct, incorrect, unknown)
         """
         ...
 
@@ -69,10 +72,7 @@ class ExactLabelComparator(AbstractLabelComparator):
         if special_case is not None:
             return special_case
 
-        if result.lower() == label.lower():
-            return True, ResultClassification.CORRECT
-        else:
-            return False, ResultClassification.INCORRECT
+        return False, ResultClassification.INCORRECT
 
     @property
     def method_name(self) -> str:

@@ -29,19 +29,6 @@ class TestExactLabelComparator:
         assert comparator.compare("Uncertain", "dog") == (False, ResultClassification.UNKNOWN)
         assert comparator.compare("unsure", "bird") == (False, ResultClassification.UNKNOWN)
 
-    def test_no_animal_result_matches_no_animal_label(self) -> None:
-        comparator = ExactLabelComparator()
-        assert comparator.compare("none", "none") == (True, ResultClassification.NO_ANIMAL)
-        assert comparator.compare("no animal", "no") == (True, ResultClassification.NO_ANIMAL)
-        assert comparator.compare("", "empty") == (True, ResultClassification.NO_ANIMAL)
-        assert comparator.compare("missing", "") == (True, ResultClassification.NO_ANIMAL)
-
-    def test_no_animal_result_matches_animal_label(self) -> None:
-        comparator = ExactLabelComparator()
-        assert comparator.compare("none", "cat") == (False, ResultClassification.NO_ANIMAL)
-        assert comparator.compare("no animal", "dog") == (False, ResultClassification.NO_ANIMAL)
-        assert comparator.compare("missing", "bird") == (False, ResultClassification.NO_ANIMAL)
-
     def test_method_name(self) -> None:
         comparator = ExactLabelComparator()
         assert comparator.method_name == "exact"
@@ -81,19 +68,14 @@ class TestLLMLabelComparator:
         assert comparator.compare("unknown", "cat") == (False, ResultClassification.UNKNOWN)
         assert comparator.compare("uncertain", "dog") == (False, ResultClassification.UNKNOWN)
 
-    def test_no_animal_result(self, mock_llm: MagicMock) -> None:
-        comparator = LLMLabelComparator(llm=mock_llm)
-        assert comparator.compare("none", "none") == (True, ResultClassification.NO_ANIMAL)
-        assert comparator.compare("no animal", "cat") == (False, ResultClassification.NO_ANIMAL)
-
     def test_caching(self, mock_llm: MagicMock) -> None:
         comparator = LLMLabelComparator(llm=mock_llm)
 
         mock_response = BoolResponse(answer=True)
         mock_llm.message_with_schema.return_value = mock_response
 
-        comparator.compare("cat", "cat")
-        comparator.compare("cat", "cat")
+        comparator.compare("domestic cat", "cat")
+        comparator.compare("domestic cat", "cat")
 
         assert mock_llm.message_with_schema.call_count == 1
 
@@ -103,9 +85,9 @@ class TestLLMLabelComparator:
         mock_response = BoolResponse(answer=True)
         mock_llm.message_with_schema.return_value = mock_response
 
-        comparator.compare("cat", "cat")
+        comparator.compare("domestic cat", "cat")
         comparator.clear_cache()
-        comparator.compare("cat", "cat")
+        comparator.compare("domestic cat", "cat")
 
         assert mock_llm.message_with_schema.call_count == 2
 
@@ -115,29 +97,29 @@ class TestLLMLabelComparator:
         mock_response = BoolResponse(answer=True)
         mock_llm.message_with_schema.return_value = mock_response
 
-        comparator.compare("cat", "cat")
-        comparator.compare("cat", "cat")
+        comparator.compare("domestic cat", "cat")
+        comparator.compare("domestic cat", "cat")
 
         assert mock_llm.message_with_schema.call_count == 2
         assert comparator._cache is None
 
-    def test_invalid_json_response(self, mock_llm: MagicMock) -> None:
+    def test_llm_call_made_for_semantic_comparison(self, mock_llm: MagicMock) -> None:
         comparator = LLMLabelComparator(llm=mock_llm)
 
         mock_response = BoolResponse(answer=True)
         mock_llm.message_with_schema.return_value = mock_response
 
-        comparator.compare("cat", "cat")
+        comparator.compare("domestic cat", "cat")
 
         assert mock_llm.message_with_schema.call_count == 1
 
-    def test_missing_match_field_raises_error(self, mock_llm: MagicMock) -> None:
+    def test_llm_call_with_false_response(self, mock_llm: MagicMock) -> None:
         comparator = LLMLabelComparator(llm=mock_llm)
 
         mock_response = BoolResponse(answer=False)
         mock_llm.message_with_schema.return_value = mock_response
 
-        comparator.compare("cat", "cat")
+        comparator.compare("domestic cat", "cat")
 
         assert mock_llm.message_with_schema.call_count == 1
 
@@ -148,11 +130,11 @@ class TestLLMLabelComparator:
         mock_response = BoolResponse(answer=True)
         mock_llm.message_with_schema.return_value = mock_response
 
-        comparator.compare("cat", "cat")
+        comparator.compare("domestic cat", "cat")
 
         mock_llm.message_with_schema.assert_called_once()
         call_args = mock_llm.message_with_schema.call_args
-        assert call_args.kwargs["message"] == "Custom prompt: cat vs cat"
+        assert call_args.kwargs["message"] == "Custom prompt: domestic cat vs cat"
 
     def test_default_prompt(self, mock_llm: MagicMock) -> None:
         comparator = LLMLabelComparator(llm=mock_llm)
@@ -160,7 +142,7 @@ class TestLLMLabelComparator:
         mock_response = BoolResponse(answer=True)
         mock_llm.message_with_schema.return_value = mock_response
 
-        comparator.compare("cat", "cat")
+        comparator.compare("domestic cat", "cat")
 
         call_args = mock_llm.message_with_schema.call_args
         assert "You are comparing an AI classification result" in call_args.kwargs["message"]
@@ -175,7 +157,7 @@ class TestLLMLabelComparator:
         mock_response = BoolResponse(answer=True)
         mock_llm.message_with_schema.return_value = mock_response
 
-        comparator.compare("Cat", "CAT")
-        comparator.compare("cat", "cat")
+        comparator.compare("Domestic Cat", "CAT")
+        comparator.compare("domestic cat", "cat")
 
         assert mock_llm.message_with_schema.call_count == 1

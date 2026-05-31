@@ -19,17 +19,20 @@ from wildcamtools.lib.ai.pipeline_evaluation import (
     _FrameSelectorWrapper,
     evaluate_ai_pipeline,
 )
+from wildcamtools.lib.ai.types import ResultClassification
 
 
 class TestPipelineEvaluationResult:
     def test_result_creation(self) -> None:
         result = PipelineEvaluationResult(
             filename="test.mp4",
-            correct=True,
+            classification=ResultClassification.CORRECT,
             raw_result="otter",
             label="otter",
+            is_correct=True,
         )
         assert result.filename == "test.mp4"
+        assert result.classification == ResultClassification.CORRECT
         assert result.correct is True
         assert result.raw_result == "otter"
         assert result.label == "otter"
@@ -41,23 +44,48 @@ class TestPipelineEvaluationResult:
     def test_result_with_error(self) -> None:
         result = PipelineEvaluationResult(
             filename="test.mp4",
-            correct=False,
+            classification=ResultClassification.INCORRECT,
             raw_result="",
             label="otter",
             error="Connection timeout",
+            is_correct=False,
         )
         assert result.error == "Connection timeout"
+        assert result.classification == ResultClassification.INCORRECT
         assert result.correct is False
         assert result.processing_time_seconds == 0.0
         assert result.frame_ids == []
 
+    def test_result_unknown_classification(self) -> None:
+        result = PipelineEvaluationResult(
+            filename="test.mp4",
+            classification=ResultClassification.UNKNOWN,
+            raw_result="unknown",
+            label="otter",
+        )
+        assert result.classification == ResultClassification.UNKNOWN
+        assert result.correct is False
+
+    def test_result_no_animal_classification(self) -> None:
+        result = PipelineEvaluationResult(
+            filename="test.mp4",
+            classification=ResultClassification.NO_ANIMAL,
+            raw_result="none",
+            label="none",
+            is_correct=True,
+        )
+        assert result.classification == ResultClassification.NO_ANIMAL
+        assert result.is_correct is True
+        assert result.correct is True
+
     def test_result_with_comparison_method(self) -> None:
         result = PipelineEvaluationResult(
             filename="test.mp4",
-            correct=True,
+            classification=ResultClassification.CORRECT,
             raw_result="domestic cat",
             label="cat",
             comparison_method="llm",
+            is_correct=True,
         )
         assert result.comparison_method == "llm"
         assert result.frame_ids == []
@@ -65,10 +93,11 @@ class TestPipelineEvaluationResult:
     def test_result_with_processing_time(self) -> None:
         result = PipelineEvaluationResult(
             filename="test.mp4",
-            correct=True,
+            classification=ResultClassification.CORRECT,
             raw_result="otter",
             label="otter",
             processing_time_seconds=1.5,
+            is_correct=True,
         )
         assert result.processing_time_seconds == 1.5
         assert result.frame_ids == []
@@ -76,10 +105,11 @@ class TestPipelineEvaluationResult:
     def test_result_with_frame_ids(self) -> None:
         result = PipelineEvaluationResult(
             filename="test.mp4",
-            correct=True,
+            classification=ResultClassification.CORRECT,
             raw_result="otter",
             label="otter",
             frame_ids=[1, 5, 10, 15],
+            is_correct=True,
         )
         assert result.frame_ids == [1, 5, 10, 15]
 
@@ -137,79 +167,172 @@ class TestFrameSelectorWrapper:
 class TestPipelineEvaluationSummary:
     def test_summary_creation(self) -> None:
         results = [
-            PipelineEvaluationResult(filename="test1.mp4", correct=True, raw_result="otter", label="otter"),
-            PipelineEvaluationResult(filename="test2.mp4", correct=False, raw_result="cat", label="otter"),
+            PipelineEvaluationResult(
+                filename="test1.mp4",
+                classification=ResultClassification.CORRECT,
+                raw_result="otter",
+                label="otter",
+                is_correct=True,
+            ),
+            PipelineEvaluationResult(
+                filename="test2.mp4",
+                classification=ResultClassification.INCORRECT,
+                raw_result="cat",
+                label="otter",
+                is_correct=False,
+            ),
         ]
         summary = PipelineEvaluationSummary(
             results=results,
             correct_count=1,
+            incorrect_count=1,
+            unknown_count=0,
+            no_animal_count=0,
             total_count=2,
             error_count=0,
         )
         assert summary.correct_count == 1
+        assert summary.incorrect_count == 1
         assert summary.total_count == 2
         assert summary.error_count == 0
         assert summary.average_processing_time_seconds == 0.0
 
     def test_accuracy_calculation(self) -> None:
         results = [
-            PipelineEvaluationResult(filename="test1.mp4", correct=True, raw_result="otter", label="otter"),
-            PipelineEvaluationResult(filename="test2.mp4", correct=True, raw_result="cat", label="cat"),
-            PipelineEvaluationResult(filename="test3.mp4", correct=False, raw_result="dog", label="cat"),
+            PipelineEvaluationResult(
+                filename="test1.mp4",
+                classification=ResultClassification.CORRECT,
+                raw_result="otter",
+                label="otter",
+                is_correct=True,
+            ),
+            PipelineEvaluationResult(
+                filename="test2.mp4",
+                classification=ResultClassification.CORRECT,
+                raw_result="cat",
+                label="cat",
+                is_correct=True,
+            ),
+            PipelineEvaluationResult(
+                filename="test3.mp4",
+                classification=ResultClassification.INCORRECT,
+                raw_result="dog",
+                label="cat",
+                is_correct=False,
+            ),
         ]
         summary = PipelineEvaluationSummary(
             results=results,
             correct_count=2,
+            incorrect_count=1,
+            unknown_count=0,
+            no_animal_count=0,
             total_count=3,
             error_count=0,
         )
         assert summary.accuracy == pytest.approx(2 / 3)
 
-    def test_accuracy_zero_division(self) -> None:
-        summary = PipelineEvaluationSummary(
-            results=[],
-            correct_count=0,
-            total_count=0,
-            error_count=0,
-        )
-        assert summary.accuracy == 0.0
-
-    def test_accuracy_with_errors(self) -> None:
+    def test_accuracy_excludes_unknown(self) -> None:
         results = [
-            PipelineEvaluationResult(filename="test1.mp4", correct=True, raw_result="otter", label="otter"),
+            PipelineEvaluationResult(
+                filename="test1.mp4",
+                classification=ResultClassification.CORRECT,
+                raw_result="otter",
+                label="otter",
+                is_correct=True,
+            ),
             PipelineEvaluationResult(
                 filename="test2.mp4",
-                correct=False,
-                raw_result="",
-                label="cat",
-                error="LLM error",
+                classification=ResultClassification.UNKNOWN,
+                raw_result="unknown",
+                label="otter",
+                is_correct=False,
+            ),
+            PipelineEvaluationResult(
+                filename="test3.mp4",
+                classification=ResultClassification.INCORRECT,
+                raw_result="dog",
+                label="otter",
+                is_correct=False,
             ),
         ]
         summary = PipelineEvaluationSummary(
             results=results,
             correct_count=1,
+            incorrect_count=1,
+            unknown_count=1,
+            no_animal_count=0,
+            total_count=3,
+            error_count=0,
+        )
+        assert summary.accuracy == pytest.approx(0.5)
+
+    def test_accuracy_with_errors(self) -> None:
+        results = [
+            PipelineEvaluationResult(
+                filename="test1.mp4",
+                classification=ResultClassification.CORRECT,
+                raw_result="otter",
+                label="otter",
+                is_correct=True,
+            ),
+            PipelineEvaluationResult(
+                filename="test2.mp4",
+                classification=ResultClassification.INCORRECT,
+                raw_result="",
+                label="cat",
+                error="LLM error",
+                is_correct=False,
+            ),
+        ]
+        summary = PipelineEvaluationSummary(
+            results=results,
+            correct_count=1,
+            incorrect_count=0,
+            unknown_count=0,
+            no_animal_count=0,
             total_count=2,
             error_count=1,
         )
         assert summary.accuracy == pytest.approx(1.0)
 
     @pytest.mark.parametrize(
-        "correct,total,expected",
+        "correct,incorrect,total,expected",
         [
-            (0, 10, 0.0),
-            (5, 10, 0.5),
-            (10, 10, 1.0),
-            (7, 8, 0.875),
+            (0, 10, 10, 0.0),
+            (5, 5, 10, 0.5),
+            (10, 0, 10, 1.0),
+            (7, 1, 8, 0.875),
         ],
     )
-    def test_accuracy_various_values(self, correct: int, total: int, expected: float) -> None:
-        results = [
-            PipelineEvaluationResult(filename=f"test{i}.mp4", correct=i < correct, raw_result="otter", label="otter")
-            for i in range(total)
-        ]
+    def test_accuracy_various_values(self, correct: int, incorrect: int, total: int, expected: float) -> None:
+        results = []
+        for i in range(correct):
+            results.append(
+                PipelineEvaluationResult(
+                    filename=f"test_correct_{i}.mp4",
+                    classification=ResultClassification.CORRECT,
+                    raw_result="otter",
+                    label="otter",
+                    is_correct=True,
+                )
+            )
+        for i in range(incorrect):
+            results.append(
+                PipelineEvaluationResult(
+                    filename=f"test_incorrect_{i}.mp4",
+                    classification=ResultClassification.INCORRECT,
+                    raw_result="cat",
+                    label="otter",
+                    is_correct=False,
+                )
+            )
         summary = PipelineEvaluationSummary(
             results=results,
             correct_count=correct,
+            incorrect_count=incorrect,
+            unknown_count=0,
+            no_animal_count=0,
             total_count=total,
             error_count=0,
         )
@@ -217,12 +340,27 @@ class TestPipelineEvaluationSummary:
 
     def test_success_rate_property(self) -> None:
         results = [
-            PipelineEvaluationResult(filename="test1.mp4", correct=True, raw_result="otter", label="otter"),
-            PipelineEvaluationResult(filename="test2.mp4", correct=True, raw_result="cat", label="cat"),
+            PipelineEvaluationResult(
+                filename="test1.mp4",
+                classification=ResultClassification.CORRECT,
+                raw_result="otter",
+                label="otter",
+                is_correct=True,
+            ),
+            PipelineEvaluationResult(
+                filename="test2.mp4",
+                classification=ResultClassification.CORRECT,
+                raw_result="cat",
+                label="cat",
+                is_correct=True,
+            ),
         ]
         summary = PipelineEvaluationSummary(
             results=results,
             correct_count=2,
+            incorrect_count=0,
+            unknown_count=0,
+            no_animal_count=0,
             total_count=3,
             error_count=0,
         )
@@ -230,32 +368,135 @@ class TestPipelineEvaluationSummary:
 
     def test_failure_count_property(self) -> None:
         results = [
-            PipelineEvaluationResult(filename="test1.mp4", correct=True, raw_result="otter", label="otter"),
-            PipelineEvaluationResult(filename="test2.mp4", correct=False, raw_result="cat", label="cat"),
+            PipelineEvaluationResult(
+                filename="test1.mp4",
+                classification=ResultClassification.CORRECT,
+                raw_result="otter",
+                label="otter",
+                is_correct=True,
+            ),
+            PipelineEvaluationResult(
+                filename="test2.mp4",
+                classification=ResultClassification.INCORRECT,
+                raw_result="cat",
+                label="cat",
+                is_correct=False,
+            ),
         ]
         summary = PipelineEvaluationSummary(
             results=results,
             correct_count=1,
+            incorrect_count=1,
+            unknown_count=0,
+            no_animal_count=0,
             total_count=3,
             error_count=0,
         )
         assert summary.failure_count == 2
 
+    def test_detection_rate_property(self) -> None:
+        results = [
+            PipelineEvaluationResult(
+                filename="test1.mp4",
+                classification=ResultClassification.CORRECT,
+                raw_result="otter",
+                label="otter",
+                is_correct=True,
+            ),
+            PipelineEvaluationResult(
+                filename="test2.mp4",
+                classification=ResultClassification.UNKNOWN,
+                raw_result="unknown",
+                label="cat",
+                is_correct=False,
+            ),
+            PipelineEvaluationResult(
+                filename="test3.mp4",
+                classification=ResultClassification.INCORRECT,
+                raw_result="dog",
+                label="dog",
+                is_correct=False,
+            ),
+        ]
+        summary = PipelineEvaluationSummary(
+            results=results,
+            correct_count=1,
+            incorrect_count=1,
+            unknown_count=1,
+            no_animal_count=0,
+            total_count=3,
+            error_count=0,
+        )
+        assert summary.detection_rate == pytest.approx(2 / 3)
+
+    def test_precision_when_confident_property(self) -> None:
+        results = [
+            PipelineEvaluationResult(
+                filename="test1.mp4",
+                classification=ResultClassification.CORRECT,
+                raw_result="otter",
+                label="otter",
+                is_correct=True,
+            ),
+            PipelineEvaluationResult(
+                filename="test2.mp4",
+                classification=ResultClassification.INCORRECT,
+                raw_result="cat",
+                label="cat",
+                is_correct=False,
+            ),
+            PipelineEvaluationResult(
+                filename="test3.mp4",
+                classification=ResultClassification.NO_ANIMAL,
+                raw_result="none",
+                label="otter",
+                is_correct=True,
+            ),
+        ]
+        summary = PipelineEvaluationSummary(
+            results=results,
+            correct_count=1,
+            incorrect_count=1,
+            unknown_count=0,
+            no_animal_count=1,
+            total_count=3,
+            error_count=0,
+        )
+        assert summary.precision_when_confident == pytest.approx(1 / 3)
+
     def test_average_processing_time(self) -> None:
         results = [
             PipelineEvaluationResult(
-                filename="test1.mp4", correct=True, raw_result="otter", label="otter", processing_time_seconds=1.0
+                filename="test1.mp4",
+                classification=ResultClassification.CORRECT,
+                raw_result="otter",
+                label="otter",
+                processing_time_seconds=1.0,
+                is_correct=True,
             ),
             PipelineEvaluationResult(
-                filename="test2.mp4", correct=True, raw_result="cat", label="cat", processing_time_seconds=2.0
+                filename="test2.mp4",
+                classification=ResultClassification.CORRECT,
+                raw_result="cat",
+                label="cat",
+                processing_time_seconds=2.0,
+                is_correct=True,
             ),
             PipelineEvaluationResult(
-                filename="test3.mp4", correct=True, raw_result="dog", label="dog", processing_time_seconds=3.0
+                filename="test3.mp4",
+                classification=ResultClassification.CORRECT,
+                raw_result="dog",
+                label="dog",
+                processing_time_seconds=3.0,
+                is_correct=True,
             ),
         ]
         summary = PipelineEvaluationSummary(
             results=results,
             correct_count=3,
+            incorrect_count=0,
+            unknown_count=0,
+            no_animal_count=0,
             total_count=3,
             error_count=0,
             average_processing_time_seconds=2.0,
@@ -265,19 +506,27 @@ class TestPipelineEvaluationSummary:
     def test_json_serialization(self) -> None:
         results = [
             PipelineEvaluationResult(
-                filename="test1.mp4", correct=True, raw_result="otter", label="otter", processing_time_seconds=1.5
+                filename="test1.mp4",
+                classification=ResultClassification.CORRECT,
+                raw_result="otter",
+                label="otter",
+                processing_time_seconds=1.5,
+                is_correct=True,
             ),
         ]
         summary = PipelineEvaluationSummary(
             results=results,
             correct_count=1,
+            incorrect_count=0,
+            unknown_count=0,
+            no_animal_count=0,
             total_count=1,
             error_count=0,
             average_processing_time_seconds=1.5,
         )
         json_str = summary.model_dump_json(indent=2)
         assert "test1.mp4" in json_str
-        assert "correct" in json_str
+        assert "classification" in json_str
         assert "processing_time_seconds" in json_str
         assert "average_processing_time_seconds" in json_str
 
@@ -294,7 +543,7 @@ class TestEvaluateVideoWorker:
         mock_config.create_pipeline.return_value = mock_pipeline
 
         mock_comparator = MagicMock()
-        mock_comparator.compare.return_value = True
+        mock_comparator.compare.return_value = (True, ResultClassification.CORRECT)
         mock_comparator.method_name = "exact"
         mock_comparison_config = MagicMock()
         mock_comparison_config.create_comparator.return_value = mock_comparator
@@ -303,6 +552,7 @@ class TestEvaluateVideoWorker:
         result = _evaluate_video_worker(str(video_path), "otter", mock_config, mock_comparison_config)
 
         assert result.filename == "test.mp4"
+        assert result.classification == ResultClassification.CORRECT
         assert result.correct is True
         assert result.raw_result == "otter"
         assert result.label == "otter"
@@ -320,7 +570,7 @@ class TestEvaluateVideoWorker:
         mock_config.create_pipeline.return_value = mock_pipeline
 
         mock_comparator = MagicMock()
-        mock_comparator.compare.return_value = False
+        mock_comparator.compare.return_value = (False, ResultClassification.INCORRECT)
         mock_comparator.method_name = "exact"
         mock_comparison_config = MagicMock()
         mock_comparison_config.create_comparator.return_value = mock_comparator
@@ -328,9 +578,33 @@ class TestEvaluateVideoWorker:
         video_path = data_directory / "test.mp4"
         result = _evaluate_video_worker(str(video_path), "otter", mock_config, mock_comparison_config)
 
+        assert result.classification == ResultClassification.INCORRECT
         assert result.correct is False
         assert result.raw_result == "cat"
         assert result.label == "otter"
+
+    def test_worker_unknown_result_with_mock(
+        self,
+        data_directory: Path,
+    ) -> None:
+        mock_result = SpeciesResult(species_name="unknown")
+        mock_config = MagicMock()
+        mock_pipeline = MagicMock()
+        mock_pipeline.run.return_value = mock_result
+        mock_config.create_pipeline.return_value = mock_pipeline
+
+        mock_comparator = MagicMock()
+        mock_comparator.compare.return_value = (False, ResultClassification.UNKNOWN)
+        mock_comparator.method_name = "exact"
+        mock_comparison_config = MagicMock()
+        mock_comparison_config.create_comparator.return_value = mock_comparator
+
+        video_path = data_directory / "test.mp4"
+        result = _evaluate_video_worker(str(video_path), "otter", mock_config, mock_comparison_config)
+
+        assert result.classification == ResultClassification.UNKNOWN
+        assert result.correct is False
+        assert result.raw_result == "unknown"
 
     def test_worker_case_insensitive_comparison_with_mock(
         self,
@@ -343,7 +617,7 @@ class TestEvaluateVideoWorker:
         mock_config.create_pipeline.return_value = mock_pipeline
 
         mock_comparator = MagicMock()
-        mock_comparator.compare.return_value = True
+        mock_comparator.compare.return_value = (True, ResultClassification.CORRECT)
         mock_comparator.method_name = "exact"
         mock_comparison_config = MagicMock()
         mock_comparison_config.create_comparator.return_value = mock_comparator
@@ -351,6 +625,7 @@ class TestEvaluateVideoWorker:
         video_path = data_directory / "test.mp4"
         result = _evaluate_video_worker(str(video_path), "OTTER", mock_config, mock_comparison_config)
 
+        assert result.classification == ResultClassification.CORRECT
         assert result.correct is True
 
     def test_worker_error_handling_with_mock(
@@ -382,7 +657,7 @@ class TestEvaluateVideoWorker:
         mock_config.create_pipeline.return_value = mock_pipeline
 
         mock_comparator = MagicMock()
-        mock_comparator.compare.return_value = True
+        mock_comparator.compare.return_value = (True, ResultClassification.CORRECT)
         mock_comparator.method_name = "exact"
         mock_comparison_config = MagicMock()
         mock_comparison_config.create_comparator.return_value = mock_comparator
@@ -391,6 +666,7 @@ class TestEvaluateVideoWorker:
         result = _evaluate_video_worker(str(video_path), "test response", mock_config, mock_comparison_config)
 
         assert result.raw_result == "test response"
+        assert result.classification == ResultClassification.CORRECT
         assert result.correct is True
 
     def test_worker_captures_frame_ids(
@@ -418,7 +694,7 @@ class TestEvaluateVideoWorker:
         mock_config.create_pipeline.return_value = mock_pipeline
 
         mock_comparator = MagicMock()
-        mock_comparator.compare.return_value = True
+        mock_comparator.compare.return_value = (True, ResultClassification.CORRECT)
         mock_comparator.method_name = "exact"
         mock_comparison_config = MagicMock()
         mock_comparison_config.create_comparator.return_value = mock_comparator
@@ -527,7 +803,7 @@ class TestEvaluateAiPipeline:
             mock_validate.return_value = mock_config
 
             mock_comparator = MagicMock()
-            mock_comparator.compare.return_value = True
+            mock_comparator.compare.return_value = (True, ResultClassification.CORRECT)
             mock_comparator.method_name = "exact"
             mock_comparison_config = MagicMock()
             mock_comparison_config.create_comparator.return_value = mock_comparator
@@ -536,7 +812,7 @@ class TestEvaluateAiPipeline:
             mock_pool.return_value = [
                 PipelineEvaluationResult(
                     filename="test.mp4",
-                    correct=True,
+                    classification=ResultClassification.CORRECT,
                     raw_result="otter",
                     label="otter",
                     comparison_method="exact",
@@ -545,7 +821,7 @@ class TestEvaluateAiPipeline:
                 ),
                 PipelineEvaluationResult(
                     filename="short.mp4",
-                    correct=True,
+                    classification=ResultClassification.CORRECT,
                     raw_result="cat",
                     label="cat",
                     comparison_method="exact",
@@ -584,7 +860,7 @@ class TestEvaluateAiPipeline:
             mock_validate.return_value = mock_config
 
             mock_comparator = MagicMock()
-            mock_comparator.compare.return_value = True
+            mock_comparator.compare.return_value = (True, ResultClassification.CORRECT)
             mock_comparator.method_name = "exact"
             mock_comparison_config = MagicMock()
             mock_comparison_config.create_comparator.return_value = mock_comparator
@@ -593,7 +869,7 @@ class TestEvaluateAiPipeline:
             mock_pool.return_value = [
                 PipelineEvaluationResult(
                     filename="test.mp4",
-                    correct=True,
+                    classification=ResultClassification.CORRECT,
                     raw_result="otter",
                     label="otter",
                     comparison_method="exact",
@@ -602,7 +878,7 @@ class TestEvaluateAiPipeline:
                 ),
                 PipelineEvaluationResult(
                     filename="short.mp4",
-                    correct=False,
+                    classification=ResultClassification.INCORRECT,
                     raw_result="",
                     label="cat",
                     error="LLM connection failed",
@@ -674,7 +950,7 @@ class TestIntegration:
             mock_validate.return_value = mock_config
 
             mock_comparator = MagicMock()
-            mock_comparator.compare.return_value = True
+            mock_comparator.compare.return_value = (True, ResultClassification.CORRECT)
             mock_comparator.method_name = "exact"
             mock_comparison_config = MagicMock()
             mock_comparison_config.create_comparator.return_value = mock_comparator
@@ -683,7 +959,7 @@ class TestIntegration:
             mock_pool.return_value = [
                 PipelineEvaluationResult(
                     filename="test.mp4",
-                    correct=True,
+                    classification=ResultClassification.CORRECT,
                     raw_result="otter",
                     label="otter",
                     comparison_method="exact",
@@ -692,7 +968,7 @@ class TestIntegration:
                 ),
                 PipelineEvaluationResult(
                     filename="short.mp4",
-                    correct=True,
+                    classification=ResultClassification.CORRECT,
                     raw_result="cat",
                     label="cat",
                     comparison_method="exact",
@@ -764,7 +1040,7 @@ class TestIntegration:
             mock_validate.return_value = mock_config
 
             mock_comparator = MagicMock()
-            mock_comparator.compare.return_value = True
+            mock_comparator.compare.return_value = (True, ResultClassification.CORRECT)
             mock_comparator.method_name = "exact"
             mock_comparison_config = MagicMock()
             mock_comparison_config.create_comparator.return_value = mock_comparator
@@ -773,7 +1049,7 @@ class TestIntegration:
             mock_pool.return_value = [
                 PipelineEvaluationResult(
                     filename="test.mp4",
-                    correct=True,
+                    classification=ResultClassification.CORRECT,
                     raw_result="otter",
                     label="otter",
                     comparison_method="exact",
@@ -792,7 +1068,7 @@ class TestIntegration:
 
             json_output = summary.model_dump_json(indent=2)
             assert "test.mp4" in json_output
-            assert "correct" in json_output
+            assert "classification" in json_output
             assert "processing_time_seconds" in json_output
             assert "average_processing_time_seconds" in json_output
             assert "frame_ids" in json_output

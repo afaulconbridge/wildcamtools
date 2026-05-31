@@ -7,20 +7,40 @@ from wildcamtools.lib.ai.label_comparison import (
     ExactLabelComparator,
     LLMLabelComparator,
 )
+from wildcamtools.lib.ai.types import ResultClassification
 
 
 class TestExactLabelComparator:
     def test_exact_match_case_insensitive(self) -> None:
         comparator = ExactLabelComparator()
-        assert comparator.compare("cat", "cat") is True
-        assert comparator.compare("CAT", "cat") is True
-        assert comparator.compare("Cat", "CAT") is True
+        assert comparator.compare("cat", "cat") == (True, ResultClassification.CORRECT)
+        assert comparator.compare("CAT", "cat") == (True, ResultClassification.CORRECT)
+        assert comparator.compare("Cat", "CAT") == (True, ResultClassification.CORRECT)
 
     def test_exact_match_mismatch(self) -> None:
         comparator = ExactLabelComparator()
-        assert comparator.compare("cat", "dog") is False
-        assert comparator.compare("cat", "cats") is False
-        assert comparator.compare("domestic cat", "cat") is False
+        assert comparator.compare("cat", "dog") == (False, ResultClassification.INCORRECT)
+        assert comparator.compare("cat", "cats") == (False, ResultClassification.INCORRECT)
+        assert comparator.compare("domestic cat", "cat") == (False, ResultClassification.INCORRECT)
+
+    def test_unknown_result(self) -> None:
+        comparator = ExactLabelComparator()
+        assert comparator.compare("unknown", "cat") == (False, ResultClassification.UNKNOWN)
+        assert comparator.compare("Uncertain", "dog") == (False, ResultClassification.UNKNOWN)
+        assert comparator.compare("unsure", "bird") == (False, ResultClassification.UNKNOWN)
+
+    def test_no_animal_result_matches_no_animal_label(self) -> None:
+        comparator = ExactLabelComparator()
+        assert comparator.compare("none", "none") == (True, ResultClassification.NO_ANIMAL)
+        assert comparator.compare("no animal", "no") == (True, ResultClassification.NO_ANIMAL)
+        assert comparator.compare("", "empty") == (True, ResultClassification.NO_ANIMAL)
+        assert comparator.compare("missing", "") == (True, ResultClassification.NO_ANIMAL)
+
+    def test_no_animal_result_matches_animal_label(self) -> None:
+        comparator = ExactLabelComparator()
+        assert comparator.compare("none", "cat") == (False, ResultClassification.NO_ANIMAL)
+        assert comparator.compare("no animal", "dog") == (False, ResultClassification.NO_ANIMAL)
+        assert comparator.compare("missing", "bird") == (False, ResultClassification.NO_ANIMAL)
 
     def test_method_name(self) -> None:
         comparator = ExactLabelComparator()
@@ -42,9 +62,9 @@ class TestLLMLabelComparator:
         mock_response = BoolResponse(answer=True)
         mock_llm.message_with_schema.return_value = mock_response
 
-        assert comparator.compare("domestic cat", "cat") is True
-        assert comparator.compare("Moorhen", "bird") is True
-        assert comparator.compare("Roe deer", "deer") is True
+        assert comparator.compare("domestic cat", "cat") == (True, ResultClassification.CORRECT)
+        assert comparator.compare("Moorhen", "bird") == (True, ResultClassification.CORRECT)
+        assert comparator.compare("Roe deer", "deer") == (True, ResultClassification.CORRECT)
 
     def test_semantic_match_general_to_specific(self, mock_llm: MagicMock) -> None:
         comparator = LLMLabelComparator(llm=mock_llm)
@@ -52,9 +72,19 @@ class TestLLMLabelComparator:
         mock_response = BoolResponse(answer=False)
         mock_llm.message_with_schema.return_value = mock_response
 
-        assert comparator.compare("cat", "domestic cat") is False
-        assert comparator.compare("bird", "Moorhen") is False
-        assert comparator.compare("deer", "Roe deer") is False
+        assert comparator.compare("cat", "domestic cat") == (False, ResultClassification.INCORRECT)
+        assert comparator.compare("bird", "Moorhen") == (False, ResultClassification.INCORRECT)
+        assert comparator.compare("deer", "Roe deer") == (False, ResultClassification.INCORRECT)
+
+    def test_unknown_result(self, mock_llm: MagicMock) -> None:
+        comparator = LLMLabelComparator(llm=mock_llm)
+        assert comparator.compare("unknown", "cat") == (False, ResultClassification.UNKNOWN)
+        assert comparator.compare("uncertain", "dog") == (False, ResultClassification.UNKNOWN)
+
+    def test_no_animal_result(self, mock_llm: MagicMock) -> None:
+        comparator = LLMLabelComparator(llm=mock_llm)
+        assert comparator.compare("none", "none") == (True, ResultClassification.NO_ANIMAL)
+        assert comparator.compare("no animal", "cat") == (False, ResultClassification.NO_ANIMAL)
 
     def test_caching(self, mock_llm: MagicMock) -> None:
         comparator = LLMLabelComparator(llm=mock_llm)

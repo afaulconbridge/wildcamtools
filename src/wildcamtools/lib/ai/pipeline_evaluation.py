@@ -10,7 +10,7 @@ from wildcamtools.lib import Frame
 from wildcamtools.lib.ai.label_comparison_config import LabelComparisonConfig
 from wildcamtools.lib.ai.pipeline import FrameSelector
 from wildcamtools.lib.ai.pipeline_config import AiPipelineConfig
-from wildcamtools.lib.ai.types import SpeciesResult
+from wildcamtools.lib.ai.types import ResultClassification, SpeciesResult
 from wildcamtools.lib.labels import load_labels
 
 logger = logging.getLogger(__name__)
@@ -35,18 +35,26 @@ class _FrameSelectorWrapper(FrameSelector):
 
 class PipelineEvaluationResult(BaseModel):
     filename: str
-    correct: bool
+    classification: ResultClassification
     raw_result: str
     label: str
     error: str | None = None
     comparison_method: str = "exact"
     processing_time_seconds: float = 0.0
     frame_ids: list[int] = Field(default_factory=list)
+    is_correct: bool = False
+
+    @property
+    def correct(self) -> bool:
+        return self.is_correct
 
 
 class PipelineEvaluationSummary(BaseModel):
     results: list[PipelineEvaluationResult] = Field(default_factory=list)
     correct_count: int = 0
+    incorrect_count: int = 0
+    unknown_count: int = 0
+    no_animal_count: int = 0
     total_count: int = 0
     error_count: int = 0
     average_processing_time_seconds: float = 0.0
@@ -55,7 +63,7 @@ class PipelineEvaluationSummary(BaseModel):
     def accuracy(self) -> float:
         if self.total_count == 0:
             return 0.0
-        valid_count = self.total_count - self.error_count
+        valid_count = self.total_count - self.error_count - self.unknown_count
         if valid_count == 0:
             return 0.0
         return self.correct_count / valid_count
@@ -68,12 +76,31 @@ class PipelineEvaluationSummary(BaseModel):
     def failure_count(self) -> int:
         return self.total_count - self.correct_count
 
+    @property
+    def detection_rate(self) -> float:
+        if self.total_count == 0:
+            return 0.0
+        confident_count = self.total_count - self.unknown_count - self.error_count
+        return confident_count / self.total_count
+
+    @property
+    def precision_when_confident(self) -> float:
+        confident_total = self.correct_count + self.incorrect_count + self.no_animal_count
+        if confident_total == 0:
+            return 0.0
+        return self.correct_count / confident_total
+
     def print_summary(self) -> None:
         logger.info("Evaluation Summary:")
         logger.info("  Total: %d", self.total_count)
         logger.info("  Correct: %d", self.correct_count)
+        logger.info("  Incorrect: %d", self.incorrect_count)
+        logger.info("  Unknown: %d", self.unknown_count)
+        logger.info("  No Animal: %d", self.no_animal_count)
         logger.info("  Errors: %d", self.error_count)
         logger.info("  Accuracy: %.4f", self.accuracy)
+        logger.info("  Detection Rate: %.4f", self.detection_rate)
+        logger.info("  Precision (when confident): %.4f", self.precision_when_confident)
         logger.info("  Average processing time: %.2f seconds", self.average_processing_time_seconds)
 
 
@@ -103,26 +130,27 @@ def _evaluate_video_worker(
             raw_result = str(result)
 
         comparator = comparator_config.create_comparator()
-        correct = comparator.compare(raw_result, ground_truth_label)
+        is_correct, classification = comparator.compare(raw_result, ground_truth_label)
         logger.info(
-            "Video %s: label=%s, result=%s, correct=%s (method=%s), frames=%s",
+            "Video %s: label=%s, result=%s, classification=%s (method=%s), frames=%s",
             video_path.name,
             ground_truth_label,
             raw_result,
-            correct,
+            classification.value,
             comparator.method_name,
             frame_ids,
         )
 
         return PipelineEvaluationResult(
             filename=video_path.name,
-            correct=correct,
+            classification=classification,
             raw_result=raw_result,
             label=ground_truth_label,
             error=None,
             comparison_method=comparator.method_name,
             processing_time_seconds=processing_time,
             frame_ids=frame_ids,
+            is_correct=is_correct,
         )
     except Exception:
         logger.exception("Worker failed for video %s", video_path.name)
@@ -176,7 +204,7 @@ def _run_worker_pool(
                 results.append(
                     PipelineEvaluationResult(
                         filename="unknown",
-                        correct=False,
+                        classification=ResultClassification.INCORRECT,
                         raw_result="",
                         label="unknown",
                         error=str(e),
@@ -232,7 +260,10 @@ def evaluate_ai_pipeline(
 
     results = _run_worker_pool(labelled_data, video_dir, pipeline_config, max_workers, comparison_config)
 
-    correct_count = sum(1 for r in results if r.correct and r.error is None)
+    correct_count = sum(1 for r in results if r.classification == ResultClassification.CORRECT)
+    incorrect_count = sum(1 for r in results if r.classification == ResultClassification.INCORRECT)
+    unknown_count = sum(1 for r in results if r.classification == ResultClassification.UNKNOWN)
+    no_animal_count = sum(1 for r in results if r.classification == ResultClassification.NO_ANIMAL)
     error_count = sum(1 for r in results if r.error is not None)
     total_count = len(results)
     total_processing_time = sum(r.processing_time_seconds for r in results)
@@ -241,6 +272,9 @@ def evaluate_ai_pipeline(
     return PipelineEvaluationSummary(
         results=results,
         correct_count=correct_count,
+        incorrect_count=incorrect_count,
+        unknown_count=unknown_count,
+        no_animal_count=no_animal_count,
         total_count=total_count,
         error_count=error_count,
         average_processing_time_seconds=average_processing_time,

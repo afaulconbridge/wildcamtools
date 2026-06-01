@@ -102,6 +102,10 @@ class FrameExtractorConfig(BaseModel):
         tuple[Annotated[int, Field(strict=True, gt=0)], Annotated[int, Field(strict=True, gt=0)]],
         Field(description="Target resolution as (width, height)"),
     ] = (640, 360)
+    max_batch_size: Annotated[
+        int,
+        Field(strict=True, gt=0, description="Maximum number of images per batch"),
+    ] = 30
 
     def create_frame_extractor(self) -> RescaledFrameImageExtractor:
         """Create a FrameImageExtractor instance based on the configuration.
@@ -109,7 +113,7 @@ class FrameExtractorConfig(BaseModel):
         Returns:
             RescaledFrameImageExtractor: The configured frame extractor instance.
         """
-        return RescaledFrameImageExtractor(resolution=self.resolution)
+        return RescaledFrameImageExtractor(resolution=self.resolution, max_batch_size=self.max_batch_size)
 
 
 class LlmConfig(BaseModel):

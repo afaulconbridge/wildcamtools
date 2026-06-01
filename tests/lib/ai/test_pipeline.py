@@ -579,6 +579,66 @@ class TestRescaledFrameImageExtractor:
         assert len(result[0]) == len(sample_frames)
         assert all(isinstance(p, Path) for p in result[0])
 
+    def test_rescaled_extractor_max_batch_size(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """Test max_batch_size splits batches correctly."""
+        frames = []
+        for i in range(75):
+            raw = np.zeros((100, 200, 3), dtype=np.uint8)
+            raw[:, :] = [(i * 10) % 256, (i * 20) % 256, (i * 30) % 256]
+            frame = Frame(raw=raw, frame_no=i, filter_keep=True)
+            frames.append(frame)
+        extractor = RescaledFrameImageExtractor(max_batch_size=30)
+        result = extractor.extract_images(frames, tmp_path)
+
+        assert len(result) == 3
+        assert len(result[0]) == 30
+        assert len(result[1]) == 30
+        assert len(result[2]) == 15
+
+    def test_rescaled_extractor_max_batch_size_default(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """Test default max_batch_size is 30."""
+        extractor = RescaledFrameImageExtractor()
+        assert extractor.max_batch_size == 30
+
+    def test_rescaled_extractor_max_batch_size_custom(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """Test custom max_batch_size is stored."""
+        extractor = RescaledFrameImageExtractor(max_batch_size=50)
+        assert extractor.max_batch_size == 50
+
+    def test_rescaled_extractor_max_batch_size_exact_multiple(
+        self,
+        sample_frames: list[Frame],
+        tmp_path: Path,
+    ) -> None:
+        """Test when frames exactly match batch size."""
+        extractor = RescaledFrameImageExtractor(max_batch_size=len(sample_frames))
+        result = extractor.extract_images(sample_frames, tmp_path)
+
+        assert len(result) == 1
+        assert len(result[0]) == len(sample_frames)
+
+    def test_rescaled_extractor_max_batch_size_one(
+        self,
+        sample_frames: list[Frame],
+        tmp_path: Path,
+    ) -> None:
+        """Test max_batch_size=1 creates one batch per frame."""
+        extractor = RescaledFrameImageExtractor(max_batch_size=1)
+        result = extractor.extract_images(sample_frames, tmp_path)
+
+        assert len(result) == len(sample_frames)
+        for batch in result:
+            assert len(batch) == 1
+
     def test_extract_images_with_empty_frames(self, tmp_path: Path) -> None:
         """Test edge case with empty frame list."""
         extractor = RescaledFrameImageExtractor()

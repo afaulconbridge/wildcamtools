@@ -144,13 +144,15 @@ class FrameImageExtractor(ABC):
 
 
 class RescaledFrameImageExtractor(FrameImageExtractor):
-    def __init__(self, resolution: tuple[int, int] = (640, 360)) -> None:
+    def __init__(self, resolution: tuple[int, int] = (640, 360), max_batch_size: int = 30) -> None:
         self.resolution = resolution
+        self.max_batch_size = max_batch_size
 
     def extract_images(self, frames: Iterable[Frame], outdir: Path) -> Sequence[Sequence[Path]]:
         outdir.mkdir(parents=True, exist_ok=True)
 
         current_batch: list[Path] = []
+        all_batches: list[list[Path]] = []
 
         for frame in frames:
             if not frame.filter_keep:
@@ -161,7 +163,14 @@ class RescaledFrameImageExtractor(FrameImageExtractor):
             cv2.imwrite(str(image_path), rescaled_image)
             current_batch.append(image_path)
 
-        return [current_batch] if current_batch else []
+            if len(current_batch) >= self.max_batch_size:
+                all_batches.append(current_batch)
+                current_batch = []
+
+        if current_batch:
+            all_batches.append(current_batch)
+
+        return all_batches
 
 
 T = TypeVar("T", bound=BaseModel)

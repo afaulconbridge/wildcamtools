@@ -255,10 +255,20 @@ class TestFrameExtractorConfig:
     def test_default_values(self) -> None:
         config = FrameExtractorConfig()
         assert config.resolution == (640, 360)
+        assert config.max_batch_size == 30
 
     def test_custom_resolution(self) -> None:
         config = FrameExtractorConfig(resolution=(1280, 720))
         assert config.resolution == (1280, 720)
+
+    def test_custom_max_batch_size(self) -> None:
+        config = FrameExtractorConfig(max_batch_size=50)
+        assert config.max_batch_size == 50
+
+    def test_custom_resolution_and_max_batch_size(self) -> None:
+        config = FrameExtractorConfig(resolution=(1280, 720), max_batch_size=25)
+        assert config.resolution == (1280, 720)
+        assert config.max_batch_size == 25
 
     def test_invalid_resolution_zero_width(self) -> None:
         with pytest.raises(ValidationError) as exc_info:
@@ -275,14 +285,35 @@ class TestFrameExtractorConfig:
             FrameExtractorConfig(resolution=(-100, 200))
         assert "gt=0" in str(exc_info.value) or "greater than 0" in str(exc_info.value).lower()
 
+    def test_invalid_max_batch_size_zero(self) -> None:
+        with pytest.raises(ValidationError) as exc_info:
+            FrameExtractorConfig(max_batch_size=0)
+        assert "gt=0" in str(exc_info.value) or "greater than 0" in str(exc_info.value).lower()
+
+    def test_invalid_max_batch_size_negative(self) -> None:
+        with pytest.raises(ValidationError) as exc_info:
+            FrameExtractorConfig(max_batch_size=-10)
+        assert "gt=0" in str(exc_info.value) or "greater than 0" in str(exc_info.value).lower()
+
     def test_create_frame_extractor(self) -> None:
         config = FrameExtractorConfig(resolution=(800, 600))
         extractor = config.create_frame_extractor()
         assert extractor.resolution == (800, 600)
+        assert extractor.max_batch_size == 30
+
+    def test_create_frame_extractor_with_custom_max_batch_size(self) -> None:
+        config = FrameExtractorConfig(resolution=(800, 600), max_batch_size=50)
+        extractor = config.create_frame_extractor()
+        assert extractor.resolution == (800, 600)
+        assert extractor.max_batch_size == 50
 
     def test_strict_type_validation_resolution(self) -> None:
         with pytest.raises(ValidationError):
             FrameExtractorConfig(resolution=("640", "360"))
+
+    def test_strict_type_validation_max_batch_size(self) -> None:
+        with pytest.raises(ValidationError):
+            FrameExtractorConfig(max_batch_size="30")
 
 
 class TestLlmConfig:

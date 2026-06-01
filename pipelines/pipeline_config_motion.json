@@ -1,7 +1,7 @@
 {
   "frame_selector": {
     "selector_type": "motion",
-    "max_fps": 5.0
+    "fps": 5.0
   },
   "frame_extractor": {
     "resolution": [

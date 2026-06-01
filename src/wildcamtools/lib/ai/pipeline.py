@@ -11,7 +11,7 @@ from pydantic import BaseModel
 from wildcamtools.lib import Frame
 from wildcamtools.lib.ai.llm.abstract import AbstractLlm
 from wildcamtools.lib.ai.types import ConfidenceLevel, VerificationResult
-from wildcamtools.lib.frames import Rescaler, resize_with_aspect_ratio
+from wildcamtools.lib.frames import FilterSSIM, Rescaler, resize_with_aspect_ratio
 from wildcamtools.lib.motion import MogMotion
 from wildcamtools.lib.stats import get_video_stats
 from wildcamtools.lib.vidio import VideoReader
@@ -60,19 +60,19 @@ class FpsRescalingFrameSelector(FrameSelector):
 
 
 class MotionFrameSelector(FrameSelector):
-    max_fps: float
+    fps: float
     motion_threshold: float
     resolution: tuple[int, int] | None
     history: int
 
     def __init__(
         self,
-        max_fps: float = 5.0,
+        fps: float = 5.0,
         motion_threshold: float = 0.01,
         resolution: tuple[int, int] | None = None,
         history: int = 30,
     ) -> None:
-        self.max_fps = max_fps
+        self.fps = fps
         self.motion_threshold = motion_threshold
         self.resolution = resolution
         self.history = history
@@ -80,7 +80,7 @@ class MotionFrameSelector(FrameSelector):
     def select_frames(self, video: Path) -> Iterator[Frame]:
         stats = get_video_stats(video)
         motion_handler = MogMotion(history=self.history, resolution=self.resolution)
-        rescaler = Rescaler(stats, fps=self.max_fps) if self.max_fps > 0 else None
+        rescaler = Rescaler(stats, fps=self.fps) if self.fps > 0 else None
 
         with VideoReader(video) as video_reader:
             for frame in video_reader:
@@ -99,6 +99,43 @@ class MotionFrameSelector(FrameSelector):
                     continue
 
                 yield frame
+
+
+class SSIMFrameSelector(FrameSelector):
+    fps: float
+    similarity_minimum: float
+    resolution: tuple[int, int] | None
+
+    def __init__(
+        self,
+        fps: float = 5.0,
+        similarity_minimum: float = 0.9,
+        resolution: tuple[int, int] | None = None,
+    ) -> None:
+        self.fps = fps
+        self.similarity_minimum = similarity_minimum
+        self.resolution = resolution
+
+    def select_frames(self, video: Path) -> Iterator[Frame]:
+        stats = get_video_stats(video)
+        ssim_filter = FilterSSIM(similarity_minimum=self.similarity_minimum)
+        rescaler = None
+        if self.fps > 0:
+            if self.resolution is not None:
+                rescaler = Rescaler(stats, fps=self.fps, x=self.resolution[0], y=self.resolution[1])
+            else:
+                rescaler = Rescaler(stats, fps=self.fps)
+
+        with VideoReader(video) as video_reader:
+            for frame in video_reader:
+                if rescaler is not None:
+                    frame = rescaler.handle(frame)
+                    if not frame.filter_keep:
+                        continue
+
+                frame = ssim_filter.handle(frame)
+                if frame.filter_keep:
+                    yield frame
 
 
 class FrameImageExtractor(ABC):
@@ -196,7 +233,7 @@ class VerifiedImageBatchQuery(ImageBatchQuery[VerificationResult]):
             logger.warning("Empty image batch received")
             raise ValueError("Empty image batch")
 
-        logger.info("Sending %d images to analyser for initial classification", len(images_list))
+        logger.debug("Sending %d images to analyser for initial classification", len(images_list))
         initial_result = self.llm.message_with_schema(
             message=self.prompt,
             images=images_list,

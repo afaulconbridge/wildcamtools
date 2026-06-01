@@ -5,7 +5,7 @@ import pytest
 from pydantic import AnyHttpUrl, ValidationError
 
 from wildcamtools.lib.ai import Backend
-from wildcamtools.lib.ai.pipeline import MotionFrameSelector
+from wildcamtools.lib.ai.pipeline import MotionFrameSelector, SSIMFrameSelector
 from wildcamtools.lib.ai.pipeline_config import (
     AiPipelineConfig,
     FrameExtractorConfig,
@@ -32,7 +32,7 @@ class TestFrameSelectorConfig:
 
     def test_invalid_fps_zero(self) -> None:
         with pytest.raises(ValidationError) as exc_info:
-            FrameSelectorConfig(fps=0.0)
+            FrameSelectorConfig(selector_type=FrameSelectorType.FPS_RESCALING, fps=0.0)
         assert "gt=0.0" in str(exc_info.value) or "greater than 0" in str(exc_info.value).lower()
 
     def test_invalid_fps_negative(self) -> None:
@@ -69,7 +69,7 @@ class TestFrameSelectorConfig:
     def test_motion_selector_default_values(self) -> None:
         config = FrameSelectorConfig(selector_type=FrameSelectorType.MOTION)
         assert config.selector_type == FrameSelectorType.MOTION
-        assert config.max_fps == 5.0
+        assert config.fps == 1.0
         assert config.motion_threshold == 0.01
         assert config.resolution is None
         assert config.history == 30
@@ -77,12 +77,12 @@ class TestFrameSelectorConfig:
     def test_motion_selector_custom_values(self) -> None:
         config = FrameSelectorConfig(
             selector_type=FrameSelectorType.MOTION,
-            max_fps=10.0,
+            fps=10.0,
             motion_threshold=0.05,
             resolution=(320, 240),
             history=50,
         )
-        assert config.max_fps == 10.0
+        assert config.fps == 10.0
         assert config.motion_threshold == 0.05
         assert config.resolution == (320, 240)
         assert config.history == 50
@@ -112,22 +112,22 @@ class TestFrameSelectorConfig:
             FrameSelectorConfig(selector_type=FrameSelectorType.MOTION, resolution=(320, 0))
         assert "gt=0" in str(exc_info.value) or "greater than 0" in str(exc_info.value).lower()
 
-    def test_motion_selector_invalid_max_fps_negative(self) -> None:
+    def test_motion_selector_invalid_fps_negative(self) -> None:
         with pytest.raises(ValidationError) as exc_info:
-            FrameSelectorConfig(selector_type=FrameSelectorType.MOTION, max_fps=-1.0)
-        assert "ge=0.0" in str(exc_info.value) or "greater than or equal to 0" in str(exc_info.value).lower()
+            FrameSelectorConfig(selector_type=FrameSelectorType.MOTION, fps=-1.0)
+        assert "gt=0.0" in str(exc_info.value) or "greater than 0" in str(exc_info.value).lower()
 
     def test_motion_selector_create_frame_selector(self) -> None:
         config = FrameSelectorConfig(
             selector_type=FrameSelectorType.MOTION,
-            max_fps=10.0,
+            fps=10.0,
             motion_threshold=0.02,
             resolution=(640, 480),
             history=40,
         )
         selector = config.create_frame_selector()
         assert isinstance(selector, MotionFrameSelector)
-        assert selector.max_fps == 10.0
+        assert selector.fps == 10.0
         assert selector.motion_threshold == 0.02
         assert selector.resolution == (640, 480)
         assert selector.history == 40
@@ -136,7 +136,7 @@ class TestFrameSelectorConfig:
         config = FrameSelectorConfig(selector_type=FrameSelectorType.MOTION)
         selector = config.create_frame_selector()
         assert isinstance(selector, MotionFrameSelector)
-        assert selector.max_fps == 5.0
+        assert selector.fps == 1.0
         assert selector.motion_threshold == 0.01
         assert selector.resolution is None
         assert selector.history == 30
@@ -144,14 +144,14 @@ class TestFrameSelectorConfig:
     def test_motion_selector_serialization(self) -> None:
         config = FrameSelectorConfig(
             selector_type=FrameSelectorType.MOTION,
-            max_fps=8.0,
+            fps=8.0,
             motion_threshold=0.03,
             resolution=(400, 300),
             history=25,
         )
         data = config.model_dump()
         assert data["selector_type"] == "motion"
-        assert data["max_fps"] == 8.0
+        assert data["fps"] == 8.0
         assert data["motion_threshold"] == 0.03
         assert data["resolution"] == (400, 300)
         assert data["history"] == 25
@@ -159,16 +159,96 @@ class TestFrameSelectorConfig:
     def test_motion_selector_from_dict(self) -> None:
         config = FrameSelectorConfig.model_validate({
             "selector_type": "motion",
-            "max_fps": 7.0,
+            "fps": 7.0,
             "motion_threshold": 0.015,
             "resolution": [480, 360],
             "history": 35,
         })
         assert config.selector_type == FrameSelectorType.MOTION
-        assert config.max_fps == 7.0
+        assert config.fps == 7.0
         assert config.motion_threshold == 0.015
         assert config.resolution == (480, 360)
         assert config.history == 35
+
+    def test_ssim_selector_default_values(self) -> None:
+        config = FrameSelectorConfig(selector_type=FrameSelectorType.SSIM)
+        assert config.selector_type == FrameSelectorType.SSIM
+        assert config.fps == 1.0
+        assert config.similarity_minimum == 0.9
+        assert config.resolution is None
+
+    def test_ssim_selector_custom_values(self) -> None:
+        config = FrameSelectorConfig(
+            selector_type=FrameSelectorType.SSIM,
+            fps=10.0,
+            similarity_minimum=0.95,
+            resolution=(320, 240),
+            history=5,
+        )
+        assert config.fps == 10.0
+        assert config.similarity_minimum == 0.95
+        assert config.resolution == (320, 240)
+        assert config.history == 5
+
+    def test_ssim_selector_invalid_similarity_negative(self) -> None:
+        with pytest.raises(ValidationError) as exc_info:
+            FrameSelectorConfig(selector_type=FrameSelectorType.SSIM, similarity_minimum=-0.1)
+        assert "ge=0.0" in str(exc_info.value) or "greater than or equal to 0" in str(exc_info.value).lower()
+
+    def test_ssim_selector_invalid_similarity_above_one(self) -> None:
+        with pytest.raises(ValidationError) as exc_info:
+            FrameSelectorConfig(selector_type=FrameSelectorType.SSIM, similarity_minimum=1.5)
+        assert "le=1.0" in str(exc_info.value) or "less than or equal to 1" in str(exc_info.value).lower()
+
+    def test_ssim_selector_create_frame_selector(self) -> None:
+        config = FrameSelectorConfig(
+            selector_type=FrameSelectorType.SSIM,
+            fps=10.0,
+            similarity_minimum=0.85,
+            resolution=(640, 480),
+        )
+        selector = config.create_frame_selector()
+        assert isinstance(selector, SSIMFrameSelector)
+        assert selector.fps == 10.0
+        assert selector.similarity_minimum == 0.85
+        assert selector.resolution == (640, 480)
+
+    def test_ssim_selector_create_default(self) -> None:
+        config = FrameSelectorConfig(selector_type=FrameSelectorType.SSIM)
+        selector = config.create_frame_selector()
+        assert isinstance(selector, SSIMFrameSelector)
+        assert selector.fps == 1.0
+        assert selector.similarity_minimum == 0.9
+        assert selector.resolution is None
+
+    def test_ssim_selector_serialization(self) -> None:
+        config = FrameSelectorConfig(
+            selector_type=FrameSelectorType.SSIM,
+            fps=8.0,
+            similarity_minimum=0.92,
+            resolution=(400, 300),
+            history=15,
+        )
+        data = config.model_dump()
+        assert data["selector_type"] == "ssim"
+        assert data["fps"] == 8.0
+        assert data["similarity_minimum"] == 0.92
+        assert data["resolution"] == (400, 300)
+        assert data["history"] == 15
+
+    def test_ssim_selector_from_dict(self) -> None:
+        config = FrameSelectorConfig.model_validate({
+            "selector_type": "ssim",
+            "fps": 7.0,
+            "similarity_minimum": 0.88,
+            "resolution": [480, 360],
+            "history": 20,
+        })
+        assert config.selector_type == FrameSelectorType.SSIM
+        assert config.fps == 7.0
+        assert config.similarity_minimum == 0.88
+        assert config.resolution == (480, 360)
+        assert config.history == 20
 
 
 class TestFrameExtractorConfig:
@@ -543,7 +623,7 @@ class TestAiPipelineConfig:
         config = AiPipelineConfig(
             frame_selector=FrameSelectorConfig(
                 selector_type=FrameSelectorType.MOTION,
-                max_fps=10.0,
+                fps=10.0,
                 motion_threshold=0.02,
                 resolution=(320, 240),
                 history=40,
@@ -554,7 +634,7 @@ class TestAiPipelineConfig:
 
         pipeline = config.create_pipeline()
         assert isinstance(pipeline.frame_selector, MotionFrameSelector)
-        assert pipeline.frame_selector.max_fps == 10.0
+        assert pipeline.frame_selector.fps == 10.0
         assert pipeline.frame_selector.motion_threshold == 0.02
         assert pipeline.frame_selector.resolution == (320, 240)
         assert pipeline.frame_selector.history == 40
@@ -568,7 +648,7 @@ class TestAiPipelineConfig:
 
         pipeline = config.create_pipeline()
         assert isinstance(pipeline.frame_selector, MotionFrameSelector)
-        assert pipeline.frame_selector.max_fps == 5.0
+        assert pipeline.frame_selector.fps == 1.0
         assert pipeline.frame_selector.motion_threshold == 0.01
         assert pipeline.frame_selector.resolution is None
         assert pipeline.frame_selector.history == 30

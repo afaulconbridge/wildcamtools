@@ -17,6 +17,7 @@ from wildcamtools.lib.ai.pipeline import (
     MotionFrameSelector,
     RescaledFrameImageExtractor,
     ResultReconciler,
+    SSIMFrameSelector,
     VerifiedImageBatchQuery,
 )
 from wildcamtools.lib.ai.types import Backend, ConfidenceLevel, Result, SpeciesResult, StringResponse
@@ -25,6 +26,7 @@ from wildcamtools.lib.ai.types import Backend, ConfidenceLevel, Result, SpeciesR
 class FrameSelectorType(StrEnum):
     FPS_RESCALING = "fps_rescaling"
     MOTION = "motion"
+    SSIM = "ssim"
 
 
 class ReconcilerType(StrEnum):
@@ -52,14 +54,14 @@ RESPONSE_SCHEMA_MAP: dict[ResponseSchemaType, type[BaseModel]] = {
 class FrameSelectorConfig(BaseModel):
     selector_type: FrameSelectorType = FrameSelectorType.FPS_RESCALING
     fps: Annotated[float, Field(strict=True, gt=0.0, description="Target frames per second")] = 1.0
-    max_fps: Annotated[
-        float,
-        Field(strict=True, ge=0.0, description="Max frames per second for motion selector"),
-    ] = 5.0
     motion_threshold: Annotated[
         float,
         Field(strict=True, ge=0.0, le=1.0, description="Motion detection threshold"),
     ] = 0.01
+    similarity_minimum: Annotated[
+        float,
+        Field(strict=True, ge=0.0, le=1.0, description="Minimum SSIM similarity threshold"),
+    ] = 0.9
     resolution: Annotated[
         tuple[Annotated[int, Field(strict=True, gt=0)], Annotated[int, Field(strict=True, gt=0)]] | None,
         Field(description="Motion detection resolution as (width, height)"),
@@ -80,10 +82,16 @@ class FrameSelectorConfig(BaseModel):
                 return FpsRescalingFrameSelector(fps=self.fps)
             case FrameSelectorType.MOTION:
                 return MotionFrameSelector(
-                    max_fps=self.max_fps,
+                    fps=self.fps,
                     motion_threshold=self.motion_threshold,
                     resolution=self.resolution,
                     history=self.history,
+                )
+            case FrameSelectorType.SSIM:
+                return SSIMFrameSelector(
+                    fps=self.fps,
+                    similarity_minimum=self.similarity_minimum,
+                    resolution=self.resolution,
                 )
             case _:
                 raise NotImplementedError(f"Unsupported frame selector type: {self.selector_type}")

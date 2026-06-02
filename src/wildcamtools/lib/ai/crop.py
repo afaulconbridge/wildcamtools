@@ -1,9 +1,5 @@
 import logging
 import math
-from collections.abc import Sequence
-from pathlib import Path
-
-from pydantic import ValidationError
 
 from wildcamtools.lib import BBox, Frame
 from wildcamtools.lib.ai.llm.abstract import AbstractLlm
@@ -13,13 +9,6 @@ logger = logging.getLogger(__name__)
 
 
 class AICropFinder:
-    DETECTION_PROMPT = """These are images from a video taken in a UK garden near a river.
-Identify any animals you are highly confident of in the images.
-Return JSON only with this exact structure:
-{"results": [{"species_name": "string", "frames": [{"frame_no":0,"left": 0.0, "right": 1.0, "top": 1.0, "bottom": 0.0}]}]}
-Note that the bounding box coordinates are proportional to the image dimensions and therefore must be between 0.0 and 1.0.
-If no animals are detected, return {"results": []}."""
-
     analyser: AbstractLlm
     detections: ResultList | None = None
     expansion: float = 0.25
@@ -31,22 +20,6 @@ If no animals are detected, return {"results": []}."""
     ):
         self.analyser = analyser
         self.expansion = expansion
-
-    def run_detection(self, images: Sequence[Path]) -> None:
-        """Run AI detection on low-resolution frames."""
-        logger.info("Starting detection on %d low-res frames", len(images))
-
-        try:
-            self.detections = self.analyser.message_with_schema(
-                message=self.DETECTION_PROMPT,
-                images=sorted(images),
-                response_class=ResultList,
-            )
-        except ValidationError:
-            logger.exception("Unable to validate")
-            self.detections = ResultList(results=[])
-
-        logger.info("Detection complete: found %d species results", len(self.detections.results))
 
     def handle(self, frame: Frame) -> Frame:
         if self.detections is None:

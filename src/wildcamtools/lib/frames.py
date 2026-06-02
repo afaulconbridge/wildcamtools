@@ -186,12 +186,12 @@ class Rescaler(FrameHandler):
 
         if self.now >= self.target_frametime:
             # were going to return this frame, so rescale it
-            # if multiple frames have not been kept this could be significantly high
             if self.preserve_aspect:
                 frame.rescale = resize_with_aspect_ratio(frame.output, (self.x, self.y))
             else:
                 frame.rescale = cv2.resize(frame.output, (self.x, self.y), interpolation=cv2.INTER_LINEAR)
 
+            # if multiple frames have not been kept this could be significantly high
             while self.now >= self.target_frametime:
                 self.now -= self.target_frametime
 

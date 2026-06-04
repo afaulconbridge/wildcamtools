@@ -1,3 +1,4 @@
+import itertools
 import logging
 import tempfile
 from abc import ABC, abstractmethod
@@ -9,8 +10,9 @@ import cv2
 from pydantic import BaseModel
 
 from wildcamtools.lib import Frame
+from wildcamtools.lib.ai.crop import AICropFinder
 from wildcamtools.lib.ai.llm.abstract import AbstractLlm
-from wildcamtools.lib.ai.types import ConfidenceLevel, VerificationResult
+from wildcamtools.lib.ai.types import ConfidenceLevel, ResultList, VerificationResult
 from wildcamtools.lib.frames import FilterSSIM, Rescaler, resize_with_aspect_ratio
 from wildcamtools.lib.motion import MogMotion
 from wildcamtools.lib.stats import get_video_stats
@@ -143,12 +145,15 @@ class FrameImageExtractor(ABC):
     def extract_images(self, frames: Iterable[Frame], outdir: Path) -> Sequence[Sequence[Path]]: ...
 
 
+FrameExtractor = FrameImageExtractor
+
+
 class RescaledFrameImageExtractor(FrameImageExtractor):
     def __init__(self, resolution: tuple[int, int] = (640, 360), max_batch_size: int = 30) -> None:
         self.resolution = resolution
         self.max_batch_size = max_batch_size
 
-    def extract_images(self, frames: Iterable[Frame], outdir: Path) -> Sequence[Sequence[Path]]:
+    def extract_images(self, frames: Iterable[Frame], outdir: Path) -> list[list[Path]]:
         outdir.mkdir(parents=True, exist_ok=True)
 
         current_batch: list[Path] = []
@@ -171,6 +176,67 @@ class RescaledFrameImageExtractor(FrameImageExtractor):
             all_batches.append(current_batch)
 
         return all_batches
+
+
+class AICroppedFrameImageExtractor(FrameImageExtractor):
+    DETECTION_PROMPT = """Analyze these wildlife camera trap frames and identify all animals present.
+
+For each species detected, provide:
+1. The species name
+2. For each frame where the species appears, provide normalized bounding box coordinates:
+   - left, right, top, bottom (values between 0.0 and 1.0)
+   - frame_no (the frame number)
+
+Return results as a ResultList with species_name and frames array."""
+
+    def __init__(
+        self,
+        aicropfinder: AICropFinder,
+        resolution: tuple[int, int] = (640, 360),
+        crop_max_resolution: tuple[int, int] = (640, 360),
+        max_batch_size: int = 30,
+    ) -> None:
+        self.aicropfinder = aicropfinder
+        self.resolution = resolution
+        self.crop_max_resolution = crop_max_resolution
+        self.max_batch_size = max_batch_size
+
+    def extract_images(self, frames: Iterable[Frame], outdir: Path) -> list[list[Path]]:
+        outdir.mkdir(parents=True, exist_ok=True)
+
+        all_batches = itertools.batched(frames, self.max_batch_size, strict=False)
+        output_batches: list[list[Path]] = []
+
+        for batch in all_batches:
+            # for each image in this batch, produce a downscaled file
+            batch_paths: list[Path] = []
+            for frame in batch:
+                rescaled_image = resize_with_aspect_ratio(frame.output, self.resolution)
+                image_path = outdir / f"frame_{frame.frame_no:05d}.jpg"
+                cv2.imwrite(str(image_path), rescaled_image)
+                batch_paths.append(image_path)
+
+            self.aicropfinder.detections = self.aicropfinder.analyser.message_with_schema(
+                message=self.DETECTION_PROMPT,
+                images=batch_paths,
+                response_class=ResultList,
+            )
+
+            # align bbox with original and crop
+
+            batch_crop_paths: list[Path] = []
+            for frame in batch:
+                frame = self.aicropfinder.handle(frame)
+                if not frame.filter_keep or frame.crop is None:
+                    continue
+                rescaled_image = resize_with_aspect_ratio(frame.crop, self.crop_max_resolution)
+                image_path = outdir / f"frame_crop_{frame.frame_no:05d}.jpg"
+                cv2.imwrite(str(image_path), rescaled_image)
+                batch_crop_paths.append(image_path)
+
+            if batch_crop_paths:
+                output_batches.append(batch_crop_paths)
+        return output_batches
 
 
 T = TypeVar("T", bound=BaseModel)

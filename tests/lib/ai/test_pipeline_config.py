@@ -5,10 +5,17 @@ import pytest
 from pydantic import AnyHttpUrl, ValidationError
 
 from wildcamtools.lib.ai import Backend
-from wildcamtools.lib.ai.pipeline import MotionFrameSelector, SSIMFrameSelector
+from wildcamtools.lib.ai.llm import create_analyser
+from wildcamtools.lib.ai.pipeline import (
+    AICroppedFrameImageExtractor,
+    MotionFrameSelector,
+    RescaledFrameImageExtractor,
+    SSIMFrameSelector,
+)
 from wildcamtools.lib.ai.pipeline_config import (
     AiPipelineConfig,
     FrameExtractorConfig,
+    FrameExtractorType,
     FrameSelectorConfig,
     FrameSelectorType,
     ImageBatchQueryConfig,
@@ -254,8 +261,10 @@ class TestFrameSelectorConfig:
 class TestFrameExtractorConfig:
     def test_default_values(self) -> None:
         config = FrameExtractorConfig()
+        assert config.extractor_type == FrameExtractorType.RESCALED
         assert config.resolution == (640, 360)
         assert config.max_batch_size == 30
+        assert config.crop_expansion == 0.25
 
     def test_custom_resolution(self) -> None:
         config = FrameExtractorConfig(resolution=(1280, 720))
@@ -269,6 +278,15 @@ class TestFrameExtractorConfig:
         config = FrameExtractorConfig(resolution=(1280, 720), max_batch_size=25)
         assert config.resolution == (1280, 720)
         assert config.max_batch_size == 25
+
+    def test_custom_crop_expansion(self) -> None:
+        config = FrameExtractorConfig(crop_expansion=0.5)
+        assert config.crop_expansion == 0.5
+
+    def test_invalid_crop_expansion_negative(self) -> None:
+        with pytest.raises(ValidationError) as exc_info:
+            FrameExtractorConfig(crop_expansion=-0.1)
+        assert "ge=0.0" in str(exc_info.value) or "greater than or equal to 0" in str(exc_info.value).lower()
 
     def test_invalid_resolution_zero_width(self) -> None:
         with pytest.raises(ValidationError) as exc_info:
@@ -295,9 +313,10 @@ class TestFrameExtractorConfig:
             FrameExtractorConfig(max_batch_size=-10)
         assert "gt=0" in str(exc_info.value) or "greater than 0" in str(exc_info.value).lower()
 
-    def test_create_frame_extractor(self) -> None:
-        config = FrameExtractorConfig(resolution=(800, 600))
+    def test_create_frame_extractor_rescaled(self) -> None:
+        config = FrameExtractorConfig(extractor_type=FrameExtractorType.RESCALED, resolution=(800, 600))
         extractor = config.create_frame_extractor()
+        assert isinstance(extractor, RescaledFrameImageExtractor)
         assert extractor.resolution == (800, 600)
         assert extractor.max_batch_size == 30
 
@@ -307,6 +326,33 @@ class TestFrameExtractorConfig:
         assert extractor.resolution == (800, 600)
         assert extractor.max_batch_size == 50
 
+    def test_create_frame_extractor_ai_cropped_requires_analyser(self) -> None:
+        config = FrameExtractorConfig(extractor_type=FrameExtractorType.AI_CROPPED)
+        with pytest.raises(ValueError, match="analyser_llm must be provided or configured in analyser"):
+            config.create_frame_extractor()
+
+    def test_create_frame_extractor_ai_cropped_with_analyser_llm(self) -> None:
+        config = FrameExtractorConfig(extractor_type=FrameExtractorType.AI_CROPPED, resolution=(320, 240))
+        analyser = create_analyser(backend=Backend.OLLAMA, model="test", url="http://test", api_key=None)
+        extractor = config.create_frame_extractor(analyser_llm=analyser)
+        from wildcamtools.lib.ai.pipeline import AICroppedFrameImageExtractor
+
+        assert isinstance(extractor, AICroppedFrameImageExtractor)
+        assert extractor.resolution == (320, 240)
+        assert extractor.aicropfinder.expansion == 0.25
+
+    def test_create_frame_extractor_ai_cropped_with_configured_analyser(self) -> None:
+        config = FrameExtractorConfig(
+            extractor_type=FrameExtractorType.AI_CROPPED,
+            resolution=(320, 240),
+            crop_expansion=0.5,
+            analyser=LlmConfig(model="test", url="http://test"),
+        )
+        extractor = config.create_frame_extractor()
+        assert isinstance(extractor, AICroppedFrameImageExtractor)
+        assert extractor.resolution == (320, 240)
+        assert extractor.aicropfinder.expansion == 0.5
+
     def test_strict_type_validation_resolution(self) -> None:
         with pytest.raises(ValidationError):
             FrameExtractorConfig(resolution=("640", "360"))
@@ -314,6 +360,15 @@ class TestFrameExtractorConfig:
     def test_strict_type_validation_max_batch_size(self) -> None:
         with pytest.raises(ValidationError):
             FrameExtractorConfig(max_batch_size="30")
+
+    def test_extractor_type_serialization(self) -> None:
+        config = FrameExtractorConfig()
+        data = config.model_dump()
+        assert data["extractor_type"] == "rescaled"
+
+    def test_extractor_type_from_dict(self) -> None:
+        config = FrameExtractorConfig.model_validate({"extractor_type": "ai_cropped"})
+        assert config.extractor_type == FrameExtractorType.AI_CROPPED
 
 
 class TestLlmConfig:
@@ -451,7 +506,6 @@ class TestImageBatchQueryConfig:
             ImageBatchQueryConfig.model_validate({"prompt": "test", "query_type": "invalid"})
 
     def test_create_llm_image_batch_query(self) -> None:
-        from wildcamtools.lib.ai.llm import create_analyser
         from wildcamtools.lib.ai.pipeline import LlmImageBatchQuery
 
         config = ImageBatchQueryConfig(prompt="test prompt")
@@ -463,7 +517,6 @@ class TestImageBatchQueryConfig:
         assert query.llm is llm
 
     def test_create_verified_image_batch_query(self) -> None:
-        from wildcamtools.lib.ai.llm import create_analyser
         from wildcamtools.lib.ai.pipeline import VerifiedImageBatchQuery
 
         config = ImageBatchQueryConfig(
@@ -480,7 +533,6 @@ class TestImageBatchQueryConfig:
         assert query.min_confidence == "high"
 
     def test_create_verified_image_batch_query_with_custom_verification_prompt(self) -> None:
-        from wildcamtools.lib.ai.llm import create_analyser
         from wildcamtools.lib.ai.pipeline import VerifiedImageBatchQuery
 
         config = ImageBatchQueryConfig(
@@ -618,6 +670,18 @@ class TestAiPipelineConfig:
         pipeline = config.create_pipeline()
         assert pipeline.frame_selector.fps == 5.0
         assert pipeline.frame_image_extractor.resolution == (1024, 768)
+
+    def test_create_pipeline_with_ai_cropped_extractor(self) -> None:
+
+        config = AiPipelineConfig(
+            frame_extractor=FrameExtractorConfig(extractor_type=FrameExtractorType.AI_CROPPED),
+            llm=LlmConfig(model="test-model", url="http://localhost:8080/v1"),
+            query=ImageBatchQueryConfig(prompt="test"),
+        )
+
+        pipeline = config.create_pipeline()
+        assert isinstance(pipeline.frame_image_extractor, AICroppedFrameImageExtractor)
+        assert pipeline.frame_image_extractor.aicropfinder.expansion == 0.25
 
     def test_create_pipeline_with_verified_query(self) -> None:
         from wildcamtools.lib.ai.pipeline import VerifiedImageBatchQuery

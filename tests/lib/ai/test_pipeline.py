@@ -11,8 +11,10 @@ from pydantic import BaseModel
 
 from wildcamtools.lib import Frame
 from wildcamtools.lib.ai import Backend
+from wildcamtools.lib.ai.crop import AICropFinder
 from wildcamtools.lib.ai.llm.abstract import AbstractLlm
 from wildcamtools.lib.ai.pipeline import (
+    AICroppedFrameImageExtractor,
     FpsRescalingFrameSelector,
     LlmImageBatchQuery,
     MajorityResultReconciler,
@@ -21,7 +23,7 @@ from wildcamtools.lib.ai.pipeline import (
     SSIMFrameSelector,
     VerifiedImageBatchQuery,
 )
-from wildcamtools.lib.ai.types import ConfidenceLevel, VerificationResult
+from wildcamtools.lib.ai.types import ConfidenceLevel, FrameResult, Result, ResultList, VerificationResult
 
 T = TypeVar("T", bound=BaseModel)
 
@@ -107,11 +109,13 @@ class MockAbstractLlm(AbstractLlm):
         backend: Backend = Backend.OLLAMA,
         url: str = "http://test",
         response_to_return: str = "test_species",
+        result_list_to_return: ResultList | None = None,
     ) -> None:
         self.model = model
         self.backend = backend
         self.url = url
         self.response_to_return = response_to_return
+        self.result_list_to_return = result_list_to_return
         self.call_count = 0
         self.last_images: list[Path] = []
         self.last_prompt: str = ""
@@ -125,6 +129,8 @@ class MockAbstractLlm(AbstractLlm):
         self.call_count += 1
         self.last_images = list(images)
         self.last_prompt = message
+        if response_class is ResultList and self.result_list_to_return is not None:
+            return self.result_list_to_return  # type: ignore[return-value]
         result = MockSpeciesResult(species_name=self.response_to_return)
         return result  # type: ignore[return-value]
 
@@ -709,6 +715,352 @@ class TestRescaledFrameImageExtractor:
 
         assert len(result) == 1
         assert len(result[0]) == len(sample_frames)
+
+
+class TestAICroppedFrameImageExtractor:
+    """Tests for AICroppedFrameImageExtractor specific functionality."""
+
+    def test_ai_cropped_extractor_initializes_with_params(self) -> None:
+        """Test constructor stores parameters."""
+        mock_llm = MockAbstractLlm()
+        aicropfinder = AICropFinder(analyser=mock_llm, expansion=0.25)
+        extractor = AICroppedFrameImageExtractor(
+            aicropfinder=aicropfinder,
+            resolution=(320, 240),
+            max_batch_size=20,
+        )
+        assert extractor.aicropfinder is aicropfinder
+        assert extractor.resolution == (320, 240)
+        assert extractor.max_batch_size == 20
+
+    def test_ai_cropped_extractor_with_default_resolution(self) -> None:
+        """Test constructor with default 640x360 resolution."""
+        mock_llm = MockAbstractLlm()
+        aicropfinder = AICropFinder(analyser=mock_llm, expansion=0.25)
+        extractor = AICroppedFrameImageExtractor(aicropfinder=aicropfinder)
+        assert extractor.resolution == (640, 360)
+        assert extractor.max_batch_size == 30
+
+    def test_extract_images_returns_sequence(
+        self,
+        sample_frames: list[Frame],
+        tmp_path: Path,
+    ) -> None:
+        """Verify extract_images returns a Sequence."""
+        mock_llm = MockAbstractLlm(result_list_to_return=ResultList(results=[]))
+        aicropfinder = AICropFinder(analyser=mock_llm, expansion=0.25)
+        extractor = AICroppedFrameImageExtractor(aicropfinder=aicropfinder)
+        result = extractor.extract_images(sample_frames, tmp_path)
+        assert isinstance(result, Sequence)
+
+    def test_extract_images_drops_frames_without_detections(
+        self,
+        sample_frames: list[Frame],
+        tmp_path: Path,
+    ) -> None:
+        """Test frames are dropped when no animals detected."""
+        mock_llm = MockAbstractLlm(result_list_to_return=ResultList(results=[]))
+        aicropfinder = AICropFinder(analyser=mock_llm, expansion=0.25)
+        extractor = AICroppedFrameImageExtractor(aicropfinder=aicropfinder)
+        result = extractor.extract_images(sample_frames, tmp_path)
+
+        assert result == []
+        image_files = list(tmp_path.glob("frame_crop_*.jpg"))
+        assert len(image_files) == 0
+
+    def test_extract_images_drops_frames_with_none_crop(
+        self,
+        sample_frames: list[Frame],
+        tmp_path: Path,
+    ) -> None:
+        """Test frames are dropped when crop is None after processing."""
+        mock_llm = MockAbstractLlm(
+            result_list_to_return=ResultList(
+                results=[
+                    Result(
+                        species_name="fox",
+                        frames=[
+                            FrameResult(
+                                frame_no=999,
+                                left=0.2,
+                                right=0.8,
+                                top=0.2,
+                                bottom=0.8,
+                            )
+                        ],
+                    )
+                ]
+            )
+        )
+        aicropfinder = AICropFinder(analyser=mock_llm, expansion=0.25)
+        extractor = AICroppedFrameImageExtractor(aicropfinder=aicropfinder)
+        result = extractor.extract_images(sample_frames, tmp_path)
+
+        assert result == []
+        image_files = list(tmp_path.glob("frame_crop_*.jpg"))
+        assert len(image_files) == 0
+
+    def test_extract_images_extracts_cropped_frames(
+        self,
+        sample_frames: list[Frame],
+        tmp_path: Path,
+    ) -> None:
+        """Test cropped images are extracted when animals detected."""
+        mock_llm = MockAbstractLlm(
+            result_list_to_return=ResultList(
+                results=[
+                    Result(
+                        species_name="fox",
+                        frames=[
+                            FrameResult(
+                                frame_no=0,
+                                left=0.2,
+                                right=0.8,
+                                top=0.2,
+                                bottom=0.8,
+                            )
+                        ],
+                    )
+                ]
+            )
+        )
+        aicropfinder = AICropFinder(analyser=mock_llm, expansion=0.0)
+        extractor = AICroppedFrameImageExtractor(aicropfinder=aicropfinder, resolution=(320, 240))
+        result = extractor.extract_images(sample_frames, tmp_path)
+
+        assert len(result) == 1
+        assert len(result[0]) == 1
+        image_files = list(tmp_path.glob("frame_crop_*.jpg"))
+        assert len(image_files) == 1
+
+    def test_extract_images_downscales_cropped_images(
+        self,
+        sample_frames: list[Frame],
+        tmp_path: Path,
+    ) -> None:
+        """Test output images match target resolution."""
+        mock_llm = MockAbstractLlm(
+            result_list_to_return=ResultList(
+                results=[
+                    Result(
+                        species_name="fox",
+                        frames=[
+                            FrameResult(
+                                frame_no=i,
+                                left=0.2,
+                                right=0.8,
+                                top=0.2,
+                                bottom=0.8,
+                            )
+                            for i in range(len(sample_frames))
+                        ],
+                    )
+                ]
+            )
+        )
+        aicropfinder = AICropFinder(analyser=mock_llm, expansion=0.0)
+        resolution = (320, 240)
+        extractor = AICroppedFrameImageExtractor(aicropfinder=aicropfinder, crop_max_resolution=resolution)
+        extractor.extract_images(sample_frames, tmp_path)
+
+        for image_file in tmp_path.glob("frame_crop_*.jpg"):
+            img = cv2.imread(str(image_file))
+            assert img is not None
+            h, w = img.shape[:2]
+            assert w <= resolution[0]
+            assert h <= resolution[1]
+
+    def test_ai_cropped_extractor_skips_filtered_frames(
+        self,
+        sample_frames_with_filtering: list[Frame],
+        tmp_path: Path,
+    ) -> None:
+        """Test only filter_keep=True frames are processed."""
+        mock_llm = MockAbstractLlm(
+            result_list_to_return=ResultList(
+                results=[
+                    Result(
+                        species_name="fox",
+                        frames=[
+                            FrameResult(
+                                frame_no=i,
+                                left=0.2,
+                                right=0.8,
+                                top=0.2,
+                                bottom=0.8,
+                            )
+                            for i in range(10)
+                        ],
+                    )
+                ]
+            )
+        )
+        aicropfinder = AICropFinder(analyser=mock_llm, expansion=0.0)
+        extractor = AICroppedFrameImageExtractor(aicropfinder=aicropfinder)
+        extractor.extract_images(sample_frames_with_filtering, tmp_path)
+
+        image_files = list(tmp_path.glob("frame_crop_*.jpg"))
+        expected_count = sum(1 for f in sample_frames_with_filtering if f.filter_keep)
+        assert len(image_files) == expected_count
+
+    def test_ai_cropped_extractor_batch_structure(
+        self,
+        sample_frames: list[Frame],
+        tmp_path: Path,
+    ) -> None:
+        """Test returns list of lists (batches)."""
+        mock_llm = MockAbstractLlm(
+            result_list_to_return=ResultList(
+                results=[
+                    Result(
+                        species_name="fox",
+                        frames=[
+                            FrameResult(
+                                frame_no=i,
+                                left=0.2,
+                                right=0.8,
+                                top=0.2,
+                                bottom=0.8,
+                            )
+                            for i in range(len(sample_frames))
+                        ],
+                    )
+                ]
+            )
+        )
+        aicropfinder = AICropFinder(analyser=mock_llm, expansion=0.0)
+        extractor = AICroppedFrameImageExtractor(aicropfinder=aicropfinder)
+        result = extractor.extract_images(sample_frames, tmp_path)
+
+        assert isinstance(result, list)
+        assert len(result) == 1
+        assert isinstance(result[0], list)
+        assert len(result[0]) == len(sample_frames)
+        assert all(isinstance(p, Path) for p in result[0])
+
+    def test_ai_cropped_extractor_max_batch_size(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """Test max_batch_size splits batches correctly."""
+        mock_llm = MockAbstractLlm(
+            result_list_to_return=ResultList(
+                results=[
+                    Result(
+                        species_name="fox",
+                        frames=[
+                            FrameResult(
+                                frame_no=i,
+                                left=0.2,
+                                right=0.8,
+                                top=0.2,
+                                bottom=0.8,
+                            )
+                            for i in range(75)
+                        ],
+                    )
+                ]
+            )
+        )
+        aicropfinder = AICropFinder(analyser=mock_llm, expansion=0.0)
+        frames = []
+        for i in range(75):
+            raw = np.zeros((100, 200, 3), dtype=np.uint8)
+            raw[:, :] = [(i * 10) % 256, (i * 20) % 256, (i * 30) % 256]
+            frame = Frame(raw=raw, frame_no=i, filter_keep=True)
+            frames.append(frame)
+
+        extractor = AICroppedFrameImageExtractor(aicropfinder=aicropfinder, max_batch_size=30)
+        result = extractor.extract_images(frames, tmp_path)
+
+        assert len(result) == 3
+        assert len(result[0]) == 30
+        assert len(result[1]) == 30
+        assert len(result[2]) == 15
+
+    def test_ai_cropped_extractor_preserves_aspect_ratio(
+        self,
+        sample_frames: list[Frame],
+        tmp_path: Path,
+    ) -> None:
+        """Test aspect ratio is maintained in output images."""
+        mock_llm = MockAbstractLlm(
+            result_list_to_return=ResultList(
+                results=[
+                    Result(
+                        species_name="fox",
+                        frames=[
+                            FrameResult(
+                                frame_no=i,
+                                left=0.2,
+                                right=0.8,
+                                top=0.2,
+                                bottom=0.8,
+                            )
+                            for i in range(len(sample_frames))
+                        ],
+                    )
+                ]
+            )
+        )
+        aicropfinder = AICropFinder(analyser=mock_llm, expansion=0.0)
+        resolution = (320, 240)
+        extractor = AICroppedFrameImageExtractor(aicropfinder=aicropfinder, resolution=resolution)
+        extractor.extract_images(sample_frames, tmp_path)
+
+        for image_file in tmp_path.glob("*.jpg"):
+            img = cv2.imread(str(image_file))
+            assert img is not None
+            h, w = img.shape[:2]
+            crop_w = int(sample_frames[0].width_raw * 0.6)
+            crop_h = int(sample_frames[0].height_raw * 0.6)
+            original_ratio = crop_w / crop_h
+            output_ratio = w / h
+            assert abs(output_ratio - original_ratio) < 0.05
+
+    def test_extract_images_with_empty_frames(self, tmp_path: Path) -> None:
+        """Test edge case with empty frame list."""
+        mock_llm = MockAbstractLlm(result_list_to_return=ResultList(results=[]))
+        aicropfinder = AICropFinder(analyser=mock_llm, expansion=0.25)
+        extractor = AICroppedFrameImageExtractor(aicropfinder=aicropfinder)
+        result = extractor.extract_images([], tmp_path)
+
+        assert result == []
+
+    def test_extract_images_uses_outdir(
+        self,
+        sample_frames: list[Frame],
+        tmp_path: Path,
+    ) -> None:
+        """Test files are created in correct directory."""
+        mock_llm = MockAbstractLlm(
+            result_list_to_return=ResultList(
+                results=[
+                    Result(
+                        species_name="fox",
+                        frames=[
+                            FrameResult(
+                                frame_no=i,
+                                left=0.2,
+                                right=0.8,
+                                top=0.2,
+                                bottom=0.8,
+                            )
+                            for i in range(len(sample_frames))
+                        ],
+                    )
+                ]
+            )
+        )
+        aicropfinder = AICropFinder(analyser=mock_llm, expansion=0.0)
+        extractor = AICroppedFrameImageExtractor(aicropfinder=aicropfinder)
+        subdir = tmp_path / "subdir" / "nested"
+        extractor.extract_images(sample_frames, subdir)
+
+        assert subdir.exists()
+        image_files = list(subdir.glob("*.jpg"))
+        # should be a whole image and a crop foor each frame
+        assert len(image_files) == len(sample_frames) * 2
 
 
 class TestLlmImageBatchQuery:

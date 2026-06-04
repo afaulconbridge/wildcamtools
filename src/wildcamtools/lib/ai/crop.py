@@ -33,31 +33,13 @@ class AICropFinder:
         for frameresult in self.detections.results[0].frames:
             if frameresult.frame_no == frame.frame_no:
                 h, w, _ = frame.raw.shape
-                x1 = math.floor(w * min(frameresult.left, frameresult.right))
-                x2 = math.ceil(w * max(frameresult.left, frameresult.right))
-                y1 = math.floor(h * min(frameresult.bottom, frameresult.top))
-                y2 = math.ceil(h * max(frameresult.bottom, frameresult.top))
-                # enlarge crop box within screen
-                box_w = x2 - x1
-                box_h = y2 - y1
-                x1 = max(0, x1 - int(box_w * self.expansion))
-                x2 = min(w, x2 + int(box_w * self.expansion))
-                y1 = max(0, y1 - int(box_h * self.expansion))
-                y2 = min(h, y2 + int(box_h * self.expansion))
-
-                # double check for validity
-                if x1 >= x2 or y1 >= y2:
-                    logger.warning(
-                        "Invalid bounding box detected on frame %d : (%d,%d)-(%d,%d)",
-                        frame.frame_no,
-                        x1,
-                        y1,
-                        x2,
-                        y2,
-                    )
-                    continue
-
-                frame.crop_bbox = BBox(x1, y1, x2, y2)
+                result_bbox = BBox(
+                    min(frameresult.left, frameresult.right),
+                    min(frameresult.bottom, frameresult.top),
+                    max(frameresult.left, frameresult.right),
+                    max(frameresult.bottom, frameresult.top),
+                )
+                frame.crop_bbox = self.expand_bbox(result_bbox, w, h)
                 logger.debug(
                     "Crop %s to (%s,%s)-(%s,%s)",
                     frame.frame_no,
@@ -70,3 +52,19 @@ class AICropFinder:
                 return frame
         frame.filter_keep = False
         return frame
+
+    def expand_bbox(self, bbox: BBox, max_width: int, max_height: int) -> BBox:
+        # convert proportional bounding box into pixels
+        x1 = math.floor(max_width * bbox.x1)
+        x2 = math.ceil(max_width * bbox.x2)
+        y1 = math.floor(max_height * bbox.y1)
+        y2 = math.ceil(max_height * bbox.y2)
+        # enlarge crop box within screen
+        box_w = x2 - x1
+        box_h = y2 - y1
+        x1 = max(0, x1 - int(box_w * self.expansion))
+        x2 = min(max_width, x2 + int(box_w * self.expansion))
+        y1 = max(0, y1 - int(box_h * self.expansion))
+        y2 = min(max_height, y2 + int(box_h * self.expansion))
+
+        return BBox(x1, y1, x2, y2)

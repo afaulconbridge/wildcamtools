@@ -3,7 +3,7 @@ from __future__ import annotations
 import abc
 import warnings
 from dataclasses import dataclass
-from typing import Self
+from typing import Protocol, Self, TypeVar
 
 import cv2.typing
 
@@ -84,12 +84,24 @@ class Frame:
         return self.tiles[index]
 
 
+class ComparableNumber(Protocol):
+    def __lt__(self, other: Self) -> bool: ...
+    def __le__(self, other: Self) -> bool: ...
+    def __gt__(self, other: Self) -> bool: ...
+    def __ge__(self, other: Self) -> bool: ...
+    def __sub__(self, other: Self) -> Self: ...
+
+
+# support both int and float
+T = TypeVar("T", bound=ComparableNumber)
+
+
 @dataclass(frozen=True)
-class BBox:
-    x1: int
-    y1: int
-    x2: int
-    y2: int
+class BBox[T: ComparableNumber]:
+    x1: T
+    y1: T
+    x2: T
+    y2: T
 
     def __post_init__(self) -> None:
         if self.x2 <= self.x1:
@@ -98,11 +110,11 @@ class BBox:
             raise BoundingBoxHeightError()
 
     @property
-    def width(self) -> int:
+    def width(self) -> T:
         return self.x2 - self.x1
 
     @property
-    def height(self) -> int:
+    def height(self) -> T:
         return self.y2 - self.y1
 
     def overlaps(self, r: Self) -> bool:

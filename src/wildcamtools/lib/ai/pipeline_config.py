@@ -5,11 +5,14 @@ from typing import Annotated, Self
 
 from pydantic import AnyHttpUrl, BaseModel, ConfigDict, Field, SecretStr, field_validator
 
+from wildcamtools.lib.ai.crop import AICropFinder
 from wildcamtools.lib.ai.llm import create_analyser
 from wildcamtools.lib.ai.llm.abstract import AbstractLlm
 from wildcamtools.lib.ai.pipeline import (
+    AICroppedFrameImageExtractor,
     AiPipeline,
     FpsRescalingFrameSelector,
+    FrameExtractor,
     FrameSelector,
     ImageBatchQuery,
     LlmImageBatchQuery,
@@ -27,6 +30,11 @@ class FrameSelectorType(StrEnum):
     FPS_RESCALING = "fps_rescaling"
     MOTION = "motion"
     SSIM = "ssim"
+
+
+class FrameExtractorType(StrEnum):
+    RESCALED = "rescaled"
+    AI_CROPPED = "ai_cropped"
 
 
 class ReconcilerType(StrEnum):
@@ -98,6 +106,7 @@ class FrameSelectorConfig(BaseModel):
 
 
 class FrameExtractorConfig(BaseModel):
+    extractor_type: FrameExtractorType = FrameExtractorType.RESCALED
     resolution: Annotated[
         tuple[Annotated[int, Field(strict=True, gt=0)], Annotated[int, Field(strict=True, gt=0)]],
         Field(description="Target resolution as (width, height)"),
@@ -106,14 +115,51 @@ class FrameExtractorConfig(BaseModel):
         int,
         Field(strict=True, gt=0, description="Maximum number of images per batch"),
     ] = 30
+    crop_max_resolution: Annotated[
+        tuple[Annotated[int, Field(strict=True, gt=0)], Annotated[int, Field(strict=True, gt=0)]],
+        Field(description="Maximum crop resolution as (width, height)"),
+    ] = (640, 360)
+    crop_expansion: Annotated[
+        float,
+        Field(
+            strict=True,
+            ge=0.0,
+            description="Expansion factor for AI crop bounding box (0.0 = no expansion)",
+        ),
+    ] = 0.25
+    analyser: "LlmConfig | None" = None
 
-    def create_frame_extractor(self) -> RescaledFrameImageExtractor:
+    def create_frame_extractor(self, analyser_llm: AbstractLlm | None = None) -> FrameExtractor:
         """Create a FrameImageExtractor instance based on the configuration.
 
+        Args:
+            analyser_llm: The LLM instance to use for AI crop detection (required for AI_CROPPED extractor).
+
         Returns:
-            RescaledFrameImageExtractor: The configured frame extractor instance.
+            FrameImageExtractor: The configured frame extractor instance.
+
+        Raises:
+            ValueError: If analyser_llm is not provided for AI_CROPPED extractor type.
         """
-        return RescaledFrameImageExtractor(resolution=self.resolution, max_batch_size=self.max_batch_size)
+        match self.extractor_type:
+            case FrameExtractorType.RESCALED:
+                return RescaledFrameImageExtractor(resolution=self.resolution, max_batch_size=self.max_batch_size)
+            case FrameExtractorType.AI_CROPPED:
+                if analyser_llm is None:
+                    if self.analyser is None:
+                        raise ValueError(
+                            "analyser_llm must be provided or configured in analyser for AI_CROPPED extractor"
+                        )
+                    analyser_llm = self.analyser.create_llm()
+                aicropfinder = AICropFinder(analyser=analyser_llm, expansion=self.crop_expansion)
+                return AICroppedFrameImageExtractor(
+                    aicropfinder=aicropfinder,
+                    resolution=self.resolution,
+                    crop_max_resolution=self.crop_max_resolution,
+                    max_batch_size=self.max_batch_size,
+                )
+            case _:
+                raise NotImplementedError(f"Unsupported frame extractor type: {self.extractor_type}")
 
 
 class LlmConfig(BaseModel):
@@ -224,7 +270,7 @@ class AiPipelineConfig(BaseModel):
         json_schema_extra={
             "example": {
                 "frame_selector": {"selector_type": "fps_rescaling", "fps": 1.0},
-                "frame_extractor": {"resolution": [640, 360]},
+                "frame_extractor": {"extractor_type": "rescaled", "resolution": [640, 360]},
                 "llm": {"backend": "ollama", "model": "qwen3.5:cloud"},
                 "query": {"query_type": "llm", "prompt": "What species is in this image?"},
                 "reconciler": {"reconciler_type": "majority"},
@@ -249,8 +295,8 @@ class AiPipelineConfig(BaseModel):
 
     def create_pipeline(self) -> AiPipeline:
         frame_selector = self.frame_selector.create_frame_selector()
-        frame_extractor = self.frame_extractor.create_frame_extractor()
         llm = self.llm.create_llm()
+        frame_extractor = self.frame_extractor.create_frame_extractor(analyser_llm=llm)
         image_batch_query = self.query.create_image_batch_query(llm)
         reconciler = self.reconciler.create_reconciler()
 

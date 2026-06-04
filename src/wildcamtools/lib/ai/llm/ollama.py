@@ -7,7 +7,7 @@ import ollama as ollama_lib
 from pydantic import ValidationError
 
 from wildcamtools.lib.ai.llm.abstract import DEFAULT_SYSTEM_MESSAGE, AbstractLlm, T
-from wildcamtools.lib.ai.types import Backend, StringResponse
+from wildcamtools.lib.ai.types import Backend, RichResult
 
 logger = logging.getLogger(__name__)
 
@@ -41,7 +41,7 @@ class OllamaLlm(AbstractLlm):
         message: str,
         images: Sequence[Path] = (),
         # mypy limitation with generic type defaults
-        response_class: type[T] = StringResponse,  # type: ignore[assignment]
+        response_class: type[T] = RichResult,  # type: ignore[assignment]
     ) -> T:
         image_bytes = [image.read_bytes() for image in images]
         logger.info("Loaded %d images for message", len(image_bytes))

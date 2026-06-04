@@ -26,7 +26,6 @@ from wildcamtools.lib.ai.pipeline_config import (
     LlmConfig,
     ReconcilerConfig,
     ReconcilerType,
-    ResponseSchemaType,
 )
 from wildcamtools.lib.ai.pipeline_evaluation import (
     PipelineEvaluationResult,
@@ -40,8 +39,7 @@ from wildcamtools.lib.ai.types import (
     Result,
     ResultClassification,
     ResultList,
-    SpeciesResult,
-    StringResponse,
+    RichResult,
 )
 
 __all__ = [
@@ -72,14 +70,12 @@ __all__ = [
     "ReconcilerConfig",
     "ReconcilerType",
     "RescaledFrameImageExtractor",
-    "ResponseSchemaType",
     "Result",
     "ResultClassification",
     "ResultList",
     "ResultReconciler",
+    "RichResult",
     "SSIMFrameSelector",
-    "SpeciesResult",
-    "StringResponse",
     "VerifiedImageBatchQuery",
     "evaluate_ai_pipeline",
 ]

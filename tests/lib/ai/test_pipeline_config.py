@@ -23,7 +23,6 @@ from wildcamtools.lib.ai.pipeline_config import (
     LlmConfig,
     ReconcilerConfig,
     ReconcilerType,
-    ResponseSchemaType,
 )
 
 
@@ -440,7 +439,6 @@ class TestImageBatchQueryConfig:
         config = ImageBatchQueryConfig(prompt="Test prompt")
         assert config.query_type == ImageBatchQueryType.LLM
         assert config.prompt == "Test prompt"
-        assert config.response_schema == ResponseSchemaType.SPECIES_RESULT
         assert config.verification_prompt is None
         assert config.min_confidence == "medium"
 
@@ -448,13 +446,11 @@ class TestImageBatchQueryConfig:
         config = ImageBatchQueryConfig(
             query_type=ImageBatchQueryType.VERIFIED,
             prompt="Custom prompt",
-            response_schema=ResponseSchemaType.STRING_RESPONSE,
             verification_prompt="Verify: {initial_species}",
             min_confidence="high",
         )
         assert config.query_type == ImageBatchQueryType.VERIFIED
         assert config.prompt == "Custom prompt"
-        assert config.response_schema == ResponseSchemaType.STRING_RESPONSE
         assert config.verification_prompt == "Verify: {initial_species}"
         assert config.min_confidence == "high"
 
@@ -462,40 +458,6 @@ class TestImageBatchQueryConfig:
         with pytest.raises(ValidationError) as exc_info:
             ImageBatchQueryConfig(prompt="")
         assert "min_length=1" in str(exc_info.value) or "at least 1" in str(exc_info.value).lower()
-
-    @pytest.mark.parametrize(
-        "schema_value,expected_class",
-        [
-            ("SpeciesResult", "SpeciesResult"),
-            ("Result", "Result"),
-            ("StringResponse", "StringResponse"),
-        ],
-    )
-    def test_response_schema_values(self, schema_value: str, expected_class: str) -> None:
-        config = ImageBatchQueryConfig.model_validate({"prompt": "test", "response_schema": schema_value})
-        assert config.response_schema.value == expected_class
-
-    def test_invalid_response_schema(self) -> None:
-        with pytest.raises(ValidationError):
-            ImageBatchQueryConfig.model_validate({"prompt": "test", "response_schema": "InvalidSchema"})
-
-    def test_get_response_class_species(self) -> None:
-        from wildcamtools.lib.ai import SpeciesResult
-
-        config = ImageBatchQueryConfig(prompt="test", response_schema=ResponseSchemaType.SPECIES_RESULT)
-        assert config.get_response_class() == SpeciesResult
-
-    def test_get_response_class_result(self) -> None:
-        from wildcamtools.lib.ai import Result
-
-        config = ImageBatchQueryConfig(prompt="test", response_schema=ResponseSchemaType.RESULT)
-        assert config.get_response_class() == Result
-
-    def test_get_response_class_string(self) -> None:
-        from wildcamtools.lib.ai import StringResponse
-
-        config = ImageBatchQueryConfig(prompt="test", response_schema=ResponseSchemaType.STRING_RESPONSE)
-        assert config.get_response_class() == StringResponse
 
     def test_strict_type_validation(self) -> None:
         with pytest.raises(ValidationError):
@@ -587,13 +549,12 @@ class TestAiPipelineConfig:
             frame_selector=FrameSelectorConfig(fps=0.5),
             frame_extractor=FrameExtractorConfig(resolution=(1280, 720)),
             llm=LlmConfig(model="llama-3", backend=Backend.LLAMACPP, url="http://localhost:8080/v1"),
-            query=ImageBatchQueryConfig(prompt="Custom prompt", response_schema=ResponseSchemaType.STRING_RESPONSE),
+            query=ImageBatchQueryConfig(prompt="Custom prompt"),
             reconciler=ReconcilerConfig(reconciler_type=ReconcilerType.MAJORITY),
         )
         assert config.frame_selector.fps == 0.5
         assert config.frame_extractor.resolution == (1280, 720)
         assert config.llm.backend == Backend.LLAMACPP
-        assert config.query.response_schema == ResponseSchemaType.STRING_RESPONSE
 
     def test_from_json(self, tmp_path: Path) -> None:
         json_content = """
@@ -663,7 +624,7 @@ class TestAiPipelineConfig:
             frame_selector=FrameSelectorConfig(fps=5.0),
             frame_extractor=FrameExtractorConfig(resolution=(1024, 768)),
             llm=LlmConfig(model="custom-model", url="http://example.com"),
-            query=ImageBatchQueryConfig(prompt="custom prompt", response_schema=ResponseSchemaType.RESULT),
+            query=ImageBatchQueryConfig(prompt="custom prompt"),
             reconciler=ReconcilerConfig(),
         )
 

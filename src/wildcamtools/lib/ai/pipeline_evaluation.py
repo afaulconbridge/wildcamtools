@@ -10,7 +10,7 @@ from wildcamtools.lib import Frame
 from wildcamtools.lib.ai.label_comparison_config import LabelComparisonConfig
 from wildcamtools.lib.ai.pipeline import FrameSelector
 from wildcamtools.lib.ai.pipeline_config import AiPipelineConfig
-from wildcamtools.lib.ai.types import ResultClassification, SpeciesResult
+from wildcamtools.lib.ai.types import ResultClassification, RichResult
 from wildcamtools.lib.labels import load_labels
 
 logger = logging.getLogger(__name__)
@@ -37,7 +37,7 @@ class _WorkerResult(BaseModel):
     """Result from worker process before label comparison."""
 
     filename: str
-    raw_result: str
+    result: RichResult
     processing_time_seconds: float = 0.0
     frame_ids: list[int] = Field(default_factory=list)
     error: str | None = None
@@ -46,17 +46,12 @@ class _WorkerResult(BaseModel):
 class PipelineEvaluationResult(BaseModel):
     filename: str
     classification: ResultClassification
-    raw_result: str
+    result: RichResult
     label: str
     error: str | None = None
     comparison_method: str = "exact"
     processing_time_seconds: float = 0.0
     frame_ids: list[int] = Field(default_factory=list)
-    is_correct: bool = False
-
-    @property
-    def correct(self) -> bool:
-        return self.is_correct
 
 
 class PipelineEvaluationSummary(BaseModel):
@@ -127,23 +122,16 @@ def _evaluate_video_worker(
         processing_time = end_time - start_time
         frame_ids = wrapper.frame_ids
 
-        if isinstance(result, SpeciesResult) or hasattr(result, "species_name"):
-            raw_result = result.species_name
-        elif hasattr(result, "message"):
-            raw_result = result.message
-        else:
-            raw_result = str(result)
-
         logger.info(
             "Video %s: result=%s, frames=%s",
             video_path.name,
-            raw_result,
+            result.species_name,
             frame_ids,
         )
 
         return _WorkerResult(
             filename=video_path.name,
-            raw_result=raw_result,
+            result=result,
             processing_time_seconds=processing_time,
             frame_ids=frame_ids,
             error=None,
@@ -194,22 +182,24 @@ def _run_worker_pool(
 
         for label, future in futures:
             try:
-                worker_result = future.get()
+                worker_result: _WorkerResult = future.get()
             except Exception:
                 logger.exception("Worker task failed")
                 continue
-            is_correct, classification = comparator.compare(worker_result.raw_result, label)
+            if not isinstance(worker_result, _WorkerResult):
+                logger.error("Result of unexpected class")
+                continue
+            classification = comparator.compare(worker_result.result, label)
             results.append(
                 PipelineEvaluationResult(
                     filename=worker_result.filename,
+                    result=worker_result.result,
                     classification=classification,
-                    raw_result=worker_result.raw_result,
                     label=label,
                     error=worker_result.error,
                     comparison_method=comparator.method_name,
                     processing_time_seconds=worker_result.processing_time_seconds,
                     frame_ids=worker_result.frame_ids,
-                    is_correct=is_correct,
                 )
             )
 

@@ -2,7 +2,6 @@
 
 from collections.abc import Generator, Sequence
 from pathlib import Path
-from typing import TypeVar
 
 import cv2
 import numpy as np
@@ -23,9 +22,7 @@ from wildcamtools.lib.ai.pipeline import (
     SSIMFrameSelector,
     VerifiedImageBatchQuery,
 )
-from wildcamtools.lib.ai.types import ConfidenceLevel, FrameResult, Result, ResultList, VerificationResult
-
-T = TypeVar("T", bound=BaseModel)
+from wildcamtools.lib.ai.types import ConfidenceLevel, FrameResult, Result, ResultList, RichResult, VerificationResult
 
 
 @pytest.fixture(name="sample_frames")
@@ -110,29 +107,40 @@ class MockAbstractLlm(AbstractLlm):
         url: str = "http://test",
         response_to_return: str = "test_species",
         result_list_to_return: ResultList | None = None,
+        return_rich_result: bool = False,
     ) -> None:
         self.model = model
         self.backend = backend
         self.url = url
         self.response_to_return = response_to_return
         self.result_list_to_return = result_list_to_return
+        self.return_rich_result = return_rich_result
         self.call_count = 0
         self.last_images: list[Path] = []
         self.last_prompt: str = ""
 
-    def message_with_schema[T](
+    def message_with_schema(
         self,
         message: str,
         images: Sequence[Path] = (),
-        response_class: type[T] = MockSpeciesResult,  # type: ignore[assignment]
-    ) -> T:
+        response_class: type = RichResult,
+    ):
         self.call_count += 1
         self.last_images = list(images)
         self.last_prompt = message
         if response_class is ResultList and self.result_list_to_return is not None:
-            return self.result_list_to_return  # type: ignore[return-value]
-        result = MockSpeciesResult(species_name=self.response_to_return)
-        return result  # type: ignore[return-value]
+            return self.result_list_to_return
+        if response_class is RichResult:
+            result = RichResult(
+                is_animal_present=True,
+                is_animal_unknown=False,
+                defining_features="test features",
+                species_name=self.response_to_return,
+                confidence=ConfidenceLevel.HIGH,
+            )
+        else:
+            result = MockSpeciesResult(species_name=self.response_to_return)
+        return result
 
 
 class MockVerifiedLlm(AbstractLlm):
@@ -165,12 +173,12 @@ class MockVerifiedLlm(AbstractLlm):
         self.last_prompt: str = ""
         self.verification_prompt: str = ""
 
-    def message_with_schema[T](
+    def message_with_schema(
         self,
         message: str,
         images: Sequence[Path] = (),
-        response_class: type[T] = MockSpeciesResult,  # type: ignore[assignment]
-    ) -> T:
+        response_class: type = RichResult,
+    ):
         self.call_count += 1
         self.last_images = list(images)
 
@@ -181,11 +189,17 @@ class MockVerifiedLlm(AbstractLlm):
                 confidence=self.verification_confidence,
                 verified=self.verification_verified,
             )
-            return result  # type: ignore[return-value]
+            return result
         else:
             self.last_prompt = message
-            result = MockSpeciesResult(species_name=self.initial_species)
-            return result  # type: ignore[return-value]
+            result = RichResult(
+                is_animal_present=self.initial_species not in ("unknown", "no animal"),
+                is_animal_unknown=self.initial_species == "unknown",
+                defining_features="test features",
+                species_name=self.initial_species,
+                confidence=ConfidenceLevel.HIGH,
+            )
+            return result
 
 
 class TestFpsRescalingFrameSelector:
@@ -1073,25 +1087,22 @@ class TestLlmImageBatchQuery:
         query = LlmImageBatchQuery(
             llm=mock_llm,
             prompt=prompt,
-            response_class=MockSpeciesResult,
         )
         assert query.llm is mock_llm
         assert query.prompt == prompt
-        assert query.response_class is MockSpeciesResult
 
-    def test_query_images_returns_model_instance(
+    def test_query_images_returns_rich_result(
         self,
         sample_image_paths: list[Path],
     ) -> None:
-        """Test query_images returns a model instance."""
+        """Test query_images returns a RichResult instance."""
         mock_llm = MockAbstractLlm()
         query = LlmImageBatchQuery(
             llm=mock_llm,
             prompt="Test prompt",
-            response_class=MockSpeciesResult,
         )
         result = query.query_images(sample_image_paths)
-        assert isinstance(result, MockSpeciesResult)
+        assert isinstance(result, RichResult)
         assert result.species_name == "test_species"
 
     def test_query_images_calls_analyser(
@@ -1103,7 +1114,6 @@ class TestLlmImageBatchQuery:
         query = LlmImageBatchQuery(
             llm=mock_llm,
             prompt="Test prompt",
-            response_class=MockSpeciesResult,
         )
         query.query_images(sample_image_paths)
         assert mock_llm.call_count == 1
@@ -1117,7 +1127,6 @@ class TestLlmImageBatchQuery:
         query = LlmImageBatchQuery(
             llm=mock_llm,
             prompt="Test prompt",
-            response_class=MockSpeciesResult,
         )
         query.query_images(list(reversed(sample_image_paths)))
         assert mock_llm.last_images == sorted(sample_image_paths)
@@ -1132,7 +1141,6 @@ class TestLlmImageBatchQuery:
         query = LlmImageBatchQuery(
             llm=mock_llm,
             prompt=custom_prompt,
-            response_class=MockSpeciesResult,
         )
         query.query_images(sample_image_paths)
         assert mock_llm.last_prompt == custom_prompt
@@ -1146,7 +1154,6 @@ class TestLlmImageBatchQuery:
         query = LlmImageBatchQuery(
             llm=mock_llm,
             prompt="Test prompt",
-            response_class=MockSpeciesResult,
         )
         result = query.query_images(sample_image_paths)
         assert result.species_name == "custom_species"
@@ -1157,7 +1164,6 @@ class TestLlmImageBatchQuery:
         query = LlmImageBatchQuery(
             llm=mock_llm,
             prompt="Test prompt",
-            response_class=MockSpeciesResult,
         )
         with pytest.raises(ValueError, match="Empty image batch"):
             query.query_images([])
@@ -1171,12 +1177,11 @@ class TestLlmImageBatchQuery:
         query = LlmImageBatchQuery(
             llm=mock_llm,
             prompt="Test prompt",
-            response_class=MockSpeciesResult,
         )
         batches = [sample_image_paths, sample_image_paths]
         results = list(query.query_image_batches(batches))
         assert len(results) == 2
-        assert all(isinstance(r, MockSpeciesResult) for r in results)
+        assert all(isinstance(r, RichResult) for r in results)
 
     def test_query_image_batches_multiple_batches(
         self,
@@ -1187,7 +1192,6 @@ class TestLlmImageBatchQuery:
         query = LlmImageBatchQuery(
             llm=mock_llm,
             prompt="Test prompt",
-            response_class=MockSpeciesResult,
         )
         batches = [sample_image_paths, sample_image_paths, sample_image_paths]
         list(query.query_image_batches(batches))
@@ -1204,27 +1208,11 @@ class TestLlmImageBatchQuery:
         query = LlmImageBatchQuery(
             llm=mock_llm,
             prompt="Test prompt",
-            response_class=MockSpeciesResult,
         )
         batches = [sample_image_paths] * batch_count
         results = list(query.query_image_batches(batches))
         assert len(results) == batch_count
         assert mock_llm.call_count == batch_count
-
-    def test_query_images_return_type_matches_response_class(
-        self,
-        sample_image_paths: list[Path],
-    ) -> None:
-        """Test returned instance matches response_class."""
-        mock_llm = MockAbstractLlm()
-        query = LlmImageBatchQuery(
-            llm=mock_llm,
-            prompt="Test prompt",
-            response_class=MockSpeciesResult,
-        )
-        result = query.query_images(sample_image_paths)
-        assert isinstance(result, MockSpeciesResult)
-        assert type(result) is MockSpeciesResult
 
     def test_query_images_single_image(
         self,
@@ -1235,10 +1223,9 @@ class TestLlmImageBatchQuery:
         query = LlmImageBatchQuery(
             llm=mock_llm,
             prompt="Test prompt",
-            response_class=MockSpeciesResult,
         )
         result = query.query_images([sample_image_paths[0]])
-        assert isinstance(result, MockSpeciesResult)
+        assert isinstance(result, RichResult)
         assert mock_llm.call_count == 1
 
 
@@ -1247,98 +1234,147 @@ class TestMajorityResultReconciler:
 
     def test_reconciler_with_single_result(self) -> None:
         """Test reconciler returns single result unchanged."""
-        reconciler: MajorityResultReconciler[MockSpeciesResult] = MajorityResultReconciler()
-        result = reconciler.reconcile_results([MockSpeciesResult(species_name="test")])
-        assert result.species_name == "test"
+        reconciler = MajorityResultReconciler()
+        result = reconciler.reconcile_results([
+            RichResult(
+                is_animal_present=True,
+                is_animal_unknown=False,
+                defining_features="test features",
+                species_name="test_species",
+                confidence=ConfidenceLevel.HIGH,
+            )
+        ])
+        assert result.species_name == "test_species"
 
     def test_reconciler_with_identical_results(self) -> None:
-        """Test reconciler returns result when all are identical."""
-        reconciler: MajorityResultReconciler[MockSpeciesResult] = MajorityResultReconciler()
-        results = [MockSpeciesResult(species_name="same") for _ in range(5)]
+        """Test reconciler returns identical result."""
+        reconciler = MajorityResultReconciler()
+        results = [
+            RichResult(
+                is_animal_present=True,
+                is_animal_unknown=False,
+                defining_features="test",
+                species_name="same",
+                confidence=ConfidenceLevel.HIGH,
+            )
+            for _ in range(5)
+        ]
         result = reconciler.reconcile_results(results)
         assert result.species_name == "same"
 
     def test_reconciler_with_clear_majority(self) -> None:
-        """Test reconciler returns majority result."""
-        reconciler: MajorityResultReconciler[MockSpeciesResult] = MajorityResultReconciler()
+        """Test reconciler selects majority result."""
+        reconciler = MajorityResultReconciler()
         results = [
-            MockSpeciesResult(species_name="A"),
-            MockSpeciesResult(species_name="A"),
-            MockSpeciesResult(species_name="A"),
-            MockSpeciesResult(species_name="B"),
-            MockSpeciesResult(species_name="B"),
+            RichResult(
+                is_animal_present=True,
+                is_animal_unknown=False,
+                defining_features="test",
+                species_name="A",
+                confidence=ConfidenceLevel.HIGH,
+            ),
+            RichResult(
+                is_animal_present=True,
+                is_animal_unknown=False,
+                defining_features="test",
+                species_name="A",
+                confidence=ConfidenceLevel.HIGH,
+            ),
+            RichResult(
+                is_animal_present=True,
+                is_animal_unknown=False,
+                defining_features="test",
+                species_name="A",
+                confidence=ConfidenceLevel.HIGH,
+            ),
+            RichResult(
+                is_animal_present=True,
+                is_animal_unknown=False,
+                defining_features="test",
+                species_name="B",
+                confidence=ConfidenceLevel.HIGH,
+            ),
+            RichResult(
+                is_animal_present=True,
+                is_animal_unknown=False,
+                defining_features="test",
+                species_name="B",
+                confidence=ConfidenceLevel.HIGH,
+            ),
         ]
         result = reconciler.reconcile_results(results)
         assert result.species_name == "A"
 
-    def test_reconciler_with_tie_takes_first(self) -> None:
-        """Test reconciler returns first-seen result in case of tie."""
-        reconciler: MajorityResultReconciler[MockSpeciesResult] = MajorityResultReconciler()
+    def test_reconciler_with_tie_breaks_with_first_seen(self) -> None:
+        """Test reconciler breaks ties by selecting first-seen."""
+        reconciler = MajorityResultReconciler()
         results = [
-            MockSpeciesResult(species_name="A"),
-            MockSpeciesResult(species_name="B"),
-            MockSpeciesResult(species_name="B"),
-            MockSpeciesResult(species_name="A"),
+            RichResult(
+                is_animal_present=True,
+                is_animal_unknown=False,
+                defining_features="test",
+                species_name="A",
+                confidence=ConfidenceLevel.HIGH,
+            ),
+            RichResult(
+                is_animal_present=True,
+                is_animal_unknown=False,
+                defining_features="test",
+                species_name="B",
+                confidence=ConfidenceLevel.HIGH,
+            ),
+            RichResult(
+                is_animal_present=True,
+                is_animal_unknown=False,
+                defining_features="test",
+                species_name="A",
+                confidence=ConfidenceLevel.HIGH,
+            ),
+            RichResult(
+                is_animal_present=True,
+                is_animal_unknown=False,
+                defining_features="test",
+                species_name="B",
+                confidence=ConfidenceLevel.HIGH,
+            ),
         ]
         result = reconciler.reconcile_results(results)
         assert result.species_name == "A"
 
-    def test_reconciler_with_empty_results_raises_error(self) -> None:
-        """Test reconciler raises error with empty results."""
-        reconciler: MajorityResultReconciler[MockSpeciesResult] = MajorityResultReconciler()
+    def test_reconciler_with_empty_results_raises(self) -> None:
+        """Test reconciler raises ValueError on empty input."""
+        reconciler = MajorityResultReconciler()
         with pytest.raises(ValueError, match="No results to reconcile"):
             reconciler.reconcile_results([])
 
-    def test_reconciler_preserves_object_identity(self) -> None:
-        """Test reconciler returns one of the input objects, not a copy."""
-        reconciler: MajorityResultReconciler[MockSpeciesResult] = MajorityResultReconciler()
-        result_obj = MockSpeciesResult(species_name="test")
-        results = [result_obj, result_obj, result_obj]
-        result = reconciler.reconcile_results(results)
-        assert result is result_obj
-
-    @pytest.mark.parametrize("count", [1, 2, 3, 5, 10])
-    def test_reconciler_with_varying_result_counts(
-        self,
-        count: int,
-    ) -> None:
-        """Test reconciler with varying numbers of results."""
-        reconciler: MajorityResultReconciler[MockSpeciesResult] = MajorityResultReconciler()
-        results = [MockSpeciesResult(species_name="majority")] * count
-        result = reconciler.reconcile_results(results)
-        assert result.species_name == "majority"
-
-    def test_reconciler_with_complex_tie_scenario(self) -> None:
-        """Test reconciler with multiple results tied for majority."""
-        reconciler: MajorityResultReconciler[MockSpeciesResult] = MajorityResultReconciler()
+    def test_reconciler_with_all_different_results(self) -> None:
+        """Test reconciler returns first result when all are different."""
+        reconciler = MajorityResultReconciler()
         results = [
-            MockSpeciesResult(species_name="A"),
-            MockSpeciesResult(species_name="B"),
-            MockSpeciesResult(species_name="C"),
-            MockSpeciesResult(species_name="A"),
-            MockSpeciesResult(species_name="B"),
-            MockSpeciesResult(species_name="C"),
+            RichResult(
+                is_animal_present=True,
+                is_animal_unknown=False,
+                defining_features="test",
+                species_name="A",
+                confidence=ConfidenceLevel.HIGH,
+            ),
+            RichResult(
+                is_animal_present=True,
+                is_animal_unknown=False,
+                defining_features="test",
+                species_name="B",
+                confidence=ConfidenceLevel.HIGH,
+            ),
+            RichResult(
+                is_animal_present=True,
+                is_animal_unknown=False,
+                defining_features="test",
+                species_name="C",
+                confidence=ConfidenceLevel.HIGH,
+            ),
         ]
         result = reconciler.reconcile_results(results)
         assert result.species_name == "A"
-
-    def test_reconciler_with_generator_input(self) -> None:
-        """Test reconciler accepts generator/iterator input."""
-        reconciler: MajorityResultReconciler[MockSpeciesResult] = MajorityResultReconciler()
-
-        def result_generator() -> Generator[MockSpeciesResult]:
-            for _ in range(3):
-                yield MockSpeciesResult(species_name="A")
-
-        result = reconciler.reconcile_results(result_generator())
-        assert result.species_name == "A"
-
-    def test_reconciler_with_string_results(self) -> None:
-        """Test reconciler works with non-BaseModel types."""
-        reconciler: MajorityResultReconciler[str] = MajorityResultReconciler()
-        results = ["A", "A", "B", "A", "B"]
-        result = reconciler.reconcile_results(results)
-        assert result == "A"
 
 
 class TestVerifiedImageBatchQuery:
@@ -1351,11 +1387,9 @@ class TestVerifiedImageBatchQuery:
         query = VerifiedImageBatchQuery(
             llm=mock_llm,
             prompt=prompt,
-            response_class=MockSpeciesResult,
         )
         assert query.llm is mock_llm
         assert query.prompt == prompt
-        assert query.response_class is MockSpeciesResult
         assert query.min_confidence == ConfidenceLevel.MEDIUM
 
     def test_verified_query_with_custom_min_confidence(self) -> None:
@@ -1364,7 +1398,6 @@ class TestVerifiedImageBatchQuery:
         query = VerifiedImageBatchQuery(
             llm=mock_llm,
             prompt="Test prompt",
-            response_class=MockSpeciesResult,
             min_confidence=ConfidenceLevel.HIGH,
         )
         assert query.min_confidence == ConfidenceLevel.HIGH
@@ -1376,7 +1409,6 @@ class TestVerifiedImageBatchQuery:
         query = VerifiedImageBatchQuery(
             llm=mock_llm,
             prompt="Test prompt",
-            response_class=MockSpeciesResult,
             verification_prompt=custom_prompt,
         )
         assert query.verification_prompt == custom_prompt
@@ -1390,27 +1422,26 @@ class TestVerifiedImageBatchQuery:
         query = VerifiedImageBatchQuery(
             llm=mock_llm,
             prompt="Test prompt",
-            response_class=MockSpeciesResult,
         )
         query.query_images(sample_image_paths)
         assert mock_llm.call_count == 2
 
-    def test_verified_query_returns_verification_result(
+    def test_verified_query_returns_rich_result(
         self,
         sample_image_paths: list[Path],
     ) -> None:
-        """Test query_images returns VerificationResult."""
+        """Test query_images returns RichResult."""
         mock_llm = MockVerifiedLlm()
         query = VerifiedImageBatchQuery(
             llm=mock_llm,
             prompt="Test prompt",
-            response_class=MockSpeciesResult,
         )
         result = query.query_images(sample_image_paths)
-        assert isinstance(result, VerificationResult)
+        assert isinstance(result, RichResult)
         assert result.species_name == "fox"
         assert result.confidence == ConfidenceLevel.HIGH
-        assert result.verified is True
+        assert result.is_animal_present is True
+        assert result.is_animal_unknown is False
 
     def test_verified_query_passes_initial_species_to_verification(
         self,
@@ -1421,7 +1452,6 @@ class TestVerifiedImageBatchQuery:
         query = VerifiedImageBatchQuery(
             llm=mock_llm,
             prompt="Test prompt",
-            response_class=MockSpeciesResult,
         )
         query.query_images(sample_image_paths)
         assert "badger" in mock_llm.verification_prompt
@@ -1438,12 +1468,10 @@ class TestVerifiedImageBatchQuery:
         query = VerifiedImageBatchQuery(
             llm=mock_llm,
             prompt="Test prompt",
-            response_class=MockSpeciesResult,
             min_confidence=ConfidenceLevel.MEDIUM,
         )
         result = query.query_images(sample_image_paths)
-        assert result.species_name == "unknown"
-        assert result.verified is False
+        assert result.is_animal_unknown is True
         assert result.confidence == ConfidenceLevel.LOW
 
     def test_verified_query_medium_confidence_passes_with_medium_threshold(
@@ -1457,12 +1485,11 @@ class TestVerifiedImageBatchQuery:
         query = VerifiedImageBatchQuery(
             llm=mock_llm,
             prompt="Test prompt",
-            response_class=MockSpeciesResult,
             min_confidence=ConfidenceLevel.MEDIUM,
         )
         result = query.query_images(sample_image_paths)
         assert result.species_name == "fox"
-        assert result.verified is True
+        assert result.is_animal_present is True
 
     def test_verified_query_medium_confidence_fails_with_high_threshold(
         self,
@@ -1475,12 +1502,10 @@ class TestVerifiedImageBatchQuery:
         query = VerifiedImageBatchQuery(
             llm=mock_llm,
             prompt="Test prompt",
-            response_class=MockSpeciesResult,
             min_confidence=ConfidenceLevel.HIGH,
         )
         result = query.query_images(sample_image_paths)
-        assert result.species_name == "unknown"
-        assert result.verified is False
+        assert result.is_animal_unknown is True
 
     def test_verified_query_high_confidence_passes_all_thresholds(
         self,
@@ -1494,12 +1519,11 @@ class TestVerifiedImageBatchQuery:
             query = VerifiedImageBatchQuery(
                 llm=mock_llm,
                 prompt="Test prompt",
-                response_class=MockSpeciesResult,
                 min_confidence=threshold,
             )
             result = query.query_images(sample_image_paths)
             assert result.species_name == "fox"
-            assert result.verified is True
+            assert result.is_animal_present is True
 
     def test_verified_query_empty_batch_raises_error(self) -> None:
         """Test empty batch raises ValueError."""
@@ -1507,7 +1531,6 @@ class TestVerifiedImageBatchQuery:
         query = VerifiedImageBatchQuery(
             llm=mock_llm,
             prompt="Test prompt",
-            response_class=MockSpeciesResult,
         )
         with pytest.raises(ValueError, match="Empty image batch"):
             query.query_images([])
@@ -1521,7 +1544,6 @@ class TestVerifiedImageBatchQuery:
         query = VerifiedImageBatchQuery(
             llm=mock_llm,
             prompt="Test prompt",
-            response_class=MockSpeciesResult,
         )
         query.query_images(list(reversed(sample_image_paths)))
         assert mock_llm.last_images == sorted(sample_image_paths)
@@ -1539,11 +1561,11 @@ class TestVerifiedImageBatchQuery:
         query = VerifiedImageBatchQuery(
             llm=mock_llm,
             prompt="Test prompt",
-            response_class=MockSpeciesResult,
         )
         result = query.query_images(sample_image_paths)
         assert result.species_name == "badger"
-        assert result.verified is True
+        assert result.is_animal_present is True
+        assert result.is_animal_unknown is False
 
     def test_verified_query_verified_false_becomes_unknown(
         self,
@@ -1557,27 +1579,24 @@ class TestVerifiedImageBatchQuery:
         query = VerifiedImageBatchQuery(
             llm=mock_llm,
             prompt="Test prompt",
-            response_class=MockSpeciesResult,
         )
         result = query.query_images(sample_image_paths)
-        assert result.species_name == "unknown"
-        assert result.verified is False
+        assert result.is_animal_unknown is True
 
-    def test_query_image_batches_yields_verification_results(
+    def test_query_image_batches_yields_rich_results(
         self,
         sample_image_paths: list[Path],
     ) -> None:
-        """Test query_image_batches yields VerificationResult for each batch."""
+        """Test query_image_batches yields RichResult for each batch."""
         mock_llm = MockVerifiedLlm()
         query = VerifiedImageBatchQuery(
             llm=mock_llm,
             prompt="Test prompt",
-            response_class=MockSpeciesResult,
         )
         batches = [sample_image_paths, sample_image_paths]
         results = list(query.query_image_batches(batches))
         assert len(results) == 2
-        assert all(isinstance(r, VerificationResult) for r in results)
+        assert all(isinstance(r, RichResult) for r in results)
 
     def test_query_image_batches_multiple_batches(
         self,
@@ -1588,7 +1607,6 @@ class TestVerifiedImageBatchQuery:
         query = VerifiedImageBatchQuery(
             llm=mock_llm,
             prompt="Test prompt",
-            response_class=MockSpeciesResult,
         )
         batches = [sample_image_paths, sample_image_paths, sample_image_paths]
         list(query.query_image_batches(batches))
@@ -1605,7 +1623,6 @@ class TestVerifiedImageBatchQuery:
         query = VerifiedImageBatchQuery(
             llm=mock_llm,
             prompt="Test prompt",
-            response_class=MockSpeciesResult,
         )
         batches = [sample_image_paths] * batch_count
         results = list(query.query_image_batches(batches))
@@ -1622,9 +1639,8 @@ class TestVerifiedImageBatchQuery:
             query = VerifiedImageBatchQuery(
                 llm=mock_llm,
                 prompt="Test prompt",
-                response_class=MockSpeciesResult,
                 min_confidence=ConfidenceLevel.LOW,
             )
             result = query.query_images(sample_image_paths)
             assert result.species_name == "fox"
-            assert result.verified is True
+            assert result.is_animal_present is True

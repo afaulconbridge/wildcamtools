@@ -2,32 +2,140 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from wildcamtools.lib.ai import BoolResponse
+from wildcamtools.lib.ai import BoolResponse, RichResult
 from wildcamtools.lib.ai.label_comparison import (
     ExactLabelComparator,
     LLMLabelComparator,
 )
-from wildcamtools.lib.ai.types import ResultClassification
+from wildcamtools.lib.ai.types import ConfidenceLevel, ResultClassification
 
 
 class TestExactLabelComparator:
     def test_exact_match_case_insensitive(self) -> None:
         comparator = ExactLabelComparator()
-        assert comparator.compare("cat", "cat") == (True, ResultClassification.CORRECT)
-        assert comparator.compare("CAT", "cat") == (True, ResultClassification.CORRECT)
-        assert comparator.compare("Cat", "CAT") == (True, ResultClassification.CORRECT)
+        assert (
+            comparator.compare(
+                RichResult(
+                    is_animal_present=True,
+                    is_animal_unknown=False,
+                    defining_features="unknown",
+                    species_name="cat",
+                    confidence=ConfidenceLevel.HIGH,
+                ),
+                "cat",
+            )
+            == ResultClassification.CORRECT
+        )
+        assert (
+            comparator.compare(
+                RichResult(
+                    is_animal_present=True,
+                    is_animal_unknown=False,
+                    defining_features="unknown",
+                    species_name="CAT",
+                    confidence=ConfidenceLevel.HIGH,
+                ),
+                "cat",
+            )
+            == ResultClassification.CORRECT
+        )
+        assert (
+            comparator.compare(
+                RichResult(
+                    is_animal_present=True,
+                    is_animal_unknown=False,
+                    defining_features="unknown",
+                    species_name="Cat",
+                    confidence=ConfidenceLevel.HIGH,
+                ),
+                "CAT",
+            )
+            == ResultClassification.CORRECT
+        )
 
     def test_exact_match_mismatch(self) -> None:
         comparator = ExactLabelComparator()
-        assert comparator.compare("cat", "dog") == (False, ResultClassification.INCORRECT)
-        assert comparator.compare("cat", "cats") == (False, ResultClassification.INCORRECT)
-        assert comparator.compare("domestic cat", "cat") == (False, ResultClassification.INCORRECT)
+        assert (
+            comparator.compare(
+                RichResult(
+                    is_animal_present=True,
+                    is_animal_unknown=False,
+                    defining_features="unknown",
+                    species_name="cat",
+                    confidence=ConfidenceLevel.HIGH,
+                ),
+                "dog",
+            )
+            == ResultClassification.INCORRECT
+        )
+        assert (
+            comparator.compare(
+                RichResult(
+                    is_animal_present=True,
+                    is_animal_unknown=False,
+                    defining_features="unknown",
+                    species_name="cat",
+                    confidence=ConfidenceLevel.HIGH,
+                ),
+                "cats",
+            )
+            == ResultClassification.INCORRECT
+        )
+        assert (
+            comparator.compare(
+                RichResult(
+                    is_animal_present=True,
+                    is_animal_unknown=False,
+                    defining_features="unknown",
+                    species_name="domestic cat",
+                    confidence=ConfidenceLevel.HIGH,
+                ),
+                "cat",
+            )
+            == ResultClassification.INCORRECT
+        )
 
     def test_unknown_result(self) -> None:
         comparator = ExactLabelComparator()
-        assert comparator.compare("unknown", "cat") == (False, ResultClassification.UNKNOWN)
-        assert comparator.compare("Uncertain", "dog") == (False, ResultClassification.UNKNOWN)
-        assert comparator.compare("unsure", "bird") == (False, ResultClassification.UNKNOWN)
+        assert (
+            comparator.compare(
+                RichResult(
+                    is_animal_present=False,
+                    is_animal_unknown=True,
+                    defining_features="unknown",
+                    species_name="unknown",
+                    confidence=ConfidenceLevel.HIGH,
+                ),
+                "cat",
+            )
+            == ResultClassification.UNKNOWN
+        )
+        assert (
+            comparator.compare(
+                RichResult(
+                    is_animal_present=False,
+                    is_animal_unknown=True,
+                    defining_features="unknown",
+                    species_name="Uncertain",
+                    confidence=ConfidenceLevel.HIGH,
+                ),
+                "dog",
+            )
+            == ResultClassification.UNKNOWN
+        )
+        assert (
+            comparator.compare(
+                RichResult(
+                    is_animal_present=False,
+                    is_animal_unknown=True,
+                    defining_features="unknown",
+                    species_name="unsure",
+                    confidence=ConfidenceLevel.HIGH,
+                ),
+                "bird",
+            )
+            == ResultClassification.UNKNOWN
+        )
 
     def test_method_name(self) -> None:
         comparator = ExactLabelComparator()
@@ -49,9 +157,45 @@ class TestLLMLabelComparator:
         mock_response = BoolResponse(answer=True)
         mock_llm.message_with_schema.return_value = mock_response
 
-        assert comparator.compare("domestic cat", "cat") == (True, ResultClassification.CORRECT)
-        assert comparator.compare("Moorhen", "bird") == (True, ResultClassification.CORRECT)
-        assert comparator.compare("Roe deer", "deer") == (True, ResultClassification.CORRECT)
+        assert (
+            comparator.compare(
+                RichResult(
+                    is_animal_present=True,
+                    is_animal_unknown=False,
+                    defining_features="unknown",
+                    species_name="domestic cat",
+                    confidence=ConfidenceLevel.HIGH,
+                ),
+                "cat",
+            )
+            == ResultClassification.CORRECT
+        )
+        assert (
+            comparator.compare(
+                RichResult(
+                    is_animal_present=True,
+                    is_animal_unknown=False,
+                    defining_features="unknown",
+                    species_name="Moorhen",
+                    confidence=ConfidenceLevel.HIGH,
+                ),
+                "bird",
+            )
+            == ResultClassification.CORRECT
+        )
+        assert (
+            comparator.compare(
+                RichResult(
+                    is_animal_present=True,
+                    is_animal_unknown=False,
+                    defining_features="unknown",
+                    species_name="Roe deer",
+                    confidence=ConfidenceLevel.HIGH,
+                ),
+                "deer",
+            )
+            == ResultClassification.CORRECT
+        )
 
     def test_semantic_match_general_to_specific(self, mock_llm: MagicMock) -> None:
         comparator = LLMLabelComparator(llm=mock_llm)
@@ -59,14 +203,74 @@ class TestLLMLabelComparator:
         mock_response = BoolResponse(answer=False)
         mock_llm.message_with_schema.return_value = mock_response
 
-        assert comparator.compare("cat", "domestic cat") == (False, ResultClassification.INCORRECT)
-        assert comparator.compare("bird", "Moorhen") == (False, ResultClassification.INCORRECT)
-        assert comparator.compare("deer", "Roe deer") == (False, ResultClassification.INCORRECT)
+        assert (
+            comparator.compare(
+                RichResult(
+                    is_animal_present=True,
+                    is_animal_unknown=False,
+                    defining_features="unknown",
+                    species_name="cat",
+                    confidence=ConfidenceLevel.HIGH,
+                ),
+                "domestic cat",
+            )
+            == ResultClassification.INCORRECT
+        )
+        assert (
+            comparator.compare(
+                RichResult(
+                    is_animal_present=True,
+                    is_animal_unknown=False,
+                    defining_features="unknown",
+                    species_name="bird",
+                    confidence=ConfidenceLevel.HIGH,
+                ),
+                "Moorhen",
+            )
+            == ResultClassification.INCORRECT
+        )
+        assert (
+            comparator.compare(
+                RichResult(
+                    is_animal_present=True,
+                    is_animal_unknown=False,
+                    defining_features="unknown",
+                    species_name="deer",
+                    confidence=ConfidenceLevel.HIGH,
+                ),
+                "Roe deer",
+            )
+            == ResultClassification.INCORRECT
+        )
 
     def test_unknown_result(self, mock_llm: MagicMock) -> None:
         comparator = LLMLabelComparator(llm=mock_llm)
-        assert comparator.compare("unknown", "cat") == (False, ResultClassification.UNKNOWN)
-        assert comparator.compare("uncertain", "dog") == (False, ResultClassification.UNKNOWN)
+        assert (
+            comparator.compare(
+                RichResult(
+                    is_animal_present=False,
+                    is_animal_unknown=True,
+                    defining_features="unknown",
+                    species_name="unknown",
+                    confidence=ConfidenceLevel.HIGH,
+                ),
+                "cat",
+            )
+            == ResultClassification.UNKNOWN
+        )
+        assert (
+            comparator.compare(
+                RichResult(
+                    is_animal_present=False,
+                    is_animal_unknown=True,
+                    defining_features="unknown",
+                    species_name="uncertain",
+                    confidence=ConfidenceLevel.HIGH,
+                ),
+                "dog",
+            )
+            == ResultClassification.UNKNOWN
+        )
 
     def test_caching(self, mock_llm: MagicMock) -> None:
         comparator = LLMLabelComparator(llm=mock_llm)
@@ -74,8 +278,26 @@ class TestLLMLabelComparator:
         mock_response = BoolResponse(answer=True)
         mock_llm.message_with_schema.return_value = mock_response
 
-        comparator.compare("domestic cat", "cat")
-        comparator.compare("domestic cat", "cat")
+        comparator.compare(
+            RichResult(
+                is_animal_present=True,
+                is_animal_unknown=False,
+                defining_features="unknown",
+                species_name="domestic cat",
+                confidence=ConfidenceLevel.HIGH,
+            ),
+            "cat",
+        )
+        comparator.compare(
+            RichResult(
+                is_animal_present=True,
+                is_animal_unknown=False,
+                defining_features="unknown",
+                species_name="domestic cat",
+                confidence=ConfidenceLevel.HIGH,
+            ),
+            "cat",
+        )
 
         assert mock_llm.message_with_schema.call_count == 1
 
@@ -85,9 +307,27 @@ class TestLLMLabelComparator:
         mock_response = BoolResponse(answer=True)
         mock_llm.message_with_schema.return_value = mock_response
 
-        comparator.compare("domestic cat", "cat")
+        comparator.compare(
+            RichResult(
+                is_animal_present=True,
+                is_animal_unknown=False,
+                defining_features="unknown",
+                species_name="domestic cat",
+                confidence=ConfidenceLevel.HIGH,
+            ),
+            "cat",
+        )
         comparator.clear_cache()
-        comparator.compare("domestic cat", "cat")
+        comparator.compare(
+            RichResult(
+                is_animal_present=True,
+                is_animal_unknown=False,
+                defining_features="unknown",
+                species_name="domestic cat",
+                confidence=ConfidenceLevel.HIGH,
+            ),
+            "cat",
+        )
 
         assert mock_llm.message_with_schema.call_count == 2
 
@@ -97,8 +337,26 @@ class TestLLMLabelComparator:
         mock_response = BoolResponse(answer=True)
         mock_llm.message_with_schema.return_value = mock_response
 
-        comparator.compare("domestic cat", "cat")
-        comparator.compare("domestic cat", "cat")
+        comparator.compare(
+            RichResult(
+                is_animal_present=True,
+                is_animal_unknown=False,
+                defining_features="unknown",
+                species_name="domestic cat",
+                confidence=ConfidenceLevel.HIGH,
+            ),
+            "cat",
+        )
+        comparator.compare(
+            RichResult(
+                is_animal_present=True,
+                is_animal_unknown=False,
+                defining_features="unknown",
+                species_name="domestic cat",
+                confidence=ConfidenceLevel.HIGH,
+            ),
+            "cat",
+        )
 
         assert mock_llm.message_with_schema.call_count == 2
         assert comparator._cache is None
@@ -109,7 +367,16 @@ class TestLLMLabelComparator:
         mock_response = BoolResponse(answer=True)
         mock_llm.message_with_schema.return_value = mock_response
 
-        comparator.compare("domestic cat", "cat")
+        comparator.compare(
+            RichResult(
+                is_animal_present=True,
+                is_animal_unknown=False,
+                defining_features="unknown",
+                species_name="domestic cat",
+                confidence=ConfidenceLevel.HIGH,
+            ),
+            "cat",
+        )
 
         assert mock_llm.message_with_schema.call_count == 1
 
@@ -119,7 +386,16 @@ class TestLLMLabelComparator:
         mock_response = BoolResponse(answer=False)
         mock_llm.message_with_schema.return_value = mock_response
 
-        comparator.compare("domestic cat", "cat")
+        comparator.compare(
+            RichResult(
+                is_animal_present=True,
+                is_animal_unknown=False,
+                defining_features="unknown",
+                species_name="domestic cat",
+                confidence=ConfidenceLevel.HIGH,
+            ),
+            "cat",
+        )
 
         assert mock_llm.message_with_schema.call_count == 1
 
@@ -130,7 +406,16 @@ class TestLLMLabelComparator:
         mock_response = BoolResponse(answer=True)
         mock_llm.message_with_schema.return_value = mock_response
 
-        comparator.compare("domestic cat", "cat")
+        comparator.compare(
+            RichResult(
+                is_animal_present=True,
+                is_animal_unknown=False,
+                defining_features="unknown",
+                species_name="domestic cat",
+                confidence=ConfidenceLevel.HIGH,
+            ),
+            "cat",
+        )
 
         mock_llm.message_with_schema.assert_called_once()
         call_args = mock_llm.message_with_schema.call_args
@@ -142,9 +427,19 @@ class TestLLMLabelComparator:
         mock_response = BoolResponse(answer=True)
         mock_llm.message_with_schema.return_value = mock_response
 
-        comparator.compare("domestic cat", "cat")
+        comparator.compare(
+            RichResult(
+                is_animal_present=True,
+                is_animal_unknown=False,
+                defining_features="unknown",
+                species_name="domestic cat",
+                confidence=ConfidenceLevel.HIGH,
+            ),
+            "cat",
+        )
 
         call_args = mock_llm.message_with_schema.call_args
+        assert call_args is not None
         assert "You are comparing an AI classification result" in call_args.kwargs["message"]
 
     def test_method_name(self, mock_llm: MagicMock) -> None:
@@ -157,7 +452,25 @@ class TestLLMLabelComparator:
         mock_response = BoolResponse(answer=True)
         mock_llm.message_with_schema.return_value = mock_response
 
-        comparator.compare("Domestic Cat", "CAT")
-        comparator.compare("domestic cat", "cat")
+        comparator.compare(
+            RichResult(
+                is_animal_present=True,
+                is_animal_unknown=False,
+                defining_features="unknown",
+                species_name="Domestic Cat",
+                confidence=ConfidenceLevel.HIGH,
+            ),
+            "CAT",
+        )
+        comparator.compare(
+            RichResult(
+                is_animal_present=True,
+                is_animal_unknown=False,
+                defining_features="unknown",
+                species_name="domestic cat",
+                confidence=ConfidenceLevel.HIGH,
+            ),
+            "cat",
+        )
 
         assert mock_llm.message_with_schema.call_count == 1

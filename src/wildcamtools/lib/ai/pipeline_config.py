@@ -23,7 +23,7 @@ from wildcamtools.lib.ai.pipeline import (
     SSIMFrameSelector,
     VerifiedImageBatchQuery,
 )
-from wildcamtools.lib.ai.types import Backend, ConfidenceLevel, Result, SpeciesResult, StringResponse
+from wildcamtools.lib.ai.types import Backend, ConfidenceLevel
 
 
 class FrameSelectorType(StrEnum):
@@ -41,22 +41,9 @@ class ReconcilerType(StrEnum):
     MAJORITY = "majority"
 
 
-class ResponseSchemaType(StrEnum):
-    SPECIES_RESULT = "SpeciesResult"
-    RESULT = "Result"
-    STRING_RESPONSE = "StringResponse"
-
-
 class ImageBatchQueryType(StrEnum):
     LLM = "llm"
     VERIFIED = "verified"
-
-
-RESPONSE_SCHEMA_MAP: dict[ResponseSchemaType, type[BaseModel]] = {
-    ResponseSchemaType.SPECIES_RESULT: SpeciesResult,
-    ResponseSchemaType.RESULT: Result,
-    ResponseSchemaType.STRING_RESPONSE: StringResponse,
-}
 
 
 class FrameSelectorConfig(BaseModel):
@@ -199,7 +186,6 @@ class LlmConfig(BaseModel):
 class ImageBatchQueryConfig(BaseModel):
     query_type: ImageBatchQueryType = ImageBatchQueryType.LLM
     prompt: Annotated[str, Field(strict=True, min_length=1, description="Prompt sent to LLM")]
-    response_schema: ResponseSchemaType = ResponseSchemaType.SPECIES_RESULT
     verification_prompt: Annotated[
         str | None,
         Field(
@@ -209,14 +195,6 @@ class ImageBatchQueryConfig(BaseModel):
     ] = None
     min_confidence: ConfidenceLevel = ConfidenceLevel.MEDIUM
 
-    def get_response_class(self) -> type[BaseModel]:
-        """Get the Pydantic model class for the response schema.
-
-        Returns:
-            type[BaseModel]: The Pydantic model class corresponding to response_schema.
-        """
-        return RESPONSE_SCHEMA_MAP[self.response_schema]
-
     def create_image_batch_query(self, llm: AbstractLlm) -> ImageBatchQuery:
         """Create an ImageBatchQuery instance based on the configuration.
 
@@ -225,20 +203,15 @@ class ImageBatchQueryConfig(BaseModel):
 
         Returns:
             ImageBatchQuery: The configured image batch query instance (LlmImageBatchQuery or VerifiedImageBatchQuery).
+            Both return RichResult.
         """
-        response_class = self.get_response_class()
         match self.query_type:
             case ImageBatchQueryType.LLM:
-                return LlmImageBatchQuery(
-                    llm=llm,
-                    prompt=self.prompt,
-                    response_class=response_class,
-                )
+                return LlmImageBatchQuery(llm=llm, prompt=self.prompt)
             case ImageBatchQueryType.VERIFIED:
                 return VerifiedImageBatchQuery(
                     llm=llm,
                     prompt=self.prompt,
-                    response_class=response_class,
                     verification_prompt=self.verification_prompt,
                     min_confidence=self.min_confidence,
                 )
@@ -253,7 +226,7 @@ class ReconcilerConfig(BaseModel):
         """Create a ResultReconciler instance based on the configuration.
 
         Returns:
-            ResultReconciler: The configured reconciler instance.
+            ResultReconciler: The configured reconciler instance (returns RichResult).
 
         Raises:
             NotImplementedError: If the reconciler_type is not supported.

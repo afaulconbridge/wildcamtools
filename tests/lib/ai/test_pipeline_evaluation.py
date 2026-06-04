@@ -8,8 +8,7 @@ from wildcamtools.lib import Frame
 from wildcamtools.lib.ai import (
     PipelineEvaluationResult,
     PipelineEvaluationSummary,
-    SpeciesResult,
-    StringResponse,
+    RichResult,
 )
 from wildcamtools.lib.ai.label_comparison_config import LabelComparisonConfig
 from wildcamtools.lib.ai.pipeline import FrameSelector
@@ -20,17 +19,23 @@ from wildcamtools.lib.ai.pipeline_evaluation import (
     _WorkerResult,
     evaluate_ai_pipeline,
 )
-from wildcamtools.lib.ai.types import ResultClassification
+from wildcamtools.lib.ai.types import ConfidenceLevel, ResultClassification
 
 
 class TestWorkerResult:
     def test_worker_result_creation(self) -> None:
         result = _WorkerResult(
             filename="test.mp4",
-            raw_result="otter",
+            result=RichResult(
+                is_animal_present=True,
+                is_animal_unknown=False,
+                defining_features="",
+                species_name="otter",
+                confidence=ConfidenceLevel.HIGH,
+            ),
         )
         assert result.filename == "test.mp4"
-        assert result.raw_result == "otter"
+        assert result.result.species_name == "otter"
         assert result.error is None
         assert result.processing_time_seconds == 0.0
         assert result.frame_ids == []
@@ -38,7 +43,13 @@ class TestWorkerResult:
     def test_worker_result_with_error(self) -> None:
         result = _WorkerResult(
             filename="test.mp4",
-            raw_result="",
+            result=RichResult(
+                is_animal_present=True,
+                is_animal_unknown=False,
+                defining_features="",
+                species_name="otter",
+                confidence=ConfidenceLevel.HIGH,
+            ),
             error="Connection timeout",
         )
         assert result.error == "Connection timeout"
@@ -48,7 +59,13 @@ class TestWorkerResult:
     def test_worker_result_with_processing_time(self) -> None:
         result = _WorkerResult(
             filename="test.mp4",
-            raw_result="otter",
+            result=RichResult(
+                is_animal_present=True,
+                is_animal_unknown=False,
+                defining_features="",
+                species_name="otter",
+                confidence=ConfidenceLevel.HIGH,
+            ),
             processing_time_seconds=1.5,
         )
         assert result.processing_time_seconds == 1.5
@@ -56,7 +73,13 @@ class TestWorkerResult:
     def test_worker_result_with_frame_ids(self) -> None:
         result = _WorkerResult(
             filename="test.mp4",
-            raw_result="otter",
+            result=RichResult(
+                is_animal_present=True,
+                is_animal_unknown=False,
+                defining_features="",
+                species_name="otter",
+                confidence=ConfidenceLevel.HIGH,
+            ),
             frame_ids=[1, 5, 10, 15],
         )
         assert result.frame_ids == [1, 5, 10, 15]
@@ -67,14 +90,18 @@ class TestPipelineEvaluationResult:
         result = PipelineEvaluationResult(
             filename="test.mp4",
             classification=ResultClassification.CORRECT,
-            raw_result="otter",
+            result=RichResult(
+                is_animal_present=True,
+                is_animal_unknown=False,
+                defining_features="test",
+                species_name="otter",
+                confidence=ConfidenceLevel.HIGH,
+            ),
             label="otter",
-            is_correct=True,
         )
         assert result.filename == "test.mp4"
         assert result.classification == ResultClassification.CORRECT
-        assert result.correct is True
-        assert result.raw_result == "otter"
+        assert result.result.species_name == "otter"
         assert result.label == "otter"
         assert result.error is None
         assert result.comparison_method == "exact"
@@ -85,14 +112,18 @@ class TestPipelineEvaluationResult:
         result = PipelineEvaluationResult(
             filename="test.mp4",
             classification=ResultClassification.INCORRECT,
-            raw_result="",
+            result=RichResult(
+                is_animal_present=False,
+                is_animal_unknown=False,
+                defining_features="",
+                species_name="",
+                confidence=ConfidenceLevel.LOW,
+            ),
             label="otter",
             error="Connection timeout",
-            is_correct=False,
         )
         assert result.error == "Connection timeout"
         assert result.classification == ResultClassification.INCORRECT
-        assert result.correct is False
         assert result.processing_time_seconds == 0.0
         assert result.frame_ids == []
 
@@ -100,20 +131,31 @@ class TestPipelineEvaluationResult:
         result = PipelineEvaluationResult(
             filename="test.mp4",
             classification=ResultClassification.UNKNOWN,
-            raw_result="unknown",
+            result=RichResult(
+                is_animal_present=False,
+                is_animal_unknown=True,
+                defining_features="unknown",
+                species_name="unknown",
+                confidence=ConfidenceLevel.LOW,
+            ),
             label="otter",
         )
         assert result.classification == ResultClassification.UNKNOWN
-        assert result.correct is False
+        # result.correct field removed - classification UNKNOWN implies not correct
 
     def test_result_with_comparison_method(self) -> None:
         result = PipelineEvaluationResult(
             filename="test.mp4",
             classification=ResultClassification.CORRECT,
-            raw_result="domestic cat",
+            result=RichResult(
+                is_animal_present=True,
+                is_animal_unknown=False,
+                defining_features="test",
+                species_name="domestic cat",
+                confidence=ConfidenceLevel.HIGH,
+            ),
             label="cat",
             comparison_method="llm",
-            is_correct=True,
         )
         assert result.comparison_method == "llm"
         assert result.frame_ids == []
@@ -122,10 +164,15 @@ class TestPipelineEvaluationResult:
         result = PipelineEvaluationResult(
             filename="test.mp4",
             classification=ResultClassification.CORRECT,
-            raw_result="otter",
+            result=RichResult(
+                is_animal_present=True,
+                is_animal_unknown=False,
+                defining_features="test",
+                species_name="otter",
+                confidence=ConfidenceLevel.HIGH,
+            ),
             label="otter",
             processing_time_seconds=1.5,
-            is_correct=True,
         )
         assert result.processing_time_seconds == 1.5
         assert result.frame_ids == []
@@ -134,10 +181,15 @@ class TestPipelineEvaluationResult:
         result = PipelineEvaluationResult(
             filename="test.mp4",
             classification=ResultClassification.CORRECT,
-            raw_result="otter",
+            result=RichResult(
+                is_animal_present=True,
+                is_animal_unknown=False,
+                defining_features="test",
+                species_name="otter",
+                confidence=ConfidenceLevel.HIGH,
+            ),
             label="otter",
             frame_ids=[1, 5, 10, 15],
-            is_correct=True,
         )
         assert result.frame_ids == [1, 5, 10, 15]
 
@@ -198,16 +250,26 @@ class TestPipelineEvaluationSummary:
             PipelineEvaluationResult(
                 filename="test1.mp4",
                 classification=ResultClassification.CORRECT,
-                raw_result="otter",
+                result=RichResult(
+                    is_animal_present=True,
+                    is_animal_unknown=False,
+                    defining_features="test",
+                    species_name="otter",
+                    confidence=ConfidenceLevel.HIGH,
+                ),
                 label="otter",
-                is_correct=True,
             ),
             PipelineEvaluationResult(
                 filename="test2.mp4",
                 classification=ResultClassification.INCORRECT,
-                raw_result="cat",
+                result=RichResult(
+                    is_animal_present=True,
+                    is_animal_unknown=False,
+                    defining_features="test",
+                    species_name="cat",
+                    confidence=ConfidenceLevel.HIGH,
+                ),
                 label="otter",
-                is_correct=False,
             ),
         ]
         summary = PipelineEvaluationSummary(
@@ -229,23 +291,38 @@ class TestPipelineEvaluationSummary:
             PipelineEvaluationResult(
                 filename="test1.mp4",
                 classification=ResultClassification.CORRECT,
-                raw_result="otter",
+                result=RichResult(
+                    is_animal_present=True,
+                    is_animal_unknown=False,
+                    defining_features="test",
+                    species_name="otter",
+                    confidence=ConfidenceLevel.HIGH,
+                ),
                 label="otter",
-                is_correct=True,
             ),
             PipelineEvaluationResult(
                 filename="test2.mp4",
                 classification=ResultClassification.CORRECT,
-                raw_result="cat",
+                result=RichResult(
+                    is_animal_present=True,
+                    is_animal_unknown=False,
+                    defining_features="test",
+                    species_name="cat",
+                    confidence=ConfidenceLevel.HIGH,
+                ),
                 label="cat",
-                is_correct=True,
             ),
             PipelineEvaluationResult(
                 filename="test3.mp4",
                 classification=ResultClassification.INCORRECT,
-                raw_result="dog",
+                result=RichResult(
+                    is_animal_present=True,
+                    is_animal_unknown=False,
+                    defining_features="test",
+                    species_name="dog",
+                    confidence=ConfidenceLevel.HIGH,
+                ),
                 label="cat",
-                is_correct=False,
             ),
         ]
         summary = PipelineEvaluationSummary(
@@ -263,23 +340,38 @@ class TestPipelineEvaluationSummary:
             PipelineEvaluationResult(
                 filename="test1.mp4",
                 classification=ResultClassification.CORRECT,
-                raw_result="otter",
+                result=RichResult(
+                    is_animal_present=True,
+                    is_animal_unknown=False,
+                    defining_features="test",
+                    species_name="otter",
+                    confidence=ConfidenceLevel.HIGH,
+                ),
                 label="otter",
-                is_correct=True,
             ),
             PipelineEvaluationResult(
                 filename="test2.mp4",
                 classification=ResultClassification.UNKNOWN,
-                raw_result="unknown",
+                result=RichResult(
+                    is_animal_present=False,
+                    is_animal_unknown=True,
+                    defining_features="unknown",
+                    species_name="unknown",
+                    confidence=ConfidenceLevel.LOW,
+                ),
                 label="otter",
-                is_correct=False,
             ),
             PipelineEvaluationResult(
                 filename="test3.mp4",
                 classification=ResultClassification.INCORRECT,
-                raw_result="dog",
+                result=RichResult(
+                    is_animal_present=True,
+                    is_animal_unknown=False,
+                    defining_features="test",
+                    species_name="dog",
+                    confidence=ConfidenceLevel.HIGH,
+                ),
                 label="otter",
-                is_correct=False,
             ),
         ]
         summary = PipelineEvaluationSummary(
@@ -297,17 +389,27 @@ class TestPipelineEvaluationSummary:
             PipelineEvaluationResult(
                 filename="test1.mp4",
                 classification=ResultClassification.CORRECT,
-                raw_result="otter",
+                result=RichResult(
+                    is_animal_present=True,
+                    is_animal_unknown=False,
+                    defining_features="test",
+                    species_name="otter",
+                    confidence=ConfidenceLevel.HIGH,
+                ),
                 label="otter",
-                is_correct=True,
             ),
             PipelineEvaluationResult(
                 filename="test2.mp4",
                 classification=ResultClassification.INCORRECT,
-                raw_result="",
+                result=RichResult(
+                    is_animal_present=False,
+                    is_animal_unknown=False,
+                    defining_features="",
+                    species_name="",
+                    confidence=ConfidenceLevel.LOW,
+                ),
                 label="cat",
                 error="LLM error",
-                is_correct=False,
             ),
         ]
         summary = PipelineEvaluationSummary(
@@ -336,9 +438,14 @@ class TestPipelineEvaluationSummary:
                 PipelineEvaluationResult(
                     filename=f"test_correct_{i}.mp4",
                     classification=ResultClassification.CORRECT,
-                    raw_result="otter",
+                    result=RichResult(
+                        is_animal_present=True,
+                        is_animal_unknown=False,
+                        defining_features="test",
+                        species_name="otter",
+                        confidence=ConfidenceLevel.HIGH,
+                    ),
                     label="otter",
-                    is_correct=True,
                 )
             )
         for i in range(incorrect):
@@ -346,9 +453,14 @@ class TestPipelineEvaluationSummary:
                 PipelineEvaluationResult(
                     filename=f"test_incorrect_{i}.mp4",
                     classification=ResultClassification.INCORRECT,
-                    raw_result="cat",
+                    result=RichResult(
+                        is_animal_present=True,
+                        is_animal_unknown=False,
+                        defining_features="test",
+                        species_name="cat",
+                        confidence=ConfidenceLevel.HIGH,
+                    ),
                     label="otter",
-                    is_correct=False,
                 )
             )
         summary = PipelineEvaluationSummary(
@@ -366,16 +478,26 @@ class TestPipelineEvaluationSummary:
             PipelineEvaluationResult(
                 filename="test1.mp4",
                 classification=ResultClassification.CORRECT,
-                raw_result="otter",
+                result=RichResult(
+                    is_animal_present=True,
+                    is_animal_unknown=False,
+                    defining_features="test",
+                    species_name="otter",
+                    confidence=ConfidenceLevel.HIGH,
+                ),
                 label="otter",
-                is_correct=True,
             ),
             PipelineEvaluationResult(
                 filename="test2.mp4",
                 classification=ResultClassification.CORRECT,
-                raw_result="cat",
+                result=RichResult(
+                    is_animal_present=True,
+                    is_animal_unknown=False,
+                    defining_features="test",
+                    species_name="cat",
+                    confidence=ConfidenceLevel.HIGH,
+                ),
                 label="cat",
-                is_correct=True,
             ),
         ]
         summary = PipelineEvaluationSummary(
@@ -393,16 +515,26 @@ class TestPipelineEvaluationSummary:
             PipelineEvaluationResult(
                 filename="test1.mp4",
                 classification=ResultClassification.CORRECT,
-                raw_result="otter",
+                result=RichResult(
+                    is_animal_present=True,
+                    is_animal_unknown=False,
+                    defining_features="test",
+                    species_name="otter",
+                    confidence=ConfidenceLevel.HIGH,
+                ),
                 label="otter",
-                is_correct=True,
             ),
             PipelineEvaluationResult(
                 filename="test2.mp4",
                 classification=ResultClassification.INCORRECT,
-                raw_result="cat",
+                result=RichResult(
+                    is_animal_present=True,
+                    is_animal_unknown=False,
+                    defining_features="test",
+                    species_name="cat",
+                    confidence=ConfidenceLevel.HIGH,
+                ),
                 label="cat",
-                is_correct=False,
             ),
         ]
         summary = PipelineEvaluationSummary(
@@ -420,23 +552,38 @@ class TestPipelineEvaluationSummary:
             PipelineEvaluationResult(
                 filename="test1.mp4",
                 classification=ResultClassification.CORRECT,
-                raw_result="otter",
+                result=RichResult(
+                    is_animal_present=True,
+                    is_animal_unknown=False,
+                    defining_features="test",
+                    species_name="otter",
+                    confidence=ConfidenceLevel.HIGH,
+                ),
                 label="otter",
-                is_correct=True,
             ),
             PipelineEvaluationResult(
                 filename="test2.mp4",
                 classification=ResultClassification.UNKNOWN,
-                raw_result="unknown",
+                result=RichResult(
+                    is_animal_present=False,
+                    is_animal_unknown=True,
+                    defining_features="unknown",
+                    species_name="unknown",
+                    confidence=ConfidenceLevel.LOW,
+                ),
                 label="cat",
-                is_correct=False,
             ),
             PipelineEvaluationResult(
                 filename="test3.mp4",
                 classification=ResultClassification.INCORRECT,
-                raw_result="dog",
+                result=RichResult(
+                    is_animal_present=True,
+                    is_animal_unknown=False,
+                    defining_features="test",
+                    species_name="dog",
+                    confidence=ConfidenceLevel.HIGH,
+                ),
                 label="dog",
-                is_correct=False,
             ),
         ]
         summary = PipelineEvaluationSummary(
@@ -454,16 +601,26 @@ class TestPipelineEvaluationSummary:
             PipelineEvaluationResult(
                 filename="test1.mp4",
                 classification=ResultClassification.CORRECT,
-                raw_result="otter",
+                result=RichResult(
+                    is_animal_present=True,
+                    is_animal_unknown=False,
+                    defining_features="test",
+                    species_name="otter",
+                    confidence=ConfidenceLevel.HIGH,
+                ),
                 label="otter",
-                is_correct=True,
             ),
             PipelineEvaluationResult(
                 filename="test2.mp4",
                 classification=ResultClassification.INCORRECT,
-                raw_result="cat",
+                result=RichResult(
+                    is_animal_present=True,
+                    is_animal_unknown=False,
+                    defining_features="test",
+                    species_name="cat",
+                    confidence=ConfidenceLevel.HIGH,
+                ),
                 label="cat",
-                is_correct=False,
             ),
         ]
         summary = PipelineEvaluationSummary(
@@ -481,26 +638,41 @@ class TestPipelineEvaluationSummary:
             PipelineEvaluationResult(
                 filename="test1.mp4",
                 classification=ResultClassification.CORRECT,
-                raw_result="otter",
+                result=RichResult(
+                    is_animal_present=True,
+                    is_animal_unknown=False,
+                    defining_features="test",
+                    species_name="otter",
+                    confidence=ConfidenceLevel.HIGH,
+                ),
                 label="otter",
                 processing_time_seconds=1.0,
-                is_correct=True,
             ),
             PipelineEvaluationResult(
                 filename="test2.mp4",
                 classification=ResultClassification.CORRECT,
-                raw_result="cat",
+                result=RichResult(
+                    is_animal_present=True,
+                    is_animal_unknown=False,
+                    defining_features="test",
+                    species_name="cat",
+                    confidence=ConfidenceLevel.HIGH,
+                ),
                 label="cat",
                 processing_time_seconds=2.0,
-                is_correct=True,
             ),
             PipelineEvaluationResult(
                 filename="test3.mp4",
                 classification=ResultClassification.CORRECT,
-                raw_result="dog",
+                result=RichResult(
+                    is_animal_present=True,
+                    is_animal_unknown=False,
+                    defining_features="test",
+                    species_name="dog",
+                    confidence=ConfidenceLevel.HIGH,
+                ),
                 label="dog",
                 processing_time_seconds=3.0,
-                is_correct=True,
             ),
         ]
         summary = PipelineEvaluationSummary(
@@ -519,10 +691,15 @@ class TestPipelineEvaluationSummary:
             PipelineEvaluationResult(
                 filename="test1.mp4",
                 classification=ResultClassification.CORRECT,
-                raw_result="otter",
+                result=RichResult(
+                    is_animal_present=True,
+                    is_animal_unknown=False,
+                    defining_features="test",
+                    species_name="otter",
+                    confidence=ConfidenceLevel.HIGH,
+                ),
                 label="otter",
                 processing_time_seconds=1.5,
-                is_correct=True,
             ),
         ]
         summary = PipelineEvaluationSummary(
@@ -546,7 +723,13 @@ class TestEvaluateVideoWorker:
         self,
         data_directory: Path,
     ) -> None:
-        mock_result = SpeciesResult(species_name="otter")
+        mock_result = RichResult(
+            is_animal_present=True,
+            is_animal_unknown=False,
+            defining_features="test",
+            species_name="otter",
+            confidence="high",
+        )
         mock_config = MagicMock()
         mock_pipeline = MagicMock()
         mock_pipeline.run.return_value = mock_result
@@ -556,7 +739,7 @@ class TestEvaluateVideoWorker:
         result = _evaluate_video_worker(str(video_path), mock_config)
 
         assert result.filename == "test.mp4"
-        assert result.raw_result == "otter"
+        assert result.result.species_name == "otter"
         assert result.error is None
         assert result.processing_time_seconds > 0.0
 
@@ -564,7 +747,13 @@ class TestEvaluateVideoWorker:
         self,
         data_directory: Path,
     ) -> None:
-        mock_result = SpeciesResult(species_name="cat")
+        mock_result = RichResult(
+            is_animal_present=True,
+            is_animal_unknown=False,
+            defining_features="test",
+            species_name="cat",
+            confidence="high",
+        )
         mock_config = MagicMock()
         mock_pipeline = MagicMock()
         mock_pipeline.run.return_value = mock_result
@@ -573,13 +762,19 @@ class TestEvaluateVideoWorker:
         video_path = data_directory / "test.mp4"
         result = _evaluate_video_worker(str(video_path), mock_config)
 
-        assert result.raw_result == "cat"
+        assert result.result.species_name == "cat"
 
     def test_worker_unknown_result_with_mock(
         self,
         data_directory: Path,
     ) -> None:
-        mock_result = SpeciesResult(species_name="unknown")
+        mock_result = RichResult(
+            is_animal_present=False,
+            is_animal_unknown=True,
+            defining_features="unknown",
+            species_name="unknown",
+            confidence="low",
+        )
         mock_config = MagicMock()
         mock_pipeline = MagicMock()
         mock_pipeline.run.return_value = mock_result
@@ -588,7 +783,7 @@ class TestEvaluateVideoWorker:
         video_path = data_directory / "test.mp4"
         result = _evaluate_video_worker(str(video_path), mock_config)
 
-        assert result.raw_result == "unknown"
+        assert result.result.species_name == "unknown"
 
     def test_worker_error_handling_with_mock(
         self,
@@ -603,11 +798,17 @@ class TestEvaluateVideoWorker:
         with pytest.raises(RuntimeError, match="LLM connection failed"):
             _evaluate_video_worker(str(video_path), mock_config)
 
-    def test_worker_with_string_response_result(
+    def test_worker_with_rich_result(
         self,
         data_directory: Path,
     ) -> None:
-        mock_result = StringResponse(message="test response")
+        mock_result = RichResult(
+            is_animal_present=True,
+            is_animal_unknown=False,
+            defining_features="test",
+            species_name="test response",
+            confidence="high",
+        )
         mock_config = MagicMock()
         mock_pipeline = MagicMock()
         mock_pipeline.run.return_value = mock_result
@@ -616,13 +817,19 @@ class TestEvaluateVideoWorker:
         video_path = data_directory / "test.mp4"
         result = _evaluate_video_worker(str(video_path), mock_config)
 
-        assert result.raw_result == "test response"
+        assert result.result.species_name == "test response"
 
     def test_worker_captures_frame_ids(
         self,
         data_directory: Path,
     ) -> None:
-        mock_result = SpeciesResult(species_name="otter")
+        mock_result = RichResult(
+            is_animal_present=True,
+            is_animal_unknown=False,
+            defining_features="test",
+            species_name="otter",
+            confidence="high",
+        )
         mock_frame_selector = MagicMock(spec=FrameSelector)
         frames = [
             Frame(raw=[], frame_no=1),
@@ -635,7 +842,7 @@ class TestEvaluateVideoWorker:
         mock_pipeline = MagicMock()
         mock_pipeline.frame_selector = mock_frame_selector
 
-        def run_side_effect(video_path: Path) -> SpeciesResult:
+        def run_side_effect(video_path: Path) -> RichResult:
             list(mock_pipeline.frame_selector.select_frames(video_path))
             return mock_result
 
@@ -741,7 +948,13 @@ class TestEvaluateAiPipeline:
         ):
             mock_config = MagicMock()
             mock_pipeline = MagicMock()
-            mock_pipeline.run.return_value = SpeciesResult(species_name="otter")
+            mock_pipeline.run.return_value = RichResult(
+                is_animal_present=True,
+                is_animal_unknown=False,
+                defining_features="test",
+                species_name="otter",
+                confidence="high",
+            )
             mock_config.create_pipeline.return_value = mock_pipeline
             mock_validate.return_value = mock_config
 
@@ -756,7 +969,13 @@ class TestEvaluateAiPipeline:
                 PipelineEvaluationResult(
                     filename="test.mp4",
                     classification=ResultClassification.CORRECT,
-                    raw_result="otter",
+                    result=RichResult(
+                        is_animal_present=True,
+                        is_animal_unknown=False,
+                        defining_features="test",
+                        species_name="otter",
+                        confidence=ConfidenceLevel.HIGH,
+                    ),
                     label="otter",
                     comparison_method="exact",
                     processing_time_seconds=1.0,
@@ -765,7 +984,13 @@ class TestEvaluateAiPipeline:
                 PipelineEvaluationResult(
                     filename="short.mp4",
                     classification=ResultClassification.CORRECT,
-                    raw_result="cat",
+                    result=RichResult(
+                        is_animal_present=True,
+                        is_animal_unknown=False,
+                        defining_features="test",
+                        species_name="cat",
+                        confidence=ConfidenceLevel.HIGH,
+                    ),
                     label="cat",
                     comparison_method="exact",
                     processing_time_seconds=3.0,
@@ -798,7 +1023,13 @@ class TestEvaluateAiPipeline:
         ):
             mock_config = MagicMock()
             mock_pipeline = MagicMock()
-            mock_pipeline.run.return_value = SpeciesResult(species_name="otter")
+            mock_pipeline.run.return_value = RichResult(
+                is_animal_present=True,
+                is_animal_unknown=False,
+                defining_features="test",
+                species_name="otter",
+                confidence="high",
+            )
             mock_config.create_pipeline.return_value = mock_pipeline
             mock_validate.return_value = mock_config
 
@@ -813,7 +1044,13 @@ class TestEvaluateAiPipeline:
                 PipelineEvaluationResult(
                     filename="test.mp4",
                     classification=ResultClassification.CORRECT,
-                    raw_result="otter",
+                    result=RichResult(
+                        is_animal_present=True,
+                        is_animal_unknown=False,
+                        defining_features="test",
+                        species_name="otter",
+                        confidence=ConfidenceLevel.HIGH,
+                    ),
                     label="otter",
                     comparison_method="exact",
                     processing_time_seconds=1.0,
@@ -822,7 +1059,13 @@ class TestEvaluateAiPipeline:
                 PipelineEvaluationResult(
                     filename="short.mp4",
                     classification=ResultClassification.INCORRECT,
-                    raw_result="",
+                    result=RichResult(
+                        is_animal_present=False,
+                        is_animal_unknown=False,
+                        defining_features="",
+                        species_name="",
+                        confidence=ConfidenceLevel.LOW,
+                    ),
                     label="cat",
                     error="LLM connection failed",
                     comparison_method="exact",
@@ -888,7 +1131,13 @@ class TestIntegration:
         ):
             mock_config = MagicMock()
             mock_pipeline = MagicMock()
-            mock_pipeline.run.return_value = SpeciesResult(species_name="otter")
+            mock_pipeline.run.return_value = RichResult(
+                is_animal_present=True,
+                is_animal_unknown=False,
+                defining_features="test",
+                species_name="otter",
+                confidence="high",
+            )
             mock_config.create_pipeline.return_value = mock_pipeline
             mock_validate.return_value = mock_config
 
@@ -903,7 +1152,13 @@ class TestIntegration:
                 PipelineEvaluationResult(
                     filename="test.mp4",
                     classification=ResultClassification.CORRECT,
-                    raw_result="otter",
+                    result=RichResult(
+                        is_animal_present=True,
+                        is_animal_unknown=False,
+                        defining_features="test",
+                        species_name="otter",
+                        confidence=ConfidenceLevel.HIGH,
+                    ),
                     label="otter",
                     comparison_method="exact",
                     processing_time_seconds=1.0,
@@ -912,7 +1167,13 @@ class TestIntegration:
                 PipelineEvaluationResult(
                     filename="short.mp4",
                     classification=ResultClassification.CORRECT,
-                    raw_result="cat",
+                    result=RichResult(
+                        is_animal_present=True,
+                        is_animal_unknown=False,
+                        defining_features="test",
+                        species_name="cat",
+                        confidence=ConfidenceLevel.HIGH,
+                    ),
                     label="cat",
                     comparison_method="exact",
                     processing_time_seconds=2.0,
@@ -978,7 +1239,13 @@ class TestIntegration:
         ):
             mock_config = MagicMock()
             mock_pipeline = MagicMock()
-            mock_pipeline.run.return_value = SpeciesResult(species_name="otter")
+            mock_pipeline.run.return_value = RichResult(
+                is_animal_present=True,
+                is_animal_unknown=False,
+                defining_features="test",
+                species_name="otter",
+                confidence="high",
+            )
             mock_config.create_pipeline.return_value = mock_pipeline
             mock_validate.return_value = mock_config
 
@@ -993,7 +1260,13 @@ class TestIntegration:
                 PipelineEvaluationResult(
                     filename="test.mp4",
                     classification=ResultClassification.CORRECT,
-                    raw_result="otter",
+                    result=RichResult(
+                        is_animal_present=True,
+                        is_animal_unknown=False,
+                        defining_features="test",
+                        species_name="otter",
+                        confidence=ConfidenceLevel.HIGH,
+                    ),
                     label="otter",
                     comparison_method="exact",
                     processing_time_seconds=1.5,

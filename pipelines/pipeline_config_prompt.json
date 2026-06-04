@@ -17,8 +17,7 @@
   },
   "query": {
     "query_type": "llm",
-    "prompt": "Analyze this frame from a UK garden surveillance camera located near a river. Your goal is to identify animals with high precision, prioritizing the avoidance of false positives.\nStep 1: Visual Analysis Describe the specific visual evidence of an animal. Identify the shape, color, and distinct anatomical features (e.g., ears, tail, legs) that suggest a living creature is present. If you only see ambiguous shapes, shadows, or foliage, state 'No'\nStep 2: Skeptical Verification Consider if the identified shape could be a non-animal object (e.g., a rock, a garden ornament, a leaf, or a lighting artifact). If there is any significant ambiguity, default to 'no'.\nStep 3: Final Identification If and only if you are confident an animal is present",
-    "response_schema": "SpeciesResult"
+    "prompt": "Analyze this frame from a UK garden surveillance camera located near a river. Your goal is to identify animals with high precision, prioritizing the avoidance of false positives.\nStep 1: Visual Analysis Describe the specific visual evidence of an animal. Identify the shape, color, and distinct anatomical features (e.g., ears, tail, legs) that suggest a living creature is present. If you only see ambiguous shapes, shadows, or foliage, state 'No'\nStep 2: Skeptical Verification Consider if the identified shape could be a non-animal object (e.g., a rock, a garden ornament, a leaf, or a lighting artifact). If there is any significant ambiguity, default to 'no'.\nStep 3: Final Identification If and only if you are confident an animal is present"
   },
   "reconciler": {
     "reconciler_type": "majority"

@@ -6,7 +6,7 @@ from typing import TypeVar
 
 from pydantic import BaseModel
 
-from wildcamtools.lib.ai.types import Backend, StringResponse
+from wildcamtools.lib.ai.types import Backend, RichResult
 
 T = TypeVar("T", bound=BaseModel)
 
@@ -30,7 +30,7 @@ class AbstractLlm(abc.ABC):
         message: str,
         images: Sequence[Path] = (),
         # mypy limitation with generic type defaults
-        response_class: type[T] = StringResponse,  # type: ignore[assignment]
+        response_class: type[T] = RichResult,  # type: ignore[assignment]
     ) -> T: ...
 
     @staticmethod

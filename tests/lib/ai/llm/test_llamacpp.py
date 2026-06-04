@@ -4,7 +4,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from wildcamtools.lib.ai import SpeciesResult, StringResponse
+from wildcamtools.lib.ai import RichResult
 from wildcamtools.lib.ai.llm.abstract import DEFAULT_SYSTEM_MESSAGE
 from wildcamtools.lib.ai.llm.llamacpp import LlamaCppLlm
 
@@ -41,7 +41,13 @@ class TestLlamaCppLlmSystemMessage:
         mock_client = MagicMock()
         mock_response = MagicMock()
         mock_response.choices = [MagicMock()]
-        mock_response.choices[0].message.content = '{"species_name": "test"}'
+        mock_response.choices[0].message.content = json.dumps({
+            "is_animal_present": True,
+            "is_animal_unknown": False,
+            "defining_features": "test features",
+            "species_name": "test",
+            "confidence": "high",
+        })
         mock_client.chat.completions.create.return_value = mock_response
         mock_client_class.return_value = mock_client
 
@@ -49,7 +55,7 @@ class TestLlamaCppLlmSystemMessage:
         llm.message_with_schema(
             message="Test message",
             images=[sample_image],
-            response_class=SpeciesResult,
+            response_class=RichResult,
         )
 
         mock_client.chat.completions.create.assert_called_once()
@@ -66,7 +72,13 @@ class TestLlamaCppLlmSystemMessage:
         mock_client = MagicMock()
         mock_response = MagicMock()
         mock_response.choices = [MagicMock()]
-        mock_response.choices[0].message.content = '{"species_name": "test"}'
+        mock_response.choices[0].message.content = json.dumps({
+            "is_animal_present": True,
+            "is_animal_unknown": False,
+            "defining_features": "test features",
+            "species_name": "test",
+            "confidence": "high",
+        })
         mock_client.chat.completions.create.return_value = mock_response
         mock_client_class.return_value = mock_client
 
@@ -74,47 +86,44 @@ class TestLlamaCppLlmSystemMessage:
         llm.message_with_schema(
             message="Test message",
             images=[sample_image],
-            response_class=SpeciesResult,
+            response_class=RichResult,
         )
 
         call_args = mock_client.chat.completions.create.call_args
         messages = call_args.kwargs["messages"]
         system_content = messages[0]["content"]
 
-        expected_schema = SpeciesResult.model_json_schema()
         assert "species_name" in system_content
-        assert json.dumps(expected_schema) in system_content or expected_schema["properties"] is not None
+        assert "Expected JSON schema" in system_content
 
     @patch("wildcamtools.lib.ai.llm.llamacpp.openai_lib.OpenAI")
-    def test_message_with_schema_different_response_classes(
-        self, mock_client_class: MagicMock, sample_image: Path
-    ) -> None:
+    def test_message_with_schema_rich_result(self, mock_client_class: MagicMock, sample_image: Path) -> None:
         mock_client = MagicMock()
         mock_response = MagicMock()
         mock_response.choices = [MagicMock()]
+        mock_response.choices[0].message.content = json.dumps({
+            "is_animal_present": True,
+            "is_animal_unknown": False,
+            "defining_features": "test features",
+            "species_name": "test",
+            "confidence": "high",
+        })
         mock_client.chat.completions.create.return_value = mock_response
         mock_client_class.return_value = mock_client
 
         llm = LlamaCppLlm(model="test-model", base_url="http://localhost:8080/v1")
+        llm.message_with_schema(
+            message="Test message",
+            images=[sample_image],
+            response_class=RichResult,
+        )
 
-        for response_class in [SpeciesResult, StringResponse]:
-            mock_client.chat.completions.create.reset_mock()
-            mock_response.choices[0].message.content = (
-                '{"species_name": "test"}' if response_class == SpeciesResult else '{"message": "test"}'
-            )
+        call_args = mock_client.chat.completions.create.call_args
+        messages = call_args.kwargs["messages"]
+        system_content = messages[0]["content"]
 
-            llm.message_with_schema(
-                message="Test message",
-                images=[sample_image],
-                response_class=response_class,
-            )
-
-            call_args = mock_client.chat.completions.create.call_args
-            messages = call_args.kwargs["messages"]
-            system_content = messages[0]["content"]
-
-            schema = response_class.model_json_schema()
-            assert any(prop in system_content for prop in schema.get("properties", {}))
+        schema = RichResult.model_json_schema()
+        assert any(prop in system_content for prop in schema.get("properties", {}))
 
     @patch("wildcamtools.lib.ai.llm.llamacpp.openai_lib.OpenAI")
     def test_custom_system_message_receives_schema(self, mock_client_class: MagicMock, sample_image: Path) -> None:
@@ -122,7 +131,13 @@ class TestLlamaCppLlmSystemMessage:
         mock_client = MagicMock()
         mock_response = MagicMock()
         mock_response.choices = [MagicMock()]
-        mock_response.choices[0].message.content = '{"species_name": "test"}'
+        mock_response.choices[0].message.content = json.dumps({
+            "is_animal_present": True,
+            "is_animal_unknown": False,
+            "defining_features": "test features",
+            "species_name": "test",
+            "confidence": "high",
+        })
         mock_client.chat.completions.create.return_value = mock_response
         mock_client_class.return_value = mock_client
 
@@ -134,7 +149,7 @@ class TestLlamaCppLlmSystemMessage:
         llm.message_with_schema(
             message="Test message",
             images=[sample_image],
-            response_class=SpeciesResult,
+            response_class=RichResult,
         )
 
         call_args = mock_client.chat.completions.create.call_args
@@ -142,7 +157,7 @@ class TestLlamaCppLlmSystemMessage:
         system_content = messages[0]["content"]
 
         assert system_content.startswith("Custom:")
-        schema = SpeciesResult.model_json_schema()
+        schema = RichResult.model_json_schema()
         assert any(prop in system_content for prop in schema.get("properties", {}))
 
     @pytest.mark.parametrize("image_count", [0, 1, 3, 5])
@@ -153,7 +168,13 @@ class TestLlamaCppLlmSystemMessage:
         mock_client = MagicMock()
         mock_response = MagicMock()
         mock_response.choices = [MagicMock()]
-        mock_response.choices[0].message.content = '{"species_name": "test"}'
+        mock_response.choices[0].message.content = json.dumps({
+            "is_animal_present": True,
+            "is_animal_unknown": False,
+            "defining_features": "test features",
+            "species_name": "test",
+            "confidence": "high",
+        })
         mock_client.chat.completions.create.return_value = mock_response
         mock_client_class.return_value = mock_client
 
@@ -167,7 +188,7 @@ class TestLlamaCppLlmSystemMessage:
         llm.message_with_schema(
             message="Test message",
             images=images,
-            response_class=SpeciesResult,
+            response_class=RichResult,
         )
 
         call_args = mock_client.chat.completions.create.call_args
@@ -186,7 +207,13 @@ class TestLlamaCppLlmSystemMessage:
         mock_client = MagicMock()
         mock_response = MagicMock()
         mock_response.choices = [MagicMock()]
-        mock_response.choices[0].message.content = '{"species_name": "test"}'
+        mock_response.choices[0].message.content = json.dumps({
+            "is_animal_present": True,
+            "is_animal_unknown": False,
+            "defining_features": "test features",
+            "species_name": "test",
+            "confidence": "high",
+        })
         mock_client.chat.completions.create.return_value = mock_response
         mock_client_class.return_value = mock_client
 
@@ -196,7 +223,7 @@ class TestLlamaCppLlmSystemMessage:
             llm.message_with_schema(
                 message="Test message",
                 images=[sample_image],
-                response_class=SpeciesResult,
+                response_class=RichResult,
             )
 
         assert "System message:" in caplog.text
@@ -207,7 +234,13 @@ class TestLlamaCppLlmSystemMessage:
         mock_client = MagicMock()
         mock_response = MagicMock()
         mock_response.choices = [MagicMock()]
-        mock_response.choices[0].message.content = '{"species_name": "test"}'
+        mock_response.choices[0].message.content = json.dumps({
+            "is_animal_present": True,
+            "is_animal_unknown": False,
+            "defining_features": "test features",
+            "species_name": "test",
+            "confidence": "high",
+        })
         mock_client.chat.completions.create.return_value = mock_response
         mock_client_class.return_value = mock_client
 
@@ -215,7 +248,7 @@ class TestLlamaCppLlmSystemMessage:
         llm.message_with_schema(
             message="Test message",
             images=[sample_image],
-            response_class=SpeciesResult,
+            response_class=RichResult,
         )
 
         call_args = mock_client.chat.completions.create.call_args
@@ -227,7 +260,13 @@ class TestLlamaCppLlmSystemMessage:
         mock_client = MagicMock()
         mock_response = MagicMock()
         mock_response.choices = [MagicMock()]
-        mock_response.choices[0].message.content = '{"species_name": "test"}'
+        mock_response.choices[0].message.content = json.dumps({
+            "is_animal_present": True,
+            "is_animal_unknown": False,
+            "defining_features": "test features",
+            "species_name": "test",
+            "confidence": "high",
+        })
         mock_client.chat.completions.create.return_value = mock_response
         mock_client_class.return_value = mock_client
 
@@ -235,7 +274,7 @@ class TestLlamaCppLlmSystemMessage:
         llm.message_with_schema(
             message="Test message",
             images=[sample_image],
-            response_class=SpeciesResult,
+            response_class=RichResult,
         )
 
         call_args = mock_client.chat.completions.create.call_args

@@ -4,15 +4,18 @@ import tempfile
 from abc import ABC, abstractmethod
 from collections.abc import Iterable, Iterator, Sequence
 from pathlib import Path
-from typing import TypeVar
 
 import cv2
-from pydantic import BaseModel
 
 from wildcamtools.lib import Frame
 from wildcamtools.lib.ai.crop import AICropFinder
 from wildcamtools.lib.ai.llm.abstract import AbstractLlm
-from wildcamtools.lib.ai.types import ConfidenceLevel, ResultList, VerificationResult
+from wildcamtools.lib.ai.types import (
+    ConfidenceLevel,
+    ResultList,
+    RichResult,
+    VerificationResult,
+)
 from wildcamtools.lib.frames import FilterSSIM, Rescaler, resize_with_aspect_ratio
 from wildcamtools.lib.motion import MogMotion
 from wildcamtools.lib.stats import get_video_stats
@@ -239,52 +242,45 @@ Return results as a ResultList with species_name and frames array."""
         return output_batches
 
 
-T = TypeVar("T", bound=BaseModel)
-
-
-class ImageBatchQuery[T](ABC):
-    def query_image_batches(self, image_batches: Iterable[Iterable[Path]]) -> Iterator[T]:
+class ImageBatchQuery(ABC):
+    def query_image_batches(self, image_batches: Iterable[Iterable[Path]]) -> Iterator[RichResult]:
         for batch in image_batches:
             yield self.query_images(list(batch))
 
     @abstractmethod
-    def query_images(self, images: Sequence[Path]) -> T: ...
+    def query_images(self, images: Sequence[Path]) -> RichResult: ...
 
 
-class LlmImageBatchQuery[T](ImageBatchQuery[T]):
+class LlmImageBatchQuery(ImageBatchQuery):
     llm: AbstractLlm
     prompt: str
-    response_class: type[T]
 
     def __init__(
         self,
         llm: AbstractLlm,
         prompt: str,
-        response_class: type[T],
     ) -> None:
         self.llm = llm
         self.prompt = prompt
-        self.response_class = response_class
 
-    def query_images(self, images: Sequence[Path]) -> T:
+    def query_images(self, images: Sequence[Path]) -> RichResult:
         images_list = sorted(images)
         if not images_list:
             logger.warning("Empty image batch received")
             raise ValueError("Empty image batch")
         logger.info("Sending %d images to analyser", len(images_list))
-        result: T = self.llm.message_with_schema(
+        result: RichResult = self.llm.message_with_schema(
             message=self.prompt,
             images=images_list,
-            response_class=self.response_class,
-        )  # type: ignore[type-var]
+            response_class=RichResult,
+        )
         logger.info("Received response from analyser")
         return result
 
 
-class VerifiedImageBatchQuery(ImageBatchQuery[VerificationResult]):
+class VerifiedImageBatchQuery(ImageBatchQuery):
     llm: AbstractLlm
     prompt: str
-    response_class: type[BaseModel]
     verification_prompt: str
     min_confidence: ConfidenceLevel
 
@@ -292,67 +288,59 @@ class VerifiedImageBatchQuery(ImageBatchQuery[VerificationResult]):
         self,
         llm: AbstractLlm,
         prompt: str,
-        response_class: type[BaseModel],
         verification_prompt: str | None = None,
         min_confidence: ConfidenceLevel = ConfidenceLevel.MEDIUM,
     ) -> None:
         self.llm = llm
         self.prompt = prompt
-        self.response_class = response_class
         self.verification_prompt = verification_prompt or DEFAULT_VERIFICATION_PROMPT
         self.min_confidence = min_confidence
 
-    def query_images(self, images: Sequence[Path]) -> VerificationResult:
+    def query_images(self, images: Sequence[Path]) -> RichResult:
         images_list = sorted(images)
         if not images_list:
             logger.warning("Empty image batch received")
             raise ValueError("Empty image batch")
 
         logger.debug("Sending %d images to analyser for initial classification", len(images_list))
-        initial_result = self.llm.message_with_schema(
+        initial_result: RichResult = self.llm.message_with_schema(
             message=self.prompt,
             images=images_list,
-            response_class=self.response_class,
+            response_class=RichResult,
         )
+        logger.debug("Initial classification: %s", initial_result.species_name)
 
-        initial_species = getattr(initial_result, "species_name", str(initial_result))
-        logger.debug("Initial classification: %s", initial_species)
-
-        verification_message = self.verification_prompt.format(initial_species=initial_species)
-        logger.debug("Verifying classification with confidence check")
+        verification_message = self.verification_prompt.format(initial_species=initial_result.species_name)
         verification_result: VerificationResult = self.llm.message_with_schema(
             message=verification_message,
             images=images_list,
             response_class=VerificationResult,
         )
 
-        if not self._meets_confidence_threshold(verification_result.confidence) or not verification_result.verified:
+        # update confidence and species name from verification
+        initial_result.confidence = verification_result.confidence
+        initial_result.species_name = verification_result.species_name
+
+        if not verification_result.verified or not self._meets_confidence_threshold(verification_result.confidence):
             logger.debug(
-                "Confidence %s below threshold %s or verified=%s, marking as unknown",
+                "Verification failed or confidence %s below threshold %s, marking as unknown",
                 verification_result.confidence,
                 self.min_confidence,
-                verification_result.verified,
             )
-            verification_result = verification_result.model_copy(update={"species_name": "unknown", "verified": False})
+            initial_result.is_animal_unknown = True
 
-        logger.info(
-            "Verification complete: species=%s, confidence=%s, verified=%s",
-            verification_result.species_name,
-            verification_result.confidence,
-            verification_result.verified,
-        )
-        return verification_result
+        return initial_result
 
     def _meets_confidence_threshold(self, confidence: ConfidenceLevel) -> bool:
         return CONFIDENCE_ORDER[confidence] >= CONFIDENCE_ORDER[self.min_confidence]
 
 
-class ResultReconciler[T](ABC):
+class ResultReconciler(ABC):
     @abstractmethod
-    def reconcile_results(self, results: Iterable[T]) -> T: ...
+    def reconcile_results(self, results: Iterable[RichResult]) -> RichResult: ...
 
 
-class MajorityResultReconciler[T](ResultReconciler[T]):
+class MajorityResultReconciler(ResultReconciler):
     """Reconciles multiple results by selecting the most common value.
 
     Uses equality comparison (__eq__) to determine uniqueness.
@@ -362,7 +350,7 @@ class MajorityResultReconciler[T](ResultReconciler[T]):
         ValueError: If results iterable is empty.
     """
 
-    def reconcile_results(self, results: Iterable[T]) -> T:
+    def reconcile_results(self, results: Iterable[RichResult]) -> RichResult:
         results_list = list(results)
         if not results_list:
             raise ValueError("No results to reconcile")
@@ -370,7 +358,7 @@ class MajorityResultReconciler[T](ResultReconciler[T]):
             return results_list[0]
 
         logger.debug("Reconciling %d results", len(results_list))
-        seen_order: list[T] = []
+        seen_order: list[RichResult] = []
         counts: list[int] = []
 
         for result in results_list:
@@ -395,25 +383,25 @@ class MajorityResultReconciler[T](ResultReconciler[T]):
         raise RuntimeError("Unable to reconcile results")  # pragma: no cover
 
 
-class AiPipeline[T](ABC):
+class AiPipeline(ABC):
     frame_selector: FrameSelector
     frame_image_extractor: FrameImageExtractor
-    image_batch_query: ImageBatchQuery[T]
-    result_reconciler: ResultReconciler[T]
+    image_batch_query: ImageBatchQuery
+    result_reconciler: ResultReconciler
 
     def __init__(
         self,
         frame_selector: FrameSelector,
         frame_image_extractor: FrameImageExtractor,
-        image_batch_query: ImageBatchQuery[T],
-        result_reconciler: ResultReconciler[T],
+        image_batch_query: ImageBatchQuery,
+        result_reconciler: ResultReconciler,
     ) -> None:
         self.frame_selector = frame_selector
         self.frame_image_extractor = frame_image_extractor
         self.image_batch_query = image_batch_query
         self.result_reconciler = result_reconciler
 
-    def run(self, video: Path) -> T:
+    def run(self, video: Path) -> RichResult:
         # select frames from the video
         # e.g. fps, similarity
         frames = self.frame_selector.select_frames(video)

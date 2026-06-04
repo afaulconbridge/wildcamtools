@@ -4,7 +4,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from wildcamtools.lib.ai import SpeciesResult, StringResponse
+from wildcamtools.lib.ai import RichResult
 from wildcamtools.lib.ai.llm.abstract import DEFAULT_SYSTEM_MESSAGE
 from wildcamtools.lib.ai.llm.ollama import OllamaLlm
 
@@ -36,14 +36,20 @@ class TestOllamaLlmSystemMessage:
     ) -> None:
         mock_client = MagicMock()
         mock_client.chat.return_value = MagicMock()
-        mock_client.chat.return_value.message.content = '{"species_name": "test"}'
+        mock_client.chat.return_value.message.content = json.dumps({
+            "is_animal_present": True,
+            "is_animal_unknown": False,
+            "defining_features": "test features",
+            "species_name": "test",
+            "confidence": "high",
+        })
         mock_client_class.return_value = mock_client
 
         llm = OllamaLlm(model="test-model")
         llm.message_with_schema(
             message="Test message",
             images=[sample_image],
-            response_class=SpeciesResult,
+            response_class=RichResult,
         )
 
         mock_client.chat.assert_called_once()
@@ -59,67 +65,75 @@ class TestOllamaLlmSystemMessage:
     def test_message_with_schema_includes_json_schema(self, mock_client_class: MagicMock, sample_image: Path) -> None:
         mock_client = MagicMock()
         mock_client.chat.return_value = MagicMock()
-        mock_client.chat.return_value.message.content = '{"species_name": "test"}'
+        mock_client.chat.return_value.message.content = json.dumps({
+            "is_animal_present": True,
+            "is_animal_unknown": False,
+            "defining_features": "test features",
+            "species_name": "test",
+            "confidence": "high",
+        })
         mock_client_class.return_value = mock_client
 
         llm = OllamaLlm(model="test-model")
         llm.message_with_schema(
             message="Test message",
             images=[sample_image],
-            response_class=SpeciesResult,
+            response_class=RichResult,
         )
 
         call_args = mock_client.chat.call_args
         messages = call_args.kwargs["messages"]
         system_content = messages[0]["content"]
 
-        expected_schema = SpeciesResult.model_json_schema()
         assert "species_name" in system_content
-        assert json.dumps(expected_schema) in system_content or expected_schema["properties"] is not None
+        assert "Expected JSON schema" in system_content
 
     @patch("wildcamtools.lib.ai.llm.ollama.ollama_lib.Client")
-    def test_message_with_schema_different_response_classes(
-        self, mock_client_class: MagicMock, sample_image: Path
-    ) -> None:
+    def test_message_with_schema_rich_result(self, mock_client_class: MagicMock, sample_image: Path) -> None:
         mock_client = MagicMock()
         mock_client.chat.return_value = MagicMock()
-        mock_client.chat.return_value.message.content = '{"message": "test"}'
+        mock_client.chat.return_value.message.content = json.dumps({
+            "is_animal_present": True,
+            "is_animal_unknown": False,
+            "defining_features": "test features",
+            "species_name": "test",
+            "confidence": "high",
+        })
         mock_client_class.return_value = mock_client
 
         llm = OllamaLlm(model="test-model")
+        llm.message_with_schema(
+            message="Test message",
+            images=[sample_image],
+            response_class=RichResult,
+        )
 
-        for response_class in [SpeciesResult, StringResponse]:
-            mock_client.chat.reset_mock()
-            mock_client.chat.return_value.message.content = (
-                '{"species_name": "test"}' if response_class == SpeciesResult else '{"message": "test"}'
-            )
+        call_args = mock_client.chat.call_args
+        messages = call_args.kwargs["messages"]
+        system_content = messages[0]["content"]
 
-            llm.message_with_schema(
-                message="Test message",
-                images=[sample_image],
-                response_class=response_class,
-            )
-
-            call_args = mock_client.chat.call_args
-            messages = call_args.kwargs["messages"]
-            system_content = messages[0]["content"]
-
-            schema = response_class.model_json_schema()
-            assert any(prop in system_content for prop in schema.get("properties", {}))
+        schema = RichResult.model_json_schema()
+        assert any(prop in system_content for prop in schema.get("properties", {}))
 
     @patch("wildcamtools.lib.ai.llm.ollama.ollama_lib.Client")
     def test_custom_system_message_receives_schema(self, mock_client_class: MagicMock, sample_image: Path) -> None:
         custom_message = "Custom: {schema}"
         mock_client = MagicMock()
         mock_client.chat.return_value = MagicMock()
-        mock_client.chat.return_value.message.content = '{"species_name": "test"}'
+        mock_client.chat.return_value.message.content = json.dumps({
+            "is_animal_present": True,
+            "is_animal_unknown": False,
+            "defining_features": "test features",
+            "species_name": "test",
+            "confidence": "high",
+        })
         mock_client_class.return_value = mock_client
 
         llm = OllamaLlm(model="test-model", system_message=custom_message)
         llm.message_with_schema(
             message="Test message",
             images=[sample_image],
-            response_class=SpeciesResult,
+            response_class=RichResult,
         )
 
         call_args = mock_client.chat.call_args
@@ -127,7 +141,7 @@ class TestOllamaLlmSystemMessage:
         system_content = messages[0]["content"]
 
         assert system_content.startswith("Custom:")
-        schema = SpeciesResult.model_json_schema()
+        schema = RichResult.model_json_schema()
         assert any(prop in system_content for prop in schema.get("properties", {}))
 
     @pytest.mark.parametrize("image_count", [0, 1, 3, 5])
@@ -137,7 +151,13 @@ class TestOllamaLlmSystemMessage:
     ) -> None:
         mock_client = MagicMock()
         mock_client.chat.return_value = MagicMock()
-        mock_client.chat.return_value.message.content = '{"species_name": "test"}'
+        mock_client.chat.return_value.message.content = json.dumps({
+            "is_animal_present": True,
+            "is_animal_unknown": False,
+            "defining_features": "test features",
+            "species_name": "test",
+            "confidence": "high",
+        })
         mock_client_class.return_value = mock_client
 
         images = []
@@ -150,7 +170,7 @@ class TestOllamaLlmSystemMessage:
         llm.message_with_schema(
             message="Test message",
             images=images,
-            response_class=SpeciesResult,
+            response_class=RichResult,
         )
 
         call_args = mock_client.chat.call_args
@@ -168,7 +188,13 @@ class TestOllamaLlmSystemMessage:
 
         mock_client = MagicMock()
         mock_client.chat.return_value = MagicMock()
-        mock_client.chat.return_value.message.content = '{"species_name": "test"}'
+        mock_client.chat.return_value.message.content = json.dumps({
+            "is_animal_present": True,
+            "is_animal_unknown": False,
+            "defining_features": "test features",
+            "species_name": "test",
+            "confidence": "high",
+        })
         mock_client_class.return_value = mock_client
 
         llm = OllamaLlm(model="test-model")
@@ -177,7 +203,7 @@ class TestOllamaLlmSystemMessage:
             llm.message_with_schema(
                 message="Test message",
                 images=[sample_image],
-                response_class=SpeciesResult,
+                response_class=RichResult,
             )
 
         assert "System message:" in caplog.text
@@ -187,16 +213,22 @@ class TestOllamaLlmSystemMessage:
     def test_message_with_schema_preserves_other_params(self, mock_client_class: MagicMock, sample_image: Path) -> None:
         mock_client = MagicMock()
         mock_client.chat.return_value = MagicMock()
-        mock_client.chat.return_value.message.content = '{"species_name": "test"}'
+        mock_client.chat.return_value.message.content = json.dumps({
+            "is_animal_present": True,
+            "is_animal_unknown": False,
+            "defining_features": "test features",
+            "species_name": "test",
+            "confidence": "high",
+        })
         mock_client_class.return_value = mock_client
 
         llm = OllamaLlm(model="qwen3.5:cloud", host="http://custom-host:11434")
         llm.message_with_schema(
             message="Test message",
             images=[sample_image],
-            response_class=SpeciesResult,
+            response_class=RichResult,
         )
 
         call_args = mock_client.chat.call_args
         assert call_args.kwargs["model"] == "qwen3.5:cloud"
-        assert call_args.kwargs["format"] == SpeciesResult.model_json_schema()
+        assert call_args.kwargs["format"] == RichResult.model_json_schema()

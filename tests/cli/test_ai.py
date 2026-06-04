@@ -7,7 +7,7 @@ from typer.testing import CliRunner
 
 from wildcamtools.cli.ai import app as ai_app
 from wildcamtools.lib.ai import PipelineEvaluationResult, PipelineEvaluationSummary
-from wildcamtools.lib.ai.types import ResultClassification
+from wildcamtools.lib.ai.types import ConfidenceLevel, ResultClassification, RichResult
 
 runner = CliRunner()
 
@@ -222,7 +222,6 @@ class TestRunCommandIntegration:
             },
             "query": {
                 "prompt": "Custom prompt for testing",
-                "response_schema": "SpeciesResult",
             },
             "reconciler": {
                 "reconciler_type": "majority",
@@ -233,25 +232,6 @@ class TestRunCommandIntegration:
 
         result = runner.invoke(ai_app, ["run", "-c", str(config_file), str(sample_video_file)])
         assert result.exit_code != 0
-
-    def test_run_with_different_response_schemas(self, tmp_path: Path, sample_video_file: Path) -> None:
-        for schema in ["SpeciesResult", "Result", "StringResponse"]:
-            config = {
-                "llm": {
-                    "model": "test-model",
-                    "backend": "ollama",
-                    "url": "http://localhost:8080/v1",
-                },
-                "query": {
-                    "prompt": "Test prompt",
-                    "response_schema": schema,
-                },
-            }
-            config_file = tmp_path / f"config_schema_{schema}.json"
-            config_file.write_text(json.dumps(config))
-
-            result = runner.invoke(ai_app, ["run", "-c", str(config_file), str(sample_video_file)])
-            assert result.exit_code != 0
 
     def test_run_output_file_created(self, sample_config_file: Path, sample_video_file: Path, tmp_path: Path) -> None:
         output_file = tmp_path / "result.json"
@@ -399,8 +379,13 @@ class TestRunEvaluateCommand:
                 PipelineEvaluationResult(
                     filename="test.mp4",
                     classification=ResultClassification.CORRECT,
-                    is_correct=True,
-                    raw_result="otter",
+                    result=RichResult(
+                        is_animal_present=True,
+                        is_animal_unknown=False,
+                        defining_features="test features",
+                        species_name="otter",
+                        confidence=ConfidenceLevel.HIGH,
+                    ),
                     label="otter",
                     comparison_method="exact",
                     processing_time_seconds=1.0,
@@ -455,8 +440,13 @@ class TestRunEvaluateCommand:
                 PipelineEvaluationResult(
                     filename="test.mp4",
                     classification=ResultClassification.CORRECT,
-                    is_correct=True,
-                    raw_result="domestic cat",
+                    result=RichResult(
+                        is_animal_present=True,
+                        is_animal_unknown=False,
+                        defining_features="test features",
+                        species_name="domestic cat",
+                        confidence=ConfidenceLevel.HIGH,
+                    ),
                     label="cat",
                     comparison_method="llm",
                     processing_time_seconds=1.0,
@@ -496,8 +486,13 @@ class TestRunEvaluateCommand:
                 PipelineEvaluationResult(
                     filename="test.mp4",
                     classification=ResultClassification.CORRECT,
-                    is_correct=True,
-                    raw_result="otter",
+                    result=RichResult(
+                        is_animal_present=True,
+                        is_animal_unknown=False,
+                        defining_features="test features",
+                        species_name="otter",
+                        confidence=ConfidenceLevel.HIGH,
+                    ),
                     label="otter",
                     comparison_method="exact",
                     processing_time_seconds=1.5,
@@ -539,8 +534,13 @@ class TestRunEvaluateCommand:
                 PipelineEvaluationResult(
                     filename="test.mp4",
                     classification=ResultClassification.CORRECT,
-                    is_correct=True,
-                    raw_result="otter",
+                    result=RichResult(
+                        is_animal_present=True,
+                        is_animal_unknown=False,
+                        defining_features="test features",
+                        species_name="otter",
+                        confidence=ConfidenceLevel.HIGH,
+                    ),
                     label="otter",
                     comparison_method="exact",
                     processing_time_seconds=2.0,

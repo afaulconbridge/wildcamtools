@@ -22,8 +22,7 @@
   },
   "query": {
     "query_type": "llm",
-    "prompt": "This is a video image from a UK garden near a river. Is there an animal in this image, if so what?",
-    "response_schema": "SpeciesResult"
+    "prompt": "This is a video image from a UK garden near a river. Is there an animal in this image, if so what?"
   },
   "reconciler": {
     "reconciler_type": "majority"

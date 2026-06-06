@@ -1,5 +1,7 @@
+import collections
 import itertools
 import logging
+import math
 import tempfile
 from abc import ABC, abstractmethod
 from collections.abc import Iterable, Iterator, Sequence
@@ -178,7 +180,13 @@ class RescaledFrameImageExtractor(FrameImageExtractor):
         if current_batch:
             all_batches.append(current_batch)
 
-        return all_batches
+        # adjust batch boundaries to make them as equal sized as possible
+        total_frame_count = sum(len(b) for b in all_batches)
+        equalised_batch_count = math.ceil(total_frame_count / self.max_batch_size) if self.max_batch_size > 0 else 1
+        equalised_batch_size = math.ceil(total_frame_count / equalised_batch_count) if equalised_batch_count > 0 else 1
+        equalised_batches = list(itertools.batched(itertools.chain(*all_batches), equalised_batch_size, strict=False))
+
+        return [list(b) for b in equalised_batches]
 
 
 class AICroppedFrameImageExtractor(FrameImageExtractor):
@@ -358,29 +366,27 @@ class MajorityResultReconciler(ResultReconciler):
             return results_list[0]
 
         logger.debug("Reconciling %d results", len(results_list))
-        seen_order: list[RichResult] = []
-        counts: list[int] = []
 
-        for result in results_list:
-            found_index = -1
-            for i, seen in enumerate(seen_order):
-                if seen == result:
-                    found_index = i
-                    break
+        # return first no animal if all no animal
+        results_ex_no_animal = [r for r in results_list if r.is_animal_present]
+        if not results_ex_no_animal:
+            return results_list[0]
+        # return first unknown if all no animal or unknown
+        results_ex_unknown_no_animal = [r for r in results_ex_no_animal if not r.is_animal_unknown]
+        if not results_ex_unknown_no_animal:
+            return results_ex_no_animal[0]
 
-            if found_index >= 0:
-                counts[found_index] += 1
-            else:
-                seen_order.append(result)
-                counts.append(1)
+        # group by species name and return the first result from the highest frequency name
+        # these results might be different in confidence and description!
+        species_name_results: dict[str, list[RichResult]] = collections.defaultdict(list)
+        for result in results_ex_unknown_no_animal:
+            species_name_results[result.species_name].append(result)
 
-        max_count = max(counts)
-        for i, count in enumerate(counts):
-            if count == max_count:
-                logger.debug("Selected result with count %d (first-seen wins ties)", max_count)
-                return seen_order[i]
+        species_results = sorted(species_name_results.items(), key=lambda i: len(i[1]), reverse=True)
 
-        raise RuntimeError("Unable to reconcile results")  # pragma: no cover
+        logger.debug(f"Chosing from: {[(i[0], len(i[1])) for i in species_name_results.items()]}")
+
+        return species_results[0][1][0]
 
 
 class AiPipeline(ABC):
@@ -410,6 +416,15 @@ class AiPipeline(ABC):
             # extract images from frames into files
             # e.g. downscale, tile, crop
             image_batches = self.frame_image_extractor.extract_images(frames, tmpdir_path)
+            if len(image_batches) == 0:
+                # no images extracted
+                return RichResult(
+                    is_animal_present=False,
+                    is_animal_unknown=False,
+                    defining_features="",
+                    species_name="no animal",
+                    confidence=ConfidenceLevel.HIGH,
+                )
             # send each batch to the AI for identification
             query_results = self.image_batch_query.query_image_batches(image_batches)
             # reconcile multiple identifications (if applicable)

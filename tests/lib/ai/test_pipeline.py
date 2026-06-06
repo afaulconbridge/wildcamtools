@@ -614,9 +614,9 @@ class TestRescaledFrameImageExtractor:
         result = extractor.extract_images(frames, tmp_path)
 
         assert len(result) == 3
-        assert len(result[0]) == 30
-        assert len(result[1]) == 30
-        assert len(result[2]) == 15
+        assert len(result[0]) == 25
+        assert len(result[1]) == 25
+        assert len(result[2]) == 25
 
     def test_rescaled_extractor_max_batch_size_default(
         self,

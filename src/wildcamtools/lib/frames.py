@@ -195,7 +195,7 @@ class Rescaler(FrameHandler):
             while self.now >= self.target_frametime:
                 self.now -= self.target_frametime
 
-            logger.debug("Rescaled %s", frame.frame_no)
+            # logger.debug("Rescaled %s", frame.frame_no)
             return frame
         # skip this frame
         frame.filter_keep = False
@@ -235,7 +235,7 @@ class FilterSSIM(FrameHandler):
 
         # this calculation is pretty slow
         similarity = float(structural_similarity(frame_previous_resized, frame_resized, data_range=255, channel_axis=2))
-        logger.debug("SSIM (%s) = %04f", frame.frame_no, similarity)
+        # logger.debug("SSIM (%s) = %04f", frame.frame_no, similarity)
 
         if similarity > self.similarity_minimum:
             # frame is too similar to the previous interesting frame, skip it

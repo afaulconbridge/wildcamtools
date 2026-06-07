@@ -10,6 +10,8 @@ UNKNOWN_MARKERS = {"unknown", "uncertain", "unsure"}
 class Backend(StrEnum):
     LLAMACPP = "llamacpp"
     OLLAMA = "ollama"
+    MOONDREAM = "moondream"
+    MOONDREAM_CLOUD = "moondream_cloud"
 
 
 class FrameResult(BaseModel):

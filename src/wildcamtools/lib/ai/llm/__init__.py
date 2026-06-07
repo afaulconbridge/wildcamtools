@@ -1,5 +1,7 @@
 from wildcamtools.lib.ai.llm.abstract import AbstractLlm
 from wildcamtools.lib.ai.llm.llamacpp import LlamaCppLlm
+from wildcamtools.lib.ai.llm.moondream import MoondreamLlm
+from wildcamtools.lib.ai.llm.moondream_api import MoondreamApiLlm
 from wildcamtools.lib.ai.llm.ollama import OllamaLlm
 from wildcamtools.lib.ai.types import Backend
 
@@ -13,7 +15,7 @@ def create_analyser(
     """Create an AbstractLlm instance for the specified backend.
 
     Args:
-        backend: The LLM backend to use (OLLAMA or LLAMACPP).
+        backend: The LLM backend to use (OLLAMA, LLAMACPP, MOONDREAM, or MOONDREAM_CLOUD).
         model: The model name/identifier.
         url: The base URL for the LLM service.
         api_key: Optional API key for authentication.
@@ -29,5 +31,9 @@ def create_analyser(
             return LlamaCppLlm(model=model, base_url=url, api_key=api_key)
         case Backend.OLLAMA:
             return OllamaLlm(model=model, host=url, api_key=api_key)
+        case Backend.MOONDREAM:
+            return MoondreamLlm(model=model)
+        case Backend.MOONDREAM_CLOUD:
+            return MoondreamApiLlm(model=model, url=url, api_key=api_key)
         case _:
             raise NotImplementedError(f"Unsupported backend: {backend}")

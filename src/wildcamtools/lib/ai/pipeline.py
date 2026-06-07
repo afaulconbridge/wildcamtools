@@ -148,9 +148,6 @@ class FrameImageExtractor(ABC):
     def extract_images(self, frames: Iterable[Frame], outdir: Path) -> Sequence[Sequence[Path]]: ...
 
 
-FrameExtractor = FrameImageExtractor
-
-
 class RescaledFrameImageExtractor(FrameImageExtractor):
     def __init__(self, resolution: tuple[int, int] = (640, 360), max_batch_size: int = 30) -> None:
         self.resolution = resolution

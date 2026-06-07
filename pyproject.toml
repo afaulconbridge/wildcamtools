@@ -32,6 +32,10 @@ dependencies = [
   "typed-ffmpeg>=4.1",
   "sqlmodel>=0.0.22",
   "alembic>=1.14.0",
+  "transformers>=4.45.0",
+  "torch>=2.12.0",
+  "accelerate>=1.13.0",
+  "httpx>=0.27.0",
 ]
 [dependency-groups]
 dev = [
@@ -142,3 +146,7 @@ preview = true
 # we only want the headless version so put an impossible dependency on the gui version
 # see https://github.com/astral-sh/uv/issues/14220
 override-dependencies = ["opencv-python; python_version < '0'"]
+
+[[tool.uv.index]]
+name = "pytorch"
+url = "https://download.pytorch.org/whl/cpu"

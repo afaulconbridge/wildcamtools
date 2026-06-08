@@ -3,9 +3,17 @@ from pathlib import Path
 from typing import Annotated
 
 import typer
+from pydantic import BaseModel
 
+from wildcamtools.lib.ai.pipeline import PipelineOutcome
 from wildcamtools.lib.ai.pipeline_config import AiPipelineConfig
 from wildcamtools.lib.ai.pipeline_evaluation import evaluate_ai_pipeline
+
+
+class PipelineRunOutput(BaseModel):
+    config: AiPipelineConfig
+    outcome: PipelineOutcome
+
 
 app = typer.Typer()
 logger = logging.getLogger(__name__)
@@ -34,10 +42,11 @@ def run(
     pipeline_config = AiPipelineConfig.from_json(config)
     logger.info("Processing video %s", video)
     pipeline = pipeline_config.create_pipeline()
-    result = pipeline.run(video)
+    outcome = pipeline.run(video)
     logger.info("Pipeline execution completed")
 
-    json_output = result.model_dump_json(indent=2)
+    output_data = PipelineRunOutput(config=pipeline_config, outcome=outcome)
+    json_output = output_data.model_dump_json(indent=2)
 
     if output:
         output.write_text(json_output)
@@ -95,7 +104,7 @@ def run_evaluate(
             "-o",
             "--output",
             metavar="OUTPUT",
-            help="Optional output JSON file for results)",
+            help="Optional output JSON file for results",
         ),
     ] = None,
 ) -> None:

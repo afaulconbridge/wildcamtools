@@ -14,9 +14,13 @@ from wildcamtools.lib.ai.crop import AICropFinder
 from wildcamtools.lib.ai.llm.abstract import AbstractLlm
 from wildcamtools.lib.ai.pipeline import (
     AICroppedFrameImageExtractor,
+    BatchResult,
+    ExtractedBatch,
+    ExtractedFrame,
+    ExtractedFrames,
+    ExtractedFramesWithResults,
     FpsRescalingFrameSelector,
     LlmImageBatchQuery,
-    MajorityResultReconciler,
     MotionFrameSelector,
     RescaledFrameImageExtractor,
     SSIMFrameSelector,
@@ -478,6 +482,196 @@ class TestSSIMFrameSelector:
             assert isinstance(frame, Frame)
 
 
+class TestFrameImagePair:
+    """Tests for FrameImagePair class."""
+
+    def test_frame_image_pair_creation(self) -> None:
+        """Test FrameImagePair can be created with path and frame_no."""
+        path = Path("/test/image.jpg")
+        pair = ExtractedFrame(path=path, frame_no=42)
+        assert pair.path == path
+        assert pair.frame_no == 42
+
+    def test_frame_image_pair_path_excluded_from_json(self) -> None:
+        """Test path field is excluded from JSON serialization."""
+        path = Path("/test/image.jpg")
+        pair = ExtractedFrame(path=path, frame_no=42)
+        json_data = pair.model_dump()
+        assert "frame_no" in json_data
+        assert "path" not in json_data
+
+    def test_frame_image_pair_json_content(self) -> None:
+        """Test JSON contains only frame_no."""
+        pair = ExtractedFrame(path=Path("/test.jpg"), frame_no=123)
+        json_data = pair.model_dump()
+        assert json_data == {"frame_no": 123}
+
+
+class TestExtractedBatch:
+    """Tests for ExtractedBatch class."""
+
+    def test_extracted_batch_creation(self) -> None:
+        """Test ExtractedBatch can be created with frame_image_pairs."""
+        pairs = [ExtractedFrame(path=Path(f"frame_{i}.jpg"), frame_no=i) for i in range(3)]
+        batch = ExtractedBatch(selected_frames=pairs)
+        assert len(batch.selected_frames) == 3
+        assert batch.selected_frames[0].frame_no == 0
+
+    def test_extracted_batch_json_excludes_paths(self) -> None:
+        """Test JSON serialization excludes paths."""
+        pairs = [ExtractedFrame(path=Path(f"frame_{i}.jpg"), frame_no=i) for i in range(2)]
+        batch = ExtractedBatch(selected_frames=pairs)
+        json_data = batch.model_dump()
+        assert "selected_frames" in json_data
+        assert all("path" not in pair for pair in json_data["selected_frames"])
+        assert all("frame_no" in pair for pair in json_data["selected_frames"])
+
+
+class TestBatchResult:
+    """Tests for BatchResult class."""
+
+    def test_batch_result_creation_without_result(self) -> None:
+        """Test BatchResult can be created without result."""
+        pairs = [ExtractedFrame(path=Path("frame.jpg"), frame_no=1)]
+        batch = BatchResult(selected_frames=pairs)
+        assert batch.result is None
+
+    def test_batch_result_creation_with_result(self) -> None:
+        """Test BatchResult can be created with result."""
+        pairs = [ExtractedFrame(path=Path("frame.jpg"), frame_no=1)]
+        result = RichResult(
+            is_animal_present=True,
+            is_animal_unknown=False,
+            defining_features="test",
+            species_name="fox",
+            confidence=ConfidenceLevel.HIGH,
+        )
+        batch = BatchResult(selected_frames=pairs, result=result)
+        assert batch.result is not None
+        assert batch.result.species_name == "fox"
+
+    def test_batch_result_inherits_from_extracted_batch(self) -> None:
+        """Test BatchResult inherits ExtractedBatch functionality."""
+        pairs = [ExtractedFrame(path=Path("frame.jpg"), frame_no=1)]
+        batch = BatchResult(selected_frames=pairs)
+        assert isinstance(batch, ExtractedBatch)
+        assert len(batch.selected_frames) == 1
+
+
+class TestExtractedFrames:
+    """Tests for ExtractedFrames class."""
+
+    def test_extracted_frames_creation(self) -> None:
+        """Test ExtractedFrames can be created with batches."""
+        pairs = [ExtractedFrame(path=Path(f"frame_{i}.jpg"), frame_no=i) for i in range(5)]
+        batch = ExtractedBatch(selected_frames=pairs)
+        frames = ExtractedFrames(batches=[batch])
+        assert len(frames.batches) == 1
+        assert len(frames.batches[0].selected_frames) == 5
+
+    def test_extracted_frames_frame_ids_property(self) -> None:
+        """Test frame_ids property extracts frame numbers correctly."""
+        pairs = [ExtractedFrame(path=Path(f"frame_{i}.jpg"), frame_no=i * 10) for i in range(5)]
+        batch = ExtractedBatch(selected_frames=pairs)
+        frames = ExtractedFrames(batches=[batch])
+        assert frames.frame_ids == [[0, 10, 20, 30, 40]]
+
+    def test_extracted_frames_frame_ids_multiple_batches(self) -> None:
+        """Test frame_ids with multiple batches."""
+        batch1 = ExtractedBatch(selected_frames=[ExtractedFrame(path=Path(f"f{i}.jpg"), frame_no=i) for i in range(3)])
+        batch2 = ExtractedBatch(
+            selected_frames=[ExtractedFrame(path=Path(f"f{i}.jpg"), frame_no=i + 10) for i in range(2)]
+        )
+        frames = ExtractedFrames(batches=[batch1, batch2])
+        assert frames.frame_ids == [[0, 1, 2], [10, 11]]
+
+    def test_extracted_frames_get_batches_yields_paths(self) -> None:
+        """Test get_batches yields lists of paths."""
+        pairs = [ExtractedFrame(path=Path(f"frame_{i}.jpg"), frame_no=i) for i in range(5)]
+        batch = ExtractedBatch(selected_frames=pairs)
+        frames = ExtractedFrames(batches=[batch])
+        batches = list(frames.get_batches())
+        assert len(batches) == 1
+        assert len(batches[0]) == 5
+        assert all(isinstance(p, Path) for p in batches[0])
+        assert batches[0][0] == Path("frame_0.jpg")
+
+    def test_extracted_frames_len_returns_batch_count(self) -> None:
+        """Test __len__ returns number of batches."""
+        batch1 = ExtractedBatch(selected_frames=[ExtractedFrame(path=Path("f1.jpg"), frame_no=1)])
+        batch2 = ExtractedBatch(selected_frames=[ExtractedFrame(path=Path("f2.jpg"), frame_no=2)])
+        frames = ExtractedFrames(batches=[batch1, batch2])
+        assert len(frames) == 2
+
+    def test_extracted_frames_empty_batches(self) -> None:
+        """Test ExtractedFrames with no batches."""
+        frames = ExtractedFrames(batches=[])
+        assert len(frames) == 0
+        assert frames.frame_ids == []
+        assert list(frames.get_batches()) == []
+
+
+class TestExtractedFramesWithResults:
+    """Tests for ExtractedFramesWithResults class."""
+
+    def test_extracted_frames_with_results_creation(self) -> None:
+        """Test ExtractedFramesWithResults can be created."""
+        pairs = [ExtractedFrame(path=Path("frame.jpg"), frame_no=1)]
+        result = RichResult(
+            is_animal_present=True,
+            is_animal_unknown=False,
+            defining_features="test",
+            species_name="fox",
+            confidence=ConfidenceLevel.HIGH,
+        )
+        batch = BatchResult(selected_frames=pairs, result=result)
+        frames = ExtractedFramesWithResults(batches=[batch])
+        assert len(frames.batches) == 1
+        assert frames.batches[0].result is not None
+
+    def test_get_batch_results_extracts_results(self) -> None:
+        """Test get_batch_results extracts non-None results."""
+        pairs = [ExtractedFrame(path=Path("frame.jpg"), frame_no=1)]
+        result1 = RichResult(
+            is_animal_present=True,
+            is_animal_unknown=False,
+            defining_features="test1",
+            species_name="fox",
+            confidence=ConfidenceLevel.HIGH,
+        )
+        result2 = RichResult(
+            is_animal_present=True,
+            is_animal_unknown=False,
+            defining_features="test2",
+            species_name="badger",
+            confidence=ConfidenceLevel.HIGH,
+        )
+        batch1 = BatchResult(selected_frames=pairs, result=result1)
+        batch2 = BatchResult(selected_frames=pairs, result=result2)
+        batch3 = BatchResult(selected_frames=pairs, result=None)
+        frames = ExtractedFramesWithResults(batches=[batch1, batch2, batch3])
+        results = frames.get_batch_results()
+        assert len(results) == 2
+        assert results[0].species_name == "fox"
+        assert results[1].species_name == "badger"
+
+    def test_inherits_from_extracted_frames(self) -> None:
+        """Test ExtractedFramesWithResults inherits ExtractedFrames functionality."""
+        pairs = [ExtractedFrame(path=Path("frame.jpg"), frame_no=1)]
+        result = RichResult(
+            is_animal_present=True,
+            is_animal_unknown=False,
+            defining_features="test",
+            species_name="fox",
+            confidence=ConfidenceLevel.HIGH,
+        )
+        batch = BatchResult(selected_frames=pairs, result=result)
+        frames = ExtractedFramesWithResults(batches=[batch])
+        assert isinstance(frames, ExtractedFrames)
+        assert frames.frame_ids == [[1]]
+        assert len(frames) == 1
+
+
 class TestRescaledFrameImageExtractor:
     """Tests for RescaledFrameImageExtractor specific functionality."""
 
@@ -497,13 +691,14 @@ class TestRescaledFrameImageExtractor:
         sample_frames: list[Frame],
         tmp_path: Path,
     ) -> None:
-        """Verify extract_images returns a Sequence."""
+        """Verify extract_images returns ExtractedFrames."""
         extractor = RescaledFrameImageExtractor()
         result = extractor.extract_images(sample_frames, tmp_path)
-        assert isinstance(result, Sequence)
-        if result:
-            assert isinstance(result[0], Sequence)
-            assert all(isinstance(p, Path) for p in result[0])
+        assert isinstance(result, ExtractedFrames)
+        if len(result) > 0:
+            assert isinstance(result.batches[0], ExtractedBatch)
+            assert all(isinstance(pair, ExtractedFrame) for pair in result.batches[0].selected_frames)
+            assert all(isinstance(pair.path, Path) for pair in result.batches[0].selected_frames)
 
     def test_extract_images_creates_files(
         self,
@@ -589,15 +784,15 @@ class TestRescaledFrameImageExtractor:
         sample_frames: list[Frame],
         tmp_path: Path,
     ) -> None:
-        """Test returns list of lists (batches)."""
+        """Test returns ExtractedFrames with proper batch structure."""
         extractor = RescaledFrameImageExtractor()
         result = extractor.extract_images(sample_frames, tmp_path)
 
-        assert isinstance(result, list)
-        assert len(result) == 1
-        assert isinstance(result[0], list)
-        assert len(result[0]) == len(sample_frames)
-        assert all(isinstance(p, Path) for p in result[0])
+        assert isinstance(result, ExtractedFrames)
+        assert len(result.batches) == 1
+        assert len(result.batches[0].selected_frames) == len(sample_frames)
+        assert all(isinstance(pair, ExtractedFrame) for pair in result.batches[0].selected_frames)
+        assert all(isinstance(pair.path, Path) for pair in result.batches[0].selected_frames)
 
     def test_rescaled_extractor_max_batch_size(
         self,
@@ -613,10 +808,10 @@ class TestRescaledFrameImageExtractor:
         extractor = RescaledFrameImageExtractor(max_batch_size=30)
         result = extractor.extract_images(frames, tmp_path)
 
-        assert len(result) == 3
-        assert len(result[0]) == 25
-        assert len(result[1]) == 25
-        assert len(result[2]) == 25
+        assert len(result.batches) == 3
+        assert len(result.batches[0].selected_frames) == 25
+        assert len(result.batches[1].selected_frames) == 25
+        assert len(result.batches[2].selected_frames) == 25
 
     def test_rescaled_extractor_max_batch_size_default(
         self,
@@ -643,8 +838,8 @@ class TestRescaledFrameImageExtractor:
         extractor = RescaledFrameImageExtractor(max_batch_size=len(sample_frames))
         result = extractor.extract_images(sample_frames, tmp_path)
 
-        assert len(result) == 1
-        assert len(result[0]) == len(sample_frames)
+        assert len(result.batches) == 1
+        assert len(result.batches[0].selected_frames) == len(sample_frames)
 
     def test_rescaled_extractor_max_batch_size_one(
         self,
@@ -655,16 +850,16 @@ class TestRescaledFrameImageExtractor:
         extractor = RescaledFrameImageExtractor(max_batch_size=1)
         result = extractor.extract_images(sample_frames, tmp_path)
 
-        assert len(result) == len(sample_frames)
-        for batch in result:
-            assert len(batch) == 1
+        assert len(result.batches) == len(sample_frames)
+        for batch in result.batches:
+            assert len(batch.selected_frames) == 1
 
     def test_extract_images_with_empty_frames(self, tmp_path: Path) -> None:
         """Test edge case with empty frame list."""
         extractor = RescaledFrameImageExtractor()
         result = extractor.extract_images([], tmp_path)
 
-        assert result == []
+        assert len(result.batches) == 0
 
     def test_rescaled_extractor_with_all_filtered_frames(
         self,
@@ -675,7 +870,7 @@ class TestRescaledFrameImageExtractor:
         extractor = RescaledFrameImageExtractor()
         result = extractor.extract_images(sample_frames_all_filtered, tmp_path)
 
-        assert result == []
+        assert len(result.batches) == 0
         image_files = list(tmp_path.glob("*.jpg"))
         assert len(image_files) == 0
 
@@ -728,7 +923,7 @@ class TestRescaledFrameImageExtractor:
         result = extractor.extract_images(sample_frames, tmp_path)
 
         assert len(result) == 1
-        assert len(result[0]) == len(sample_frames)
+        assert len(result.batches[0].selected_frames) == len(sample_frames)
 
 
 class TestAICroppedFrameImageExtractor:
@@ -760,12 +955,12 @@ class TestAICroppedFrameImageExtractor:
         sample_frames: list[Frame],
         tmp_path: Path,
     ) -> None:
-        """Verify extract_images returns a Sequence."""
+        """Verify extract_images returns ExtractedFrames."""
         mock_llm = MockAbstractLlm(result_list_to_return=ResultList(results=[]))
         aicropfinder = AICropFinder(analyser=mock_llm, expansion=0.25)
         extractor = AICroppedFrameImageExtractor(aicropfinder=aicropfinder)
         result = extractor.extract_images(sample_frames, tmp_path)
-        assert isinstance(result, Sequence)
+        assert isinstance(result, ExtractedFrames)
 
     def test_extract_images_drops_frames_without_detections(
         self,
@@ -778,7 +973,7 @@ class TestAICroppedFrameImageExtractor:
         extractor = AICroppedFrameImageExtractor(aicropfinder=aicropfinder)
         result = extractor.extract_images(sample_frames, tmp_path)
 
-        assert result == []
+        assert len(result.batches) == 0
         image_files = list(tmp_path.glob("frame_crop_*.jpg"))
         assert len(image_files) == 0
 
@@ -810,7 +1005,7 @@ class TestAICroppedFrameImageExtractor:
         extractor = AICroppedFrameImageExtractor(aicropfinder=aicropfinder)
         result = extractor.extract_images(sample_frames, tmp_path)
 
-        assert result == []
+        assert len(result.batches) == 0
         image_files = list(tmp_path.glob("frame_crop_*.jpg"))
         assert len(image_files) == 0
 
@@ -842,8 +1037,8 @@ class TestAICroppedFrameImageExtractor:
         extractor = AICroppedFrameImageExtractor(aicropfinder=aicropfinder, resolution=(320, 240))
         result = extractor.extract_images(sample_frames, tmp_path)
 
-        assert len(result) == 1
-        assert len(result[0]) == 1
+        assert len(result.batches) == 1
+        assert len(result.batches[0].selected_frames) == 1
         image_files = list(tmp_path.glob("frame_crop_*.jpg"))
         assert len(image_files) == 1
 
@@ -922,7 +1117,7 @@ class TestAICroppedFrameImageExtractor:
         sample_frames: list[Frame],
         tmp_path: Path,
     ) -> None:
-        """Test returns list of lists (batches)."""
+        """Test returns ExtractedFrames with proper batch structure."""
         mock_llm = MockAbstractLlm(
             result_list_to_return=ResultList(
                 results=[
@@ -946,11 +1141,11 @@ class TestAICroppedFrameImageExtractor:
         extractor = AICroppedFrameImageExtractor(aicropfinder=aicropfinder)
         result = extractor.extract_images(sample_frames, tmp_path)
 
-        assert isinstance(result, list)
-        assert len(result) == 1
-        assert isinstance(result[0], list)
-        assert len(result[0]) == len(sample_frames)
-        assert all(isinstance(p, Path) for p in result[0])
+        assert isinstance(result, ExtractedFrames)
+        assert len(result.batches) == 1
+        assert len(result.batches[0].selected_frames) == len(sample_frames)
+        assert all(isinstance(pair, ExtractedFrame) for pair in result.batches[0].selected_frames)
+        assert all(isinstance(pair.path, Path) for pair in result.batches[0].selected_frames)
 
     def test_ai_cropped_extractor_max_batch_size(
         self,
@@ -987,10 +1182,10 @@ class TestAICroppedFrameImageExtractor:
         extractor = AICroppedFrameImageExtractor(aicropfinder=aicropfinder, max_batch_size=30)
         result = extractor.extract_images(frames, tmp_path)
 
-        assert len(result) == 3
-        assert len(result[0]) == 30
-        assert len(result[1]) == 30
-        assert len(result[2]) == 15
+        assert len(result.batches) == 3
+        assert len(result.batches[0].selected_frames) == 30
+        assert len(result.batches[1].selected_frames) == 30
+        assert len(result.batches[2].selected_frames) == 15
 
     def test_ai_cropped_extractor_preserves_aspect_ratio(
         self,
@@ -1039,7 +1234,7 @@ class TestAICroppedFrameImageExtractor:
         extractor = AICroppedFrameImageExtractor(aicropfinder=aicropfinder)
         result = extractor.extract_images([], tmp_path)
 
-        assert result == []
+        assert len(result.batches) == 0
 
     def test_extract_images_uses_outdir(
         self,
@@ -1168,20 +1363,28 @@ class TestLlmImageBatchQuery:
         with pytest.raises(ValueError, match="Empty image batch"):
             query.query_images([])
 
-    def test_query_image_batches_yields_results(
+    def test_query_image_batches_returns_enriched_frames(
         self,
         sample_image_paths: list[Path],
     ) -> None:
-        """Test query_image_batches yields results for each batch."""
+        """Test query_image_batches returns ExtractedFramesWithResults."""
         mock_llm = MockAbstractLlm()
         query = LlmImageBatchQuery(
             llm=mock_llm,
             prompt="Test prompt",
         )
-        batches = [sample_image_paths, sample_image_paths]
-        results = list(query.query_image_batches(batches))
-        assert len(results) == 2
-        assert all(isinstance(r, RichResult) for r in results)
+        batch1 = ExtractedBatch(
+            selected_frames=[ExtractedFrame(path=p, frame_no=i) for i, p in enumerate(sample_image_paths)]
+        )
+        batch2 = ExtractedBatch(
+            selected_frames=[ExtractedFrame(path=p, frame_no=i) for i, p in enumerate(sample_image_paths)]
+        )
+        extracted_frames = ExtractedFrames(batches=[batch1, batch2])
+        enriched_frames = query.query_image_batches(extracted_frames)
+        assert isinstance(enriched_frames, ExtractedFramesWithResults)
+        assert len(enriched_frames.batches) == 2
+        assert all(isinstance(batch, BatchResult) for batch in enriched_frames.batches)
+        assert all(batch.result is not None for batch in enriched_frames.batches)
 
     def test_query_image_batches_multiple_batches(
         self,
@@ -1193,9 +1396,16 @@ class TestLlmImageBatchQuery:
             llm=mock_llm,
             prompt="Test prompt",
         )
-        batches = [sample_image_paths, sample_image_paths, sample_image_paths]
-        list(query.query_image_batches(batches))
+        batches = []
+        for _ in range(3):
+            batch = ExtractedBatch(
+                selected_frames=[ExtractedFrame(path=p, frame_no=i) for i, p in enumerate(sample_image_paths)]
+            )
+            batches.append(batch)
+        extracted_frames = ExtractedFrames(batches=batches)
+        enriched_frames = query.query_image_batches(extracted_frames)
         assert mock_llm.call_count == 3
+        assert len(enriched_frames.batches) == 3
 
     @pytest.mark.parametrize("batch_count", [1, 3, 5])
     def test_query_image_batches_parametrized(
@@ -1203,431 +1413,22 @@ class TestLlmImageBatchQuery:
         sample_image_paths: list[Path],
         batch_count: int,
     ) -> None:
-        """Test various batch counts."""
+        """Test query_image_batches with various batch counts."""
         mock_llm = MockAbstractLlm()
         query = LlmImageBatchQuery(
             llm=mock_llm,
             prompt="Test prompt",
         )
-        batches = [sample_image_paths] * batch_count
-        results = list(query.query_image_batches(batches))
-        assert len(results) == batch_count
+        batches = []
+        for _ in range(batch_count):
+            batch = ExtractedBatch(
+                selected_frames=[ExtractedFrame(path=p, frame_no=i) for i, p in enumerate(sample_image_paths)]
+            )
+            batches.append(batch)
+        extracted_frames = ExtractedFrames(batches=batches)
+        enriched_frames = query.query_image_batches(extracted_frames)
+        assert len(enriched_frames.batches) == batch_count
         assert mock_llm.call_count == batch_count
-
-    def test_query_images_single_image(
-        self,
-        sample_image_paths: list[Path],
-    ) -> None:
-        """Test single image batch edge case."""
-        mock_llm = MockAbstractLlm()
-        query = LlmImageBatchQuery(
-            llm=mock_llm,
-            prompt="Test prompt",
-        )
-        result = query.query_images([sample_image_paths[0]])
-        assert isinstance(result, RichResult)
-        assert mock_llm.call_count == 1
-
-
-class TestMajorityResultReconciler:
-    """Tests for MajorityResultReconciler specific functionality."""
-
-    def test_reconciler_with_single_result(self) -> None:
-        """Test reconciler returns single result unchanged."""
-        reconciler = MajorityResultReconciler()
-        result = reconciler.reconcile_results([
-            RichResult(
-                is_animal_present=True,
-                is_animal_unknown=False,
-                defining_features="test features",
-                species_name="test_species",
-                confidence=ConfidenceLevel.HIGH,
-            )
-        ])
-        assert result.species_name == "test_species"
-
-    def test_reconciler_with_identical_results(self) -> None:
-        """Test reconciler returns identical result."""
-        reconciler = MajorityResultReconciler()
-        results = [
-            RichResult(
-                is_animal_present=True,
-                is_animal_unknown=False,
-                defining_features="test",
-                species_name="same",
-                confidence=ConfidenceLevel.HIGH,
-            )
-            for _ in range(5)
-        ]
-        result = reconciler.reconcile_results(results)
-        assert result.species_name == "same"
-
-    def test_reconciler_with_clear_majority(self) -> None:
-        """Test reconciler selects majority result."""
-        reconciler = MajorityResultReconciler()
-        results = [
-            RichResult(
-                is_animal_present=True,
-                is_animal_unknown=False,
-                defining_features="test",
-                species_name="A",
-                confidence=ConfidenceLevel.HIGH,
-            ),
-            RichResult(
-                is_animal_present=True,
-                is_animal_unknown=False,
-                defining_features="test",
-                species_name="A",
-                confidence=ConfidenceLevel.HIGH,
-            ),
-            RichResult(
-                is_animal_present=True,
-                is_animal_unknown=False,
-                defining_features="test",
-                species_name="A",
-                confidence=ConfidenceLevel.HIGH,
-            ),
-            RichResult(
-                is_animal_present=True,
-                is_animal_unknown=False,
-                defining_features="test",
-                species_name="B",
-                confidence=ConfidenceLevel.HIGH,
-            ),
-            RichResult(
-                is_animal_present=True,
-                is_animal_unknown=False,
-                defining_features="test",
-                species_name="B",
-                confidence=ConfidenceLevel.HIGH,
-            ),
-        ]
-        result = reconciler.reconcile_results(results)
-        assert result.species_name == "A"
-
-    def test_reconciler_with_tie_breaks_with_first_seen(self) -> None:
-        """Test reconciler breaks ties by selecting first-seen."""
-        reconciler = MajorityResultReconciler()
-        results = [
-            RichResult(
-                is_animal_present=True,
-                is_animal_unknown=False,
-                defining_features="test",
-                species_name="A",
-                confidence=ConfidenceLevel.HIGH,
-            ),
-            RichResult(
-                is_animal_present=True,
-                is_animal_unknown=False,
-                defining_features="test",
-                species_name="B",
-                confidence=ConfidenceLevel.HIGH,
-            ),
-            RichResult(
-                is_animal_present=True,
-                is_animal_unknown=False,
-                defining_features="test",
-                species_name="A",
-                confidence=ConfidenceLevel.HIGH,
-            ),
-            RichResult(
-                is_animal_present=True,
-                is_animal_unknown=False,
-                defining_features="test",
-                species_name="B",
-                confidence=ConfidenceLevel.HIGH,
-            ),
-        ]
-        result = reconciler.reconcile_results(results)
-        assert result.species_name == "A"
-
-    def test_reconciler_with_empty_results_raises(self) -> None:
-        """Test reconciler raises ValueError on empty input."""
-        reconciler = MajorityResultReconciler()
-        with pytest.raises(ValueError, match="No results to reconcile"):
-            reconciler.reconcile_results([])
-
-    def test_reconciler_with_all_different_results(self) -> None:
-        """Test reconciler returns first result when all are different."""
-        reconciler = MajorityResultReconciler()
-        results = [
-            RichResult(
-                is_animal_present=True,
-                is_animal_unknown=False,
-                defining_features="test",
-                species_name="A",
-                confidence=ConfidenceLevel.HIGH,
-            ),
-            RichResult(
-                is_animal_present=True,
-                is_animal_unknown=False,
-                defining_features="test",
-                species_name="B",
-                confidence=ConfidenceLevel.HIGH,
-            ),
-            RichResult(
-                is_animal_present=True,
-                is_animal_unknown=False,
-                defining_features="test",
-                species_name="C",
-                confidence=ConfidenceLevel.HIGH,
-            ),
-        ]
-        result = reconciler.reconcile_results(results)
-        assert result.species_name == "A"
-
-
-class TestVerifiedImageBatchQuery:
-    """Tests for VerifiedImageBatchQuery two-stage verification."""
-
-    def test_verified_query_initializes_with_params(self) -> None:
-        """Test constructor stores parameters."""
-        mock_llm = MockVerifiedLlm()
-        prompt = "Test prompt"
-        query = VerifiedImageBatchQuery(
-            llm=mock_llm,
-            prompt=prompt,
-        )
-        assert query.llm is mock_llm
-        assert query.prompt == prompt
-        assert query.min_confidence == ConfidenceLevel.MEDIUM
-
-    def test_verified_query_with_custom_min_confidence(self) -> None:
-        """Test constructor accepts custom min_confidence."""
-        mock_llm = MockVerifiedLlm()
-        query = VerifiedImageBatchQuery(
-            llm=mock_llm,
-            prompt="Test prompt",
-            min_confidence=ConfidenceLevel.HIGH,
-        )
-        assert query.min_confidence == ConfidenceLevel.HIGH
-
-    def test_verified_query_with_custom_verification_prompt(self) -> None:
-        """Test constructor accepts custom verification prompt."""
-        mock_llm = MockVerifiedLlm()
-        custom_prompt = "Custom verification: {initial_species}"
-        query = VerifiedImageBatchQuery(
-            llm=mock_llm,
-            prompt="Test prompt",
-            verification_prompt=custom_prompt,
-        )
-        assert query.verification_prompt == custom_prompt
-
-    def test_verified_query_images_makes_two_calls(
-        self,
-        sample_image_paths: list[Path],
-    ) -> None:
-        """Test query_images makes two LLM calls (initial + verification)."""
-        mock_llm = MockVerifiedLlm()
-        query = VerifiedImageBatchQuery(
-            llm=mock_llm,
-            prompt="Test prompt",
-        )
-        query.query_images(sample_image_paths)
-        assert mock_llm.call_count == 2
-
-    def test_verified_query_returns_rich_result(
-        self,
-        sample_image_paths: list[Path],
-    ) -> None:
-        """Test query_images returns RichResult."""
-        mock_llm = MockVerifiedLlm()
-        query = VerifiedImageBatchQuery(
-            llm=mock_llm,
-            prompt="Test prompt",
-        )
-        result = query.query_images(sample_image_paths)
-        assert isinstance(result, RichResult)
-        assert result.species_name == "fox"
-        assert result.confidence == ConfidenceLevel.HIGH
-        assert result.is_animal_present is True
-        assert result.is_animal_unknown is False
-
-    def test_verified_query_passes_initial_species_to_verification(
-        self,
-        sample_image_paths: list[Path],
-    ) -> None:
-        """Test initial species is passed to verification prompt."""
-        mock_llm = MockVerifiedLlm(initial_species="badger")
-        query = VerifiedImageBatchQuery(
-            llm=mock_llm,
-            prompt="Test prompt",
-        )
-        query.query_images(sample_image_paths)
-        assert "badger" in mock_llm.verification_prompt
-
-    def test_verified_query_low_confidence_becomes_unknown(
-        self,
-        sample_image_paths: list[Path],
-    ) -> None:
-        """Test low confidence result is marked as unknown."""
-        mock_llm = MockVerifiedLlm(
-            initial_species="fox",
-            verification_confidence=ConfidenceLevel.LOW,
-        )
-        query = VerifiedImageBatchQuery(
-            llm=mock_llm,
-            prompt="Test prompt",
-            min_confidence=ConfidenceLevel.MEDIUM,
-        )
-        result = query.query_images(sample_image_paths)
-        assert result.is_animal_unknown is True
-        assert result.confidence == ConfidenceLevel.LOW
-
-    def test_verified_query_medium_confidence_passes_with_medium_threshold(
-        self,
-        sample_image_paths: list[Path],
-    ) -> None:
-        """Test medium confidence passes when threshold is medium."""
-        mock_llm = MockVerifiedLlm(
-            verification_confidence=ConfidenceLevel.MEDIUM,
-        )
-        query = VerifiedImageBatchQuery(
-            llm=mock_llm,
-            prompt="Test prompt",
-            min_confidence=ConfidenceLevel.MEDIUM,
-        )
-        result = query.query_images(sample_image_paths)
-        assert result.species_name == "fox"
-        assert result.is_animal_present is True
-
-    def test_verified_query_medium_confidence_fails_with_high_threshold(
-        self,
-        sample_image_paths: list[Path],
-    ) -> None:
-        """Test medium confidence fails when threshold is high."""
-        mock_llm = MockVerifiedLlm(
-            verification_confidence=ConfidenceLevel.MEDIUM,
-        )
-        query = VerifiedImageBatchQuery(
-            llm=mock_llm,
-            prompt="Test prompt",
-            min_confidence=ConfidenceLevel.HIGH,
-        )
-        result = query.query_images(sample_image_paths)
-        assert result.is_animal_unknown is True
-
-    def test_verified_query_high_confidence_passes_all_thresholds(
-        self,
-        sample_image_paths: list[Path],
-    ) -> None:
-        """Test high confidence passes all threshold levels."""
-        for threshold in [ConfidenceLevel.LOW, ConfidenceLevel.MEDIUM, ConfidenceLevel.HIGH]:
-            mock_llm = MockVerifiedLlm(
-                verification_confidence=ConfidenceLevel.HIGH,
-            )
-            query = VerifiedImageBatchQuery(
-                llm=mock_llm,
-                prompt="Test prompt",
-                min_confidence=threshold,
-            )
-            result = query.query_images(sample_image_paths)
-            assert result.species_name == "fox"
-            assert result.is_animal_present is True
-
-    def test_verified_query_empty_batch_raises_error(self) -> None:
-        """Test empty batch raises ValueError."""
-        mock_llm = MockVerifiedLlm()
-        query = VerifiedImageBatchQuery(
-            llm=mock_llm,
-            prompt="Test prompt",
-        )
-        with pytest.raises(ValueError, match="Empty image batch"):
-            query.query_images([])
-
-    def test_verified_query_sorts_images(
-        self,
-        sample_image_paths: list[Path],
-    ) -> None:
-        """Test images are sorted before sending to LLM."""
-        mock_llm = MockVerifiedLlm()
-        query = VerifiedImageBatchQuery(
-            llm=mock_llm,
-            prompt="Test prompt",
-        )
-        query.query_images(list(reversed(sample_image_paths)))
-        assert mock_llm.last_images == sorted(sample_image_paths)
-
-    def test_verified_query_uses_corrected_species_when_provided(
-        self,
-        sample_image_paths: list[Path],
-    ) -> None:
-        """Test corrected species is used when verification provides one."""
-        mock_llm = MockVerifiedLlm(
-            initial_species="fox",
-            verification_corrected_species="badger",
-            verification_confidence=ConfidenceLevel.HIGH,
-        )
-        query = VerifiedImageBatchQuery(
-            llm=mock_llm,
-            prompt="Test prompt",
-        )
-        result = query.query_images(sample_image_paths)
-        assert result.species_name == "badger"
-        assert result.is_animal_present is True
-        assert result.is_animal_unknown is False
-
-    def test_verified_query_verified_false_becomes_unknown(
-        self,
-        sample_image_paths: list[Path],
-    ) -> None:
-        """Test verified=false results in unknown species."""
-        mock_llm = MockVerifiedLlm(
-            verification_verified=False,
-            verification_confidence=ConfidenceLevel.HIGH,
-        )
-        query = VerifiedImageBatchQuery(
-            llm=mock_llm,
-            prompt="Test prompt",
-        )
-        result = query.query_images(sample_image_paths)
-        assert result.is_animal_unknown is True
-
-    def test_query_image_batches_yields_rich_results(
-        self,
-        sample_image_paths: list[Path],
-    ) -> None:
-        """Test query_image_batches yields RichResult for each batch."""
-        mock_llm = MockVerifiedLlm()
-        query = VerifiedImageBatchQuery(
-            llm=mock_llm,
-            prompt="Test prompt",
-        )
-        batches = [sample_image_paths, sample_image_paths]
-        results = list(query.query_image_batches(batches))
-        assert len(results) == 2
-        assert all(isinstance(r, RichResult) for r in results)
-
-    def test_query_image_batches_multiple_batches(
-        self,
-        sample_image_paths: list[Path],
-    ) -> None:
-        """Test query_image_batches processes multiple batches."""
-        mock_llm = MockVerifiedLlm()
-        query = VerifiedImageBatchQuery(
-            llm=mock_llm,
-            prompt="Test prompt",
-        )
-        batches = [sample_image_paths, sample_image_paths, sample_image_paths]
-        list(query.query_image_batches(batches))
-        assert mock_llm.call_count == 6
-
-    @pytest.mark.parametrize("batch_count", [1, 3, 5])
-    def test_query_image_batches_parametrized(
-        self,
-        sample_image_paths: list[Path],
-        batch_count: int,
-    ) -> None:
-        """Test various batch counts."""
-        mock_llm = MockVerifiedLlm()
-        query = VerifiedImageBatchQuery(
-            llm=mock_llm,
-            prompt="Test prompt",
-        )
-        batches = [sample_image_paths] * batch_count
-        results = list(query.query_image_batches(batches))
-        assert len(results) == batch_count
-        assert mock_llm.call_count == batch_count * 2
 
     def test_verified_query_with_low_threshold_accepts_all(
         self,

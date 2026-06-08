@@ -102,16 +102,28 @@ class TestRunCommand:
     def test_run_success_with_mocked_pipeline(
         self, sample_config_file: Path, sample_video_file: Path, tmp_path: Path
     ) -> None:
-        mock_result = MagicMock()
-        mock_result.model_dump_json.return_value = '{"species_name": "test"}'
+        from wildcamtools.lib.ai import AiPipelineConfig, PipelineOutcome
+        from wildcamtools.lib.ai.types import ConfidenceLevel, RichResult
+        from wildcamtools.lib.stats import Colourspace, VideoStats
 
-        with patch("wildcamtools.cli.ai.AiPipelineConfig") as mock_config_class:
-            mock_config = MagicMock()
-            mock_pipeline = MagicMock()
-            mock_pipeline.run.return_value = mock_result
-            mock_config.create_pipeline.return_value = mock_pipeline
-            mock_config_class.from_json.return_value = mock_config
+        mock_result = RichResult(
+            is_animal_present=True,
+            is_animal_unknown=False,
+            defining_features="test",
+            species_name="test",
+            confidence=ConfidenceLevel.HIGH,
+        )
+        mock_stats = VideoStats(fps=30.0, frame_count=100, x=640, y=360, colourspace=Colourspace.RGB)
+        mock_outcome = PipelineOutcome(result=mock_result, stats=mock_stats, frame_ids=[[]])
 
+        mock_config = MagicMock(spec=AiPipelineConfig)
+        mock_config.llm = MagicMock()
+        mock_config.query = MagicMock()
+        mock_pipeline = MagicMock()
+        mock_pipeline.run.return_value = mock_outcome
+        mock_config.create_pipeline.return_value = mock_pipeline
+
+        with patch("wildcamtools.cli.ai.AiPipelineConfig.from_json", return_value=mock_config):
             output_file = tmp_path / "output.json"
             result = runner.invoke(
                 ai_app,
@@ -119,23 +131,41 @@ class TestRunCommand:
             )
             assert result.exit_code == 0
             assert output_file.exists()
-            assert output_file.read_text() == '{"species_name": "test"}'
+            output_json = json.loads(output_file.read_text())
+            assert "config" in output_json
+            assert "outcome" in output_json
+            assert output_json["outcome"]["result"]["species_name"] == "test"
             mock_pipeline.run.assert_called_once_with(sample_video_file)
 
     def test_run_success_prints_to_console(self, sample_config_file: Path, sample_video_file: Path) -> None:
-        mock_result = MagicMock()
-        mock_result.model_dump_json.return_value = '{"species_name": "badger"}'
+        from wildcamtools.lib.ai import AiPipelineConfig, PipelineOutcome
+        from wildcamtools.lib.ai.types import ConfidenceLevel, RichResult
+        from wildcamtools.lib.stats import Colourspace, VideoStats
 
-        with patch("wildcamtools.cli.ai.AiPipelineConfig") as mock_config_class:
-            mock_config = MagicMock()
-            mock_pipeline = MagicMock()
-            mock_pipeline.run.return_value = mock_result
-            mock_config.create_pipeline.return_value = mock_pipeline
-            mock_config_class.from_json.return_value = mock_config
+        mock_result = RichResult(
+            is_animal_present=True,
+            is_animal_unknown=False,
+            defining_features="test",
+            species_name="badger",
+            confidence=ConfidenceLevel.HIGH,
+        )
+        mock_stats = VideoStats(fps=30.0, frame_count=100, x=640, y=360, colourspace=Colourspace.RGB)
+        mock_outcome = PipelineOutcome(result=mock_result, stats=mock_stats, frame_ids=[[]])
 
+        mock_config = MagicMock(spec=AiPipelineConfig)
+        mock_config.llm = MagicMock()
+        mock_config.query = MagicMock()
+        mock_pipeline = MagicMock()
+        mock_pipeline.run.return_value = mock_outcome
+        mock_config.create_pipeline.return_value = mock_pipeline
+
+        with patch("wildcamtools.cli.ai.AiPipelineConfig.from_json", return_value=mock_config):
             result = runner.invoke(ai_app, ["run", str(sample_config_file), str(sample_video_file)])
             assert result.exit_code == 0
-            assert '{"species_name": "badger"}' in result.stdout
+            output_json = json.loads(result.stdout)
+            assert "config" in output_json
+            assert "outcome" in output_json
+            assert output_json["outcome"]["result"]["species_name"] == "badger"
 
 
 class TestRunCommandIntegration:

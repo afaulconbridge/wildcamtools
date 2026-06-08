@@ -1,14 +1,12 @@
 import logging
 import multiprocessing
 import time
-from collections.abc import Iterator
 from pathlib import Path
 
 from pydantic import BaseModel, Field
 
-from wildcamtools.lib import Frame
 from wildcamtools.lib.ai.label_comparison_config import LabelComparisonConfig
-from wildcamtools.lib.ai.pipeline import FrameSelector
+from wildcamtools.lib.ai.pipeline import PipelineOutcome
 from wildcamtools.lib.ai.pipeline_config import AiPipelineConfig
 from wildcamtools.lib.ai.types import ResultClassification, RichResult
 from wildcamtools.lib.labels import load_labels
@@ -16,28 +14,11 @@ from wildcamtools.lib.labels import load_labels
 logger = logging.getLogger(__name__)
 
 
-class _FrameSelectorWrapper(FrameSelector):
-    """Wrapper that captures frame IDs while delegating to the actual frame selector."""
-
-    def __init__(self, wrapped: FrameSelector) -> None:
-        self._wrapped = wrapped
-        self._frame_ids: list[int] = []
-
-    def select_frames(self, video: Path) -> Iterator[Frame]:
-        for frame in self._wrapped.select_frames(video):
-            self._frame_ids.append(frame.frame_no)
-            yield frame
-
-    @property
-    def frame_ids(self) -> list[int]:
-        return self._frame_ids.copy()
-
-
 class _WorkerResult(BaseModel):
     """Result from worker process before label comparison."""
 
     filename: str
-    result: RichResult
+    outcome: PipelineOutcome
     processing_time_seconds: float = 0.0
     frame_ids: list[int] = Field(default_factory=list)
     error: str | None = None
@@ -52,6 +33,7 @@ class PipelineEvaluationResult(BaseModel):
     comparison_method: str = "exact"
     processing_time_seconds: float = 0.0
     frame_ids: list[int] = Field(default_factory=list)
+    stats: dict | None = None
 
 
 class PipelineEvaluationSummary(BaseModel):
@@ -115,25 +97,24 @@ def _evaluate_video_worker(
     try:
         start_time = time.time()
         pipeline = pipeline_config.create_pipeline()
-        wrapper = _FrameSelectorWrapper(pipeline.frame_selector)
-        pipeline.frame_selector = wrapper
-        result = pipeline.run(video_path)
+        outcome = pipeline.run(video_path)
         end_time = time.time()
         processing_time = end_time - start_time
-        frame_ids = wrapper.frame_ids
+        # Extract frame numbers from batch_results
+        frame_nos = [pair.frame_no for batch in outcome.batches for pair in batch.selected_frames]
 
         logger.info(
             "Video %s: result=%s, frames=%s",
             video_path.name,
-            result.species_name,
-            frame_ids,
+            outcome.result.species_name,
+            frame_nos,
         )
 
         return _WorkerResult(
             filename=video_path.name,
-            result=result,
+            outcome=outcome,
             processing_time_seconds=processing_time,
-            frame_ids=frame_ids,
+            frame_ids=frame_nos,
             error=None,
         )
     except Exception:
@@ -189,17 +170,18 @@ def _run_worker_pool(
             if not isinstance(worker_result, _WorkerResult):
                 logger.error("Result of unexpected class")
                 continue
-            classification = comparator.compare(worker_result.result, label)
+            classification = comparator.compare(worker_result.outcome.result, label)
             results.append(
                 PipelineEvaluationResult(
                     filename=worker_result.filename,
-                    result=worker_result.result,
+                    result=worker_result.outcome.result,
                     classification=classification,
                     label=label,
                     error=worker_result.error,
                     comparison_method=comparator.method_name,
                     processing_time_seconds=worker_result.processing_time_seconds,
                     frame_ids=worker_result.frame_ids,
+                    stats=worker_result.outcome.stats.model_dump(),
                 )
             )
 

@@ -12,7 +12,7 @@ from wildcamtools.lib.ai.pipeline import (
     AICroppedFrameImageExtractor,
     AiPipeline,
     FpsRescalingFrameSelector,
-    FrameExtractor,
+    FrameImageExtractor,
     FrameSelector,
     ImageBatchQuery,
     LlmImageBatchQuery,
@@ -116,7 +116,7 @@ class FrameExtractorConfig(BaseModel):
     ] = 0.25
     analyser: "LlmConfig | None" = None
 
-    def create_frame_extractor(self, analyser_llm: AbstractLlm | None = None) -> FrameExtractor:
+    def create_frame_extractor(self, analyser_llm: AbstractLlm | None = None) -> FrameImageExtractor:
         """Create a FrameImageExtractor instance based on the configuration.
 
         Args:

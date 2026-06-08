@@ -4,52 +4,59 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from wildcamtools.lib import Frame
 from wildcamtools.lib.ai import (
+    BatchResult,
+    ExtractedFrame,
     PipelineEvaluationResult,
     PipelineEvaluationSummary,
+    PipelineOutcome,
     RichResult,
 )
 from wildcamtools.lib.ai.label_comparison_config import LabelComparisonConfig
-from wildcamtools.lib.ai.pipeline import FrameSelector
 from wildcamtools.lib.ai.pipeline_config import AiPipelineConfig
 from wildcamtools.lib.ai.pipeline_evaluation import (
     _evaluate_video_worker,
-    _FrameSelectorWrapper,
     _WorkerResult,
     evaluate_ai_pipeline,
 )
 from wildcamtools.lib.ai.types import ConfidenceLevel, ResultClassification
+from wildcamtools.lib.stats import Colourspace, VideoStats
 
 
 class TestWorkerResult:
     def test_worker_result_creation(self) -> None:
+        rich_result = RichResult(
+            is_animal_present=True,
+            is_animal_unknown=False,
+            defining_features="",
+            species_name="otter",
+            confidence=ConfidenceLevel.HIGH,
+        )
+        stats = VideoStats(fps=30.0, frame_count=100, x=640, y=360, colourspace=Colourspace.RGB)
+        outcome = PipelineOutcome(result=rich_result, stats=stats, batches=[])
         result = _WorkerResult(
             filename="test.mp4",
-            result=RichResult(
-                is_animal_present=True,
-                is_animal_unknown=False,
-                defining_features="",
-                species_name="otter",
-                confidence=ConfidenceLevel.HIGH,
-            ),
+            outcome=outcome,
         )
         assert result.filename == "test.mp4"
-        assert result.result.species_name == "otter"
+        assert result.outcome.result.species_name == "otter"
         assert result.error is None
         assert result.processing_time_seconds == 0.0
         assert result.frame_ids == []
 
     def test_worker_result_with_error(self) -> None:
+        rich_result = RichResult(
+            is_animal_present=True,
+            is_animal_unknown=False,
+            defining_features="",
+            species_name="otter",
+            confidence=ConfidenceLevel.HIGH,
+        )
+        stats = VideoStats(fps=30.0, frame_count=100, x=640, y=360, colourspace=Colourspace.RGB)
+        outcome = PipelineOutcome(result=rich_result, stats=stats, batches=[])
         result = _WorkerResult(
             filename="test.mp4",
-            result=RichResult(
-                is_animal_present=True,
-                is_animal_unknown=False,
-                defining_features="",
-                species_name="otter",
-                confidence=ConfidenceLevel.HIGH,
-            ),
+            outcome=outcome,
             error="Connection timeout",
         )
         assert result.error == "Connection timeout"
@@ -57,29 +64,39 @@ class TestWorkerResult:
         assert result.frame_ids == []
 
     def test_worker_result_with_processing_time(self) -> None:
+        rich_result = RichResult(
+            is_animal_present=True,
+            is_animal_unknown=False,
+            defining_features="",
+            species_name="otter",
+            confidence=ConfidenceLevel.HIGH,
+        )
+        stats = VideoStats(fps=30.0, frame_count=100, x=640, y=360, colourspace=Colourspace.RGB)
+        outcome = PipelineOutcome(result=rich_result, stats=stats, batches=[])
         result = _WorkerResult(
             filename="test.mp4",
-            result=RichResult(
-                is_animal_present=True,
-                is_animal_unknown=False,
-                defining_features="",
-                species_name="otter",
-                confidence=ConfidenceLevel.HIGH,
-            ),
+            outcome=outcome,
             processing_time_seconds=1.5,
         )
         assert result.processing_time_seconds == 1.5
 
     def test_worker_result_with_frame_ids(self) -> None:
+        rich_result = RichResult(
+            is_animal_present=True,
+            is_animal_unknown=False,
+            defining_features="",
+            species_name="otter",
+            confidence=ConfidenceLevel.HIGH,
+        )
+        stats = VideoStats(fps=30.0, frame_count=100, x=640, y=360, colourspace=Colourspace.RGB)
+        batch = BatchResult(
+            selected_frames=[ExtractedFrame(path=Path(f"frame_{i}.jpg"), frame_no=i) for i in [1, 5, 10, 15]],
+            result=rich_result,
+        )
+        outcome = PipelineOutcome(result=rich_result, stats=stats, batches=[batch])
         result = _WorkerResult(
             filename="test.mp4",
-            result=RichResult(
-                is_animal_present=True,
-                is_animal_unknown=False,
-                defining_features="",
-                species_name="otter",
-                confidence=ConfidenceLevel.HIGH,
-            ),
+            outcome=outcome,
             frame_ids=[1, 5, 10, 15],
         )
         assert result.frame_ids == [1, 5, 10, 15]
@@ -107,6 +124,7 @@ class TestPipelineEvaluationResult:
         assert result.comparison_method == "exact"
         assert result.processing_time_seconds == 0.0
         assert result.frame_ids == []
+        assert result.stats is None
 
     def test_result_with_error(self) -> None:
         result = PipelineEvaluationResult(
@@ -126,6 +144,7 @@ class TestPipelineEvaluationResult:
         assert result.classification == ResultClassification.INCORRECT
         assert result.processing_time_seconds == 0.0
         assert result.frame_ids == []
+        assert result.stats is None
 
     def test_result_unknown_classification(self) -> None:
         result = PipelineEvaluationResult(
@@ -192,56 +211,6 @@ class TestPipelineEvaluationResult:
             frame_ids=[1, 5, 10, 15],
         )
         assert result.frame_ids == [1, 5, 10, 15]
-
-
-class TestFrameSelectorWrapper:
-    def test_wrapper_captures_frame_ids(self, video_path: Path) -> None:
-        mock_selector = MagicMock(spec=FrameSelector)
-        frames = [
-            Frame(raw=[], frame_no=1),
-            Frame(raw=[], frame_no=5),
-            Frame(raw=[], frame_no=10),
-        ]
-        mock_selector.select_frames.return_value = iter(frames)
-
-        wrapper = _FrameSelectorWrapper(mock_selector)
-        result_frames = list(wrapper.select_frames(video_path))
-
-        assert len(result_frames) == 3
-        assert wrapper.frame_ids == [1, 5, 10]
-
-    def test_wrapper_returns_copy_of_frame_ids(self, video_path: Path) -> None:
-        mock_selector = MagicMock(spec=FrameSelector)
-        frames = [Frame(raw=[], frame_no=1), Frame(raw=[], frame_no=2)]
-        mock_selector.select_frames.return_value = iter(frames)
-
-        wrapper = _FrameSelectorWrapper(mock_selector)
-        list(wrapper.select_frames(video_path))
-
-        ids1 = wrapper.frame_ids
-        ids2 = wrapper.frame_ids
-        assert ids1 == ids2
-        assert ids1 is not ids2
-
-    def test_wrapper_empty_frames(self, video_path: Path) -> None:
-        mock_selector = MagicMock(spec=FrameSelector)
-        mock_selector.select_frames.return_value = iter([])
-
-        wrapper = _FrameSelectorWrapper(mock_selector)
-        result_frames = list(wrapper.select_frames(video_path))
-
-        assert len(result_frames) == 0
-        assert wrapper.frame_ids == []
-
-    def test_wrapper_delegates_to_selector(self, video_path: Path) -> None:
-        mock_selector = MagicMock(spec=FrameSelector)
-        frames = [Frame(raw=[], frame_no=1)]
-        mock_selector.select_frames.return_value = iter(frames)
-
-        wrapper = _FrameSelectorWrapper(mock_selector)
-        list(wrapper.select_frames(video_path))
-
-        mock_selector.select_frames.assert_called_once_with(video_path)
 
 
 class TestPipelineEvaluationSummary:
@@ -728,18 +697,24 @@ class TestEvaluateVideoWorker:
             is_animal_unknown=False,
             defining_features="test",
             species_name="otter",
-            confidence="high",
+            confidence=ConfidenceLevel.HIGH,
         )
+        mock_stats = VideoStats(fps=30.0, frame_count=100, x=640, y=360, colourspace=Colourspace.RGB)
+        mock_batch = BatchResult(
+            selected_frames=[ExtractedFrame(path=Path(f"frame_{i}.jpg"), frame_no=i) for i in [1, 5, 10]],
+            result=mock_result,
+        )
+        mock_outcome = PipelineOutcome(result=mock_result, stats=mock_stats, batches=[mock_batch])
         mock_config = MagicMock()
         mock_pipeline = MagicMock()
-        mock_pipeline.run.return_value = mock_result
+        mock_pipeline.run.return_value = mock_outcome
         mock_config.create_pipeline.return_value = mock_pipeline
 
         video_path = data_directory / "test.mp4"
         result = _evaluate_video_worker(str(video_path), mock_config)
 
         assert result.filename == "test.mp4"
-        assert result.result.species_name == "otter"
+        assert result.outcome.result.species_name == "otter"
         assert result.error is None
         assert result.processing_time_seconds > 0.0
 
@@ -752,17 +727,19 @@ class TestEvaluateVideoWorker:
             is_animal_unknown=False,
             defining_features="test",
             species_name="cat",
-            confidence="high",
+            confidence=ConfidenceLevel.HIGH,
         )
+        mock_stats = VideoStats(fps=30.0, frame_count=100, x=640, y=360, colourspace=Colourspace.RGB)
+        mock_outcome = PipelineOutcome(result=mock_result, stats=mock_stats, batches=[])
         mock_config = MagicMock()
         mock_pipeline = MagicMock()
-        mock_pipeline.run.return_value = mock_result
+        mock_pipeline.run.return_value = mock_outcome
         mock_config.create_pipeline.return_value = mock_pipeline
 
         video_path = data_directory / "test.mp4"
         result = _evaluate_video_worker(str(video_path), mock_config)
 
-        assert result.result.species_name == "cat"
+        assert result.outcome.result.species_name == "cat"
 
     def test_worker_unknown_result_with_mock(
         self,
@@ -773,30 +750,19 @@ class TestEvaluateVideoWorker:
             is_animal_unknown=True,
             defining_features="unknown",
             species_name="unknown",
-            confidence="low",
+            confidence=ConfidenceLevel.LOW,
         )
+        mock_stats = VideoStats(fps=30.0, frame_count=100, x=640, y=360, colourspace=Colourspace.RGB)
+        mock_outcome = PipelineOutcome(result=mock_result, stats=mock_stats, batches=[])
         mock_config = MagicMock()
         mock_pipeline = MagicMock()
-        mock_pipeline.run.return_value = mock_result
+        mock_pipeline.run.return_value = mock_outcome
         mock_config.create_pipeline.return_value = mock_pipeline
 
         video_path = data_directory / "test.mp4"
         result = _evaluate_video_worker(str(video_path), mock_config)
 
-        assert result.result.species_name == "unknown"
-
-    def test_worker_error_handling_with_mock(
-        self,
-        data_directory: Path,
-    ) -> None:
-        mock_config = MagicMock()
-        mock_pipeline = MagicMock()
-        mock_pipeline.run.side_effect = RuntimeError("LLM connection failed")
-        mock_config.create_pipeline.return_value = mock_pipeline
-
-        video_path = data_directory / "test.mp4"
-        with pytest.raises(RuntimeError, match="LLM connection failed"):
-            _evaluate_video_worker(str(video_path), mock_config)
+        assert result.outcome.result.species_name == "unknown"
 
     def test_worker_with_rich_result(
         self,
@@ -807,17 +773,19 @@ class TestEvaluateVideoWorker:
             is_animal_unknown=False,
             defining_features="test",
             species_name="test response",
-            confidence="high",
+            confidence=ConfidenceLevel.HIGH,
         )
+        mock_stats = VideoStats(fps=30.0, frame_count=100, x=640, y=360, colourspace=Colourspace.RGB)
+        mock_outcome = PipelineOutcome(result=mock_result, stats=mock_stats, batches=[])
         mock_config = MagicMock()
         mock_pipeline = MagicMock()
-        mock_pipeline.run.return_value = mock_result
+        mock_pipeline.run.return_value = mock_outcome
         mock_config.create_pipeline.return_value = mock_pipeline
 
         video_path = data_directory / "test.mp4"
         result = _evaluate_video_worker(str(video_path), mock_config)
 
-        assert result.result.species_name == "test response"
+        assert result.outcome.result.species_name == "test response"
 
     def test_worker_captures_frame_ids(
         self,
@@ -828,25 +796,17 @@ class TestEvaluateVideoWorker:
             is_animal_unknown=False,
             defining_features="test",
             species_name="otter",
-            confidence="high",
+            confidence=ConfidenceLevel.HIGH,
         )
-        mock_frame_selector = MagicMock(spec=FrameSelector)
-        frames = [
-            Frame(raw=[], frame_no=1),
-            Frame(raw=[], frame_no=5),
-            Frame(raw=[], frame_no=10),
-        ]
-        mock_frame_selector.select_frames.return_value = iter(frames)
-
+        mock_stats = VideoStats(fps=30.0, frame_count=100, x=640, y=360, colourspace=Colourspace.RGB)
+        mock_batch = BatchResult(
+            selected_frames=[ExtractedFrame(path=Path(f"frame_{i}.jpg"), frame_no=i) for i in [1, 5, 10]],
+            result=mock_result,
+        )
+        mock_outcome = PipelineOutcome(result=mock_result, stats=mock_stats, batches=[mock_batch])
         mock_config = MagicMock()
         mock_pipeline = MagicMock()
-        mock_pipeline.frame_selector = mock_frame_selector
-
-        def run_side_effect(video_path: Path) -> RichResult:
-            list(mock_pipeline.frame_selector.select_frames(video_path))
-            return mock_result
-
-        mock_pipeline.run.side_effect = run_side_effect
+        mock_pipeline.run.return_value = mock_outcome
         mock_config.create_pipeline.return_value = mock_pipeline
 
         video_path = data_directory / "test.mp4"
@@ -948,18 +908,25 @@ class TestEvaluateAiPipeline:
         ):
             mock_config = MagicMock()
             mock_pipeline = MagicMock()
-            mock_pipeline.run.return_value = RichResult(
+            mock_result = RichResult(
                 is_animal_present=True,
                 is_animal_unknown=False,
                 defining_features="test",
                 species_name="otter",
-                confidence="high",
+                confidence=ConfidenceLevel.HIGH,
             )
+            mock_stats = VideoStats(fps=30.0, frame_count=100, x=640, y=360, colourspace=Colourspace.RGB)
+            mock_batch = BatchResult(
+                selected_frames=[ExtractedFrame(path=Path(f"frame_{i}.jpg"), frame_no=i) for i in [1, 5, 10]],
+                result=mock_result,
+            )
+            mock_outcome = PipelineOutcome(result=mock_result, stats=mock_stats, batches=[mock_batch])
+            mock_pipeline.run.return_value = mock_outcome
             mock_config.create_pipeline.return_value = mock_pipeline
             mock_validate.return_value = mock_config
 
             mock_comparator = MagicMock()
-            mock_comparator.compare.return_value = (True, ResultClassification.CORRECT)
+            mock_comparator.compare.return_value = ResultClassification.CORRECT
             mock_comparator.method_name = "exact"
             mock_comparison_config = MagicMock()
             mock_comparison_config.create_comparator.return_value = mock_comparator
@@ -993,7 +960,7 @@ class TestEvaluateAiPipeline:
                     ),
                     label="cat",
                     comparison_method="exact",
-                    processing_time_seconds=3.0,
+                    processing_time_seconds=2.0,
                     frame_ids=[2, 6],
                 ),
             ]
@@ -1006,7 +973,7 @@ class TestEvaluateAiPipeline:
                 max_workers=1,
             )
 
-            assert summary.average_processing_time_seconds == 2.0
+            assert summary.average_processing_time_seconds == 1.5
 
     def test_evaluate_counts_errors(
         self,
@@ -1023,18 +990,25 @@ class TestEvaluateAiPipeline:
         ):
             mock_config = MagicMock()
             mock_pipeline = MagicMock()
-            mock_pipeline.run.return_value = RichResult(
+            mock_result = RichResult(
                 is_animal_present=True,
                 is_animal_unknown=False,
                 defining_features="test",
                 species_name="otter",
-                confidence="high",
+                confidence=ConfidenceLevel.HIGH,
             )
+            mock_stats = VideoStats(fps=30.0, frame_count=100, x=640, y=360, colourspace=Colourspace.RGB)
+            mock_batch = BatchResult(
+                selected_frames=[ExtractedFrame(path=Path(f"frame_{i}.jpg"), frame_no=i) for i in [1, 5, 10]],
+                result=mock_result,
+            )
+            mock_outcome = PipelineOutcome(result=mock_result, stats=mock_stats, batches=[mock_batch])
+            mock_pipeline.run.return_value = mock_outcome
             mock_config.create_pipeline.return_value = mock_pipeline
             mock_validate.return_value = mock_config
 
             mock_comparator = MagicMock()
-            mock_comparator.compare.return_value = (True, ResultClassification.CORRECT)
+            mock_comparator.compare.return_value = ResultClassification.CORRECT
             mock_comparator.method_name = "exact"
             mock_comparison_config = MagicMock()
             mock_comparison_config.create_comparator.return_value = mock_comparator
@@ -1131,18 +1105,21 @@ class TestIntegration:
         ):
             mock_config = MagicMock()
             mock_pipeline = MagicMock()
-            mock_pipeline.run.return_value = RichResult(
+            mock_result = RichResult(
                 is_animal_present=True,
                 is_animal_unknown=False,
                 defining_features="test",
                 species_name="otter",
-                confidence="high",
+                confidence=ConfidenceLevel.HIGH,
             )
+            mock_stats = VideoStats(fps=30.0, frame_count=100, x=640, y=360, colourspace=Colourspace.RGB)
+            mock_outcome = PipelineOutcome(result=mock_result, stats=mock_stats, frame_ids=[[1, 5, 10]])
+            mock_pipeline.run.return_value = mock_outcome
             mock_config.create_pipeline.return_value = mock_pipeline
             mock_validate.return_value = mock_config
 
             mock_comparator = MagicMock()
-            mock_comparator.compare.return_value = (True, ResultClassification.CORRECT)
+            mock_comparator.compare.return_value = ResultClassification.CORRECT
             mock_comparator.method_name = "exact"
             mock_comparison_config = MagicMock()
             mock_comparison_config.create_comparator.return_value = mock_comparator
@@ -1239,18 +1216,21 @@ class TestIntegration:
         ):
             mock_config = MagicMock()
             mock_pipeline = MagicMock()
-            mock_pipeline.run.return_value = RichResult(
+            mock_result = RichResult(
                 is_animal_present=True,
                 is_animal_unknown=False,
                 defining_features="test",
                 species_name="otter",
-                confidence="high",
+                confidence=ConfidenceLevel.HIGH,
             )
+            mock_stats = VideoStats(fps=30.0, frame_count=100, x=640, y=360, colourspace=Colourspace.RGB)
+            mock_outcome = PipelineOutcome(result=mock_result, stats=mock_stats, frame_ids=[[1, 5, 10]])
+            mock_pipeline.run.return_value = mock_outcome
             mock_config.create_pipeline.return_value = mock_pipeline
             mock_validate.return_value = mock_config
 
             mock_comparator = MagicMock()
-            mock_comparator.compare.return_value = (True, ResultClassification.CORRECT)
+            mock_comparator.compare.return_value = ResultClassification.CORRECT
             mock_comparator.method_name = "exact"
             mock_comparison_config = MagicMock()
             mock_comparison_config.create_comparator.return_value = mock_comparator

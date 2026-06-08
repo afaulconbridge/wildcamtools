@@ -8,6 +8,7 @@ from collections.abc import Iterable, Iterator, Sequence
 from pathlib import Path
 
 import cv2
+from pydantic import BaseModel, Field
 
 from wildcamtools.lib import Frame
 from wildcamtools.lib.ai.crop import AICropFinder
@@ -20,10 +21,96 @@ from wildcamtools.lib.ai.types import (
 )
 from wildcamtools.lib.frames import FilterSSIM, Rescaler, resize_with_aspect_ratio
 from wildcamtools.lib.motion import MogMotion
-from wildcamtools.lib.stats import get_video_stats
+from wildcamtools.lib.stats import VideoStats, get_video_stats
 from wildcamtools.lib.vidio import VideoReader
 
 logger = logging.getLogger(__name__)
+
+
+class ExtractedFrame(BaseModel):
+    """Pairs an image path with its frame number.
+
+    Attributes:
+        path: Path to the image file (excluded from JSON serialization)
+        frame_no: Frame number (included in JSON serialization)
+    """
+
+    path: Path = Field(exclude=True)
+    frame_no: int
+
+
+class ExtractedBatch(BaseModel):
+    """Base class for batch of extracted frames.
+
+    Attributes:
+        frame_image_pairs: List of FrameImagePair objects (atomic pairing)
+    """
+
+    selected_frames: list[ExtractedFrame]
+
+
+class BatchResult(ExtractedBatch):
+    """Batch with AI result attached.
+
+    Attributes:
+        frame_image_pairs: List of FrameImagePair (inherited)
+        result: RichResult from AI analysis (None before processing)
+    """
+
+    result: RichResult | None = None
+
+
+class ExtractedFrames(BaseModel):
+    """Container for extracted frame batches (before AI processing).
+
+    Attributes:
+        batches: List of ExtractedBatch objects
+    """
+
+    batches: list[ExtractedBatch]
+
+    @property
+    def frame_ids(self) -> list[list[int]]:
+        """Get frame numbers organized by batch (for JSON serialization)."""
+        return [[pair.frame_no for pair in batch.selected_frames] for batch in self.batches]
+
+    def get_batches(self) -> Iterator[list[Path]]:
+        """Iterate over batches of image paths."""
+        for batch in self.batches:
+            yield [pair.path for pair in batch.selected_frames]
+
+    def __len__(self) -> int:
+        """Return number of batches."""
+        return len(self.batches)
+
+
+class ExtractedFramesWithResults(ExtractedFrames):
+    """Container for extracted frame batches with AI results.
+
+    Attributes:
+        batches: List of BatchResult objects (contains results after AI processing)
+    """
+
+    batches: Sequence[BatchResult]  # type: ignore[assignment]
+
+    def get_batch_results(self) -> list[RichResult]:
+        """Extract non-None results from batches."""
+        return [batch.result for batch in self.batches if batch.result is not None]
+
+
+class PipelineOutcome(BaseModel):
+    """Container for pipeline execution results with intermediate stage data.
+
+    Attributes:
+        result: The final RichResult from the AI pipeline
+        stats: Video statistics captured at the start of processing
+        batch_results: List of BatchResult objects with frames and per-batch AI results
+    """
+
+    result: RichResult
+    stats: VideoStats
+    batches: list[BatchResult] = Field(default_factory=list)
+
 
 CONFIDENCE_ORDER: dict[ConfidenceLevel, int] = {
     ConfidenceLevel.LOW: 0,
@@ -147,7 +234,7 @@ class SSIMFrameSelector(FrameSelector):
 
 class FrameImageExtractor(ABC):
     @abstractmethod
-    def extract_images(self, frames: Iterable[Frame], outdir: Path) -> Sequence[Sequence[Path]]: ...
+    def extract_images(self, frames: Iterable[Frame], outdir: Path) -> ExtractedFrames: ...
 
 
 FrameExtractor = FrameImageExtractor
@@ -158,11 +245,11 @@ class RescaledFrameImageExtractor(FrameImageExtractor):
         self.resolution = resolution
         self.max_batch_size = max_batch_size
 
-    def extract_images(self, frames: Iterable[Frame], outdir: Path) -> list[list[Path]]:
+    def extract_images(self, frames: Iterable[Frame], outdir: Path) -> ExtractedFrames:
         outdir.mkdir(parents=True, exist_ok=True)
 
-        current_batch: list[Path] = []
-        all_batches: list[list[Path]] = []
+        current_batch: list[ExtractedFrame] = []
+        all_batches: list[list[ExtractedFrame]] = []
 
         for frame in frames:
             if not frame.filter_keep:
@@ -171,7 +258,7 @@ class RescaledFrameImageExtractor(FrameImageExtractor):
             rescaled_image = resize_with_aspect_ratio(frame.output, self.resolution)
             image_path = outdir / f"frame_{frame.frame_no:05d}.jpg"
             cv2.imwrite(str(image_path), rescaled_image)
-            current_batch.append(image_path)
+            current_batch.append(ExtractedFrame(path=image_path, frame_no=frame.frame_no))
 
             if len(current_batch) >= self.max_batch_size:
                 all_batches.append(current_batch)
@@ -184,9 +271,12 @@ class RescaledFrameImageExtractor(FrameImageExtractor):
         total_frame_count = sum(len(b) for b in all_batches)
         equalised_batch_count = math.ceil(total_frame_count / self.max_batch_size) if self.max_batch_size > 0 else 1
         equalised_batch_size = math.ceil(total_frame_count / equalised_batch_count) if equalised_batch_count > 0 else 1
-        equalised_batches = list(itertools.batched(itertools.chain(*all_batches), equalised_batch_size, strict=False))
 
-        return [list(b) for b in equalised_batches]
+        # Flatten and re-batch
+        flat_pairs = list(itertools.chain(*all_batches))
+        equalised_batches = list(itertools.batched(flat_pairs, equalised_batch_size, strict=False))
+
+        return ExtractedFrames(batches=[ExtractedBatch(selected_frames=list(b)) for b in equalised_batches])
 
 
 class AICroppedFrameImageExtractor(FrameImageExtractor):
@@ -212,30 +302,30 @@ Return results as a ResultList with species_name and frames array."""
         self.crop_max_resolution = crop_max_resolution
         self.max_batch_size = max_batch_size
 
-    def extract_images(self, frames: Iterable[Frame], outdir: Path) -> list[list[Path]]:
+    def extract_images(self, frames: Iterable[Frame], outdir: Path) -> ExtractedFrames:
         outdir.mkdir(parents=True, exist_ok=True)
 
         all_batches = itertools.batched(frames, self.max_batch_size, strict=False)
-        output_batches: list[list[Path]] = []
+        output_batches: list[list[ExtractedFrame]] = []
 
         for batch in all_batches:
             # for each image in this batch, produce a downscaled file
-            batch_paths: list[Path] = []
+            batch_pairs: list[ExtractedFrame] = []
             for frame in batch:
                 rescaled_image = resize_with_aspect_ratio(frame.output, self.resolution)
                 image_path = outdir / f"frame_{frame.frame_no:05d}.jpg"
                 cv2.imwrite(str(image_path), rescaled_image)
-                batch_paths.append(image_path)
+                batch_pairs.append(ExtractedFrame(path=image_path, frame_no=frame.frame_no))
 
             self.aicropfinder.detections = self.aicropfinder.analyser.message_with_schema(
                 message=self.DETECTION_PROMPT,
-                images=batch_paths,
+                images=[pair.path for pair in batch_pairs],
                 response_class=ResultList,
             )
 
             # align bbox with original and crop
 
-            batch_crop_paths: list[Path] = []
+            batch_crop_pairs: list[ExtractedFrame] = []
             for frame in batch:
                 frame = self.aicropfinder.handle(frame)
                 if not frame.filter_keep or frame.crop is None:
@@ -243,17 +333,20 @@ Return results as a ResultList with species_name and frames array."""
                 rescaled_image = resize_with_aspect_ratio(frame.crop, self.crop_max_resolution)
                 image_path = outdir / f"frame_crop_{frame.frame_no:05d}.jpg"
                 cv2.imwrite(str(image_path), rescaled_image)
-                batch_crop_paths.append(image_path)
+                batch_crop_pairs.append(ExtractedFrame(path=image_path, frame_no=frame.frame_no))
 
-            if batch_crop_paths:
-                output_batches.append(batch_crop_paths)
-        return output_batches
+            if batch_crop_pairs:
+                output_batches.append(batch_crop_pairs)
+        return ExtractedFrames(batches=[ExtractedBatch(selected_frames=b) for b in output_batches])
 
 
 class ImageBatchQuery(ABC):
-    def query_image_batches(self, image_batches: Iterable[Iterable[Path]]) -> Iterator[RichResult]:
-        for batch in image_batches:
-            yield self.query_images(list(batch))
+    def query_image_batches(self, image_batches: ExtractedFrames) -> ExtractedFramesWithResults:
+        batch_results: list[BatchResult] = []
+        for batch in image_batches.batches:
+            result = self.query_images([pair.path for pair in batch.selected_frames])
+            batch_results.append(BatchResult(selected_frames=batch.selected_frames, result=result))
+        return ExtractedFramesWithResults(batches=batch_results)
 
     @abstractmethod
     def query_images(self, images: Sequence[Path]) -> RichResult: ...
@@ -384,17 +477,12 @@ class MajorityResultReconciler(ResultReconciler):
 
         species_results = sorted(species_name_results.items(), key=lambda i: len(i[1]), reverse=True)
 
-        logger.debug(f"Chosing from: {[(i[0], len(i[1])) for i in species_name_results.items()]}")
+        logger.debug("Choosing from: %s", [(i[0], len(i[1])) for i in species_name_results.items()])
 
         return species_results[0][1][0]
 
 
-class AiPipeline(ABC):
-    frame_selector: FrameSelector
-    frame_image_extractor: FrameImageExtractor
-    image_batch_query: ImageBatchQuery
-    result_reconciler: ResultReconciler
-
+class AiPipeline:
     def __init__(
         self,
         frame_selector: FrameSelector,
@@ -407,7 +495,8 @@ class AiPipeline(ABC):
         self.image_batch_query = image_batch_query
         self.result_reconciler = result_reconciler
 
-    def run(self, video: Path) -> RichResult:
+    def run(self, video: Path) -> PipelineOutcome:
+        stats = get_video_stats(video)
         # select frames from the video
         # e.g. fps, similarity
         frames = self.frame_selector.select_frames(video)
@@ -415,19 +504,21 @@ class AiPipeline(ABC):
             tmpdir_path = Path(tmpdir)
             # extract images from frames into files
             # e.g. downscale, tile, crop
-            image_batches = self.frame_image_extractor.extract_images(frames, tmpdir_path)
-            if len(image_batches) == 0:
+            extracted_frames = self.frame_image_extractor.extract_images(frames, tmpdir_path)
+            if len(extracted_frames) == 0:
                 # no images extracted
-                return RichResult(
+                result = RichResult(
                     is_animal_present=False,
                     is_animal_unknown=False,
                     defining_features="",
                     species_name="no animal",
                     confidence=ConfidenceLevel.HIGH,
                 )
+                return PipelineOutcome(result=result, stats=stats, batches=[])
             # send each batch to the AI for identification
-            query_results = self.image_batch_query.query_image_batches(image_batches)
+            enriched_frames = self.image_batch_query.query_image_batches(extracted_frames)
             # reconcile multiple identifications (if applicable)
+            query_results = enriched_frames.get_batch_results()
             consolidated_result = self.result_reconciler.reconcile_results(query_results)
 
-        return consolidated_result
+        return PipelineOutcome(result=consolidated_result, stats=stats, batches=list(enriched_frames.batches))

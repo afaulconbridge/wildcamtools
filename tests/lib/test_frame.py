@@ -1,8 +1,20 @@
 import warnings
 
+import cv2
 import numpy as np
+import pytest
 
 from wildcamtools.lib import BBox, Frame
+from wildcamtools.lib.frames import (
+    ContrastEnhancer,
+    FilterSSIM,
+    FrameImageWriter,
+    FrameTiler,
+    MotionFlowHighlighter,
+    Rescaler,
+)
+from wildcamtools.lib.motion import MogMotion
+from wildcamtools.lib.stats import Colourspace, VideoStats
 
 
 class TestFrameDataclass:
@@ -255,7 +267,6 @@ class TestCropBbox:
 
 class TestHandlerChainIntegration:
     def test_motion_handler_preserves_crop_rescale(self):
-        from wildcamtools.lib.motion import MogMotion
 
         raw = np.random.randint(0, 255, (100, 200, 3), dtype=np.uint8)
         crop = np.zeros((50, 100, 3), dtype=np.uint8)
@@ -273,7 +284,6 @@ class TestHandlerChainIntegration:
         assert result.frame_no == 10
 
     def test_filter_ssim_uses_output_property(self):
-        from wildcamtools.lib.frames import FilterSSIM
 
         raw1 = np.random.randint(0, 255, (100, 200, 3), dtype=np.uint8)
         crop1 = np.zeros((50, 100, 3), dtype=np.uint8)
@@ -291,7 +301,6 @@ class TestHandlerChainIntegration:
         assert filter_ssim.frame_previous_interesting is not None
 
     def test_frame_image_writer_writes_output(self, tmp_path):
-        from wildcamtools.lib.frames import FrameImageWriter
 
         raw = np.zeros((100, 200, 3), dtype=np.uint8)
         crop = np.ones((50, 100, 3), dtype=np.uint8) * 128
@@ -304,16 +313,12 @@ class TestHandlerChainIntegration:
         written_file = tmp_path / "frame_00001.jpg"
         assert written_file.exists()
 
-        import cv2
-
         written_image = cv2.imread(str(written_file))
         assert written_image is not None
         assert written_image.shape[0] == 50
         assert written_image.shape[1] == 100
 
     def test_frame_image_writer_writes_tiles(self, tmp_path):
-        from wildcamtools.lib.frames import FrameImageWriter, FrameTiler
-
         raw = np.random.randint(0, 255, (100, 200, 3), dtype=np.uint8)
         frame = Frame(raw=raw, frame_no=1)
 
@@ -340,9 +345,6 @@ class TestHandlerChainIntegration:
                 assert tile_image.shape[1] == 100
 
     def test_rescaler_uses_output_property(self):
-        from wildcamtools.lib.frames import Rescaler
-        from wildcamtools.lib.stats import Colourspace, VideoStats
-
         raw = np.zeros((100, 200, 3), dtype=np.uint8)
         crop = np.zeros((50, 100, 3), dtype=np.uint8)
         frame = Frame(raw=raw, frame_no=1, crop=crop)
@@ -356,8 +358,6 @@ class TestHandlerChainIntegration:
         assert result.rescale.shape[1] == 50
 
     def test_motion_flow_highlighter_preserves_crop_rescale(self):
-        from wildcamtools.lib.frames import MotionFlowHighlighter
-
         raw = np.random.randint(0, 255, (100, 200, 3), dtype=np.uint8)
         crop = np.zeros((50, 100, 3), dtype=np.uint8)
         rescale = np.zeros((25, 50, 3), dtype=np.uint8)
@@ -431,23 +431,18 @@ class TestFrameTiling:
 
 class TestFrameTiler:
     def test_frame_tiler_creation(self):
-        from wildcamtools.lib.frames import FrameTiler
 
         tiler = FrameTiler(cols=3, rows=2)
         assert tiler.cols == 3
         assert tiler.rows == 2
 
     def test_frame_tiler_default_values(self):
-        from wildcamtools.lib.frames import FrameTiler
 
         tiler = FrameTiler()
         assert tiler.cols == 2
         assert tiler.rows == 2
 
     def test_frame_tiler_invalid_cols(self):
-        import pytest
-
-        from wildcamtools.lib.frames import FrameTiler
 
         with pytest.raises(ValueError, match="cols must be at least 1"):
             FrameTiler(cols=0)
@@ -456,9 +451,6 @@ class TestFrameTiler:
             FrameTiler(cols=-1)
 
     def test_frame_tiler_invalid_rows(self):
-        import pytest
-
-        from wildcamtools.lib.frames import FrameTiler
 
         with pytest.raises(ValueError, match="rows must be at least 1"):
             FrameTiler(rows=0)
@@ -467,7 +459,6 @@ class TestFrameTiler:
             FrameTiler(rows=-1)
 
     def test_frame_tiler_splits_frame_into_tiles(self):
-        from wildcamtools.lib.frames import FrameTiler
 
         raw = np.random.randint(0, 255, (100, 200, 3), dtype=np.uint8)
         frame = Frame(raw=raw, frame_no=1)
@@ -483,7 +474,6 @@ class TestFrameTiler:
         assert result.tiling_height == 50
 
     def test_frame_tiler_tiles_cover_image(self):
-        from wildcamtools.lib.frames import FrameTiler
 
         raw = np.random.randint(0, 255, (100, 200, 3), dtype=np.uint8)
         frame = Frame(raw=raw, frame_no=1)
@@ -498,7 +488,6 @@ class TestFrameTiler:
             assert tile.shape[2] == 3
 
     def test_frame_tiler_get_tile_access(self):
-        from wildcamtools.lib.frames import FrameTiler
 
         raw = np.random.randint(0, 255, (100, 200, 3), dtype=np.uint8)
         frame = Frame(raw=raw, frame_no=1)
@@ -512,7 +501,6 @@ class TestFrameTiler:
         assert result.get_tile(1, 1) is not None
 
     def test_frame_tiler_single_tile(self):
-        from wildcamtools.lib.frames import FrameTiler
 
         raw = np.random.randint(0, 255, (100, 200, 3), dtype=np.uint8)
         frame = Frame(raw=raw, frame_no=1)
@@ -529,7 +517,6 @@ class TestFrameTiler:
         assert np.array_equal(result.tiles[0], raw)
 
     def test_frame_tiler_uses_output_property(self):
-        from wildcamtools.lib.frames import FrameTiler
 
         raw = np.zeros((100, 200, 3), dtype=np.uint8)
         crop = np.random.randint(0, 255, (50, 100, 3), dtype=np.uint8)
@@ -544,7 +531,6 @@ class TestFrameTiler:
             assert tile.shape[2] == 3
 
     def test_frame_tiler_non_divisible_dimensions(self):
-        from wildcamtools.lib.frames import FrameTiler
 
         raw = np.random.randint(0, 255, (101, 201, 3), dtype=np.uint8)
         frame = Frame(raw=raw, frame_no=1)
@@ -560,7 +546,6 @@ class TestFrameTiler:
         assert result.tiling_height == 50
 
     def test_frame_tiler_covers_entire_image(self):
-        from wildcamtools.lib.frames import FrameTiler
 
         raw = np.random.randint(0, 255, (100, 200, 3), dtype=np.uint8)
         frame = Frame(raw=raw, frame_no=1)
@@ -584,7 +569,6 @@ class TestFrameTiler:
         assert last_tile_start_x + tile_w == raw.shape[1]
 
     def test_frame_tiler_asymmetric_grid(self):
-        from wildcamtools.lib.frames import FrameTiler
 
         raw = np.random.randint(0, 255, (100, 200, 3), dtype=np.uint8)
         frame = Frame(raw=raw, frame_no=1)
@@ -600,7 +584,6 @@ class TestFrameTiler:
         assert result.tiling_height == 50
 
     def test_frame_tiler_overlap_default(self):
-        from wildcamtools.lib.frames import FrameTiler
 
         raw = np.random.randint(0, 255, (100, 200, 3), dtype=np.uint8)
         frame = Frame(raw=raw, frame_no=1)
@@ -613,7 +596,6 @@ class TestFrameTiler:
         assert result.tiles[0].shape == (50, 100, 3)
 
     def test_frame_tiler_overlap_fifty_percent(self):
-        from wildcamtools.lib.frames import FrameTiler
 
         raw = np.random.randint(0, 255, (100, 200, 3), dtype=np.uint8)
         frame = Frame(raw=raw, frame_no=1)
@@ -628,7 +610,6 @@ class TestFrameTiler:
         assert result.tiles[0].shape[1] > 100
 
     def test_frame_tiler_overlap_coverage(self):
-        from wildcamtools.lib.frames import FrameTiler
 
         raw = np.random.randint(0, 255, (100, 200, 3), dtype=np.uint8)
         frame = Frame(raw=raw, frame_no=1)
@@ -648,9 +629,6 @@ class TestFrameTiler:
         assert last_tile_start_x + tile_w == raw.shape[1]
 
     def test_frame_tiler_overlap_invalid(self):
-        import pytest
-
-        from wildcamtools.lib.frames import FrameTiler
 
         with pytest.raises(ValueError, match=r"overlap must be between 0\.0 and 1\.0"):
             FrameTiler(cols=2, rows=2, overlap=-0.1)
@@ -660,3 +638,113 @@ class TestFrameTiler:
 
         with pytest.raises(ValueError, match=r"overlap must be between 0\.0 and 1\.0"):
             FrameTiler(cols=2, rows=2, overlap=1.5)
+
+
+class TestContrastEnhancer:
+    def test_contrast_enhancer_creation(self):
+
+        enhancer = ContrastEnhancer(clip_limit=2.0, tile_grid_size=(8, 8))
+        assert enhancer.clip_limit == 2.0
+        assert enhancer.tile_grid_size == (8, 8)
+        assert enhancer.clahe is not None
+
+    def test_contrast_enhancer_default_values(self):
+
+        enhancer = ContrastEnhancer()
+        assert enhancer.clip_limit == 2.0
+        assert enhancer.tile_grid_size == (8, 8)
+
+    def test_contrast_enhancer_handle(self):
+
+        raw = np.random.randint(0, 255, (100, 200, 3), dtype=np.uint8)
+        frame = Frame(raw=raw, frame_no=1)
+
+        enhancer = ContrastEnhancer(clip_limit=2.0, tile_grid_size=(8, 8))
+        result = enhancer.handle(frame)
+
+        assert result is not frame
+        assert result.output.shape == raw.shape
+        assert result.output.dtype == raw.dtype
+
+    def test_contrast_enhancer_increases_contrast(self):
+
+        raw = np.random.randint(50, 200, (100, 200, 3), dtype=np.uint8)
+        frame = Frame(raw=raw, frame_no=1)
+
+        enhancer = ContrastEnhancer(clip_limit=3.0, tile_grid_size=(8, 8))
+        result = enhancer.handle(frame)
+
+        original_std = np.std(raw)
+        enhanced_std = np.std(result.output)
+
+        assert enhanced_std > original_std
+
+    def test_contrast_enhancer_uses_output_property(self):
+
+        raw = np.zeros((100, 200, 3), dtype=np.uint8)
+        crop = np.random.randint(0, 255, (50, 100, 3), dtype=np.uint8)
+        frame = Frame(raw=raw, frame_no=1, crop=crop)
+
+        enhancer = ContrastEnhancer()
+        result = enhancer.handle(frame)
+
+        assert result.output.shape == crop.shape
+
+    def test_contrast_enhancer_high_clip_limit(self):
+
+        raw = np.random.randint(0, 255, (100, 200, 3), dtype=np.uint8)
+        frame = Frame(raw=raw, frame_no=1)
+
+        enhancer = ContrastEnhancer(clip_limit=5.0, tile_grid_size=(8, 8))
+        result = enhancer.handle(frame)
+
+        assert result.output.shape == raw.shape
+        assert result.output.dtype == raw.dtype
+
+    def test_contrast_enhancer_large_tile_grid(self):
+
+        raw = np.random.randint(0, 255, (100, 200, 3), dtype=np.uint8)
+        frame = Frame(raw=raw, frame_no=1)
+
+        enhancer = ContrastEnhancer(clip_limit=2.0, tile_grid_size=(16, 16))
+        result = enhancer.handle(frame)
+
+        assert result.output.shape == raw.shape
+        assert result.output.dtype == raw.dtype
+
+    def test_contrast_enhancer_preserves_frame_metadata(self):
+
+        raw = np.random.randint(0, 255, (100, 200, 3), dtype=np.uint8)
+        frame = Frame(raw=raw, frame_no=42, filter_keep=True, motion_proportion=0.5)
+
+        enhancer = ContrastEnhancer()
+        result = enhancer.handle(frame)
+
+        assert result.frame_no == 42
+        assert result.filter_keep is True
+        assert result.motion_proportion == 0.5
+
+    def test_contrast_enhancer_drop_crop_and_rescale(self):
+
+        raw = np.zeros((100, 200, 3), dtype=np.uint8)
+        crop = np.random.randint(0, 255, (50, 100, 3), dtype=np.uint8)
+        rescale = np.random.randint(0, 255, (25, 50, 3), dtype=np.uint8)
+        frame = Frame(raw=raw, frame_no=1, crop=crop, rescale=rescale)
+
+        enhancer = ContrastEnhancer()
+        result = enhancer.handle(frame)
+
+        assert result.rescale is None
+        assert result.crop is None
+        assert result.raw is not None
+
+    def test_contrast_enhancer_invalid_clip_limit(self):
+
+        with pytest.raises(ValueError, match="tile_grid_size values must be positive"):
+            ContrastEnhancer(tile_grid_size=(0, 8))
+
+        with pytest.raises(ValueError, match="tile_grid_size values must be positive"):
+            ContrastEnhancer(tile_grid_size=(8, 0))
+
+        with pytest.raises(ValueError, match="tile_grid_size values must be positive"):
+            ContrastEnhancer(tile_grid_size=(-1, 8))

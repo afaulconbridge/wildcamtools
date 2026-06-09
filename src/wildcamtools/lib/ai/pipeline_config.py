@@ -11,6 +11,7 @@ from wildcamtools.lib.ai.llm.abstract import AbstractLlm
 from wildcamtools.lib.ai.pipeline import (
     AICroppedFrameImageExtractor,
     AiPipeline,
+    ContrastEnhancedFrameImageExtractor,
     FpsRescalingFrameSelector,
     FrameImageExtractor,
     FrameSelector,
@@ -35,6 +36,7 @@ class FrameSelectorType(StrEnum):
 class FrameExtractorType(StrEnum):
     RESCALED = "rescaled"
     AI_CROPPED = "ai_cropped"
+    CONTRAST_ENHANCED = "contrast_enhanced"
 
 
 class ReconcilerType(StrEnum):
@@ -92,6 +94,25 @@ class FrameSelectorConfig(BaseModel):
                 raise NotImplementedError(f"Unsupported frame selector type: {self.selector_type}")
 
 
+class ContrastEnhancedFrameExtractorConfig(BaseModel):
+    resolution: Annotated[
+        tuple[Annotated[int, Field(strict=True, gt=0)], Annotated[int, Field(strict=True, gt=0)]],
+        Field(description="Target resolution as (width, height)"),
+    ] = (640, 360)
+    max_batch_size: Annotated[
+        int,
+        Field(strict=True, gt=0, description="Maximum number of images per batch"),
+    ] = 30
+    clip_limit: Annotated[
+        float,
+        Field(strict=True, gt=0.0, description="CLAHE clip limit parameter"),
+    ] = 2.0
+    tile_grid_size: Annotated[
+        tuple[Annotated[int, Field(strict=True, gt=0)], Annotated[int, Field(strict=True, gt=0)]],
+        Field(description="CLAHE tile grid size as (width, height)"),
+    ] = (8, 8)
+
+
 class FrameExtractorConfig(BaseModel):
     extractor_type: FrameExtractorType = FrameExtractorType.RESCALED
     resolution: Annotated[
@@ -114,6 +135,14 @@ class FrameExtractorConfig(BaseModel):
             description="Expansion factor for AI crop bounding box (0.0 = no expansion)",
         ),
     ] = 0.25
+    clip_limit: Annotated[
+        float,
+        Field(strict=True, gt=0.0, description="CLAHE clip limit parameter (for contrast_enhanced extractor)"),
+    ] = 2.0
+    tile_grid_size: Annotated[
+        tuple[Annotated[int, Field(strict=True, gt=0)], Annotated[int, Field(strict=True, gt=0)]],
+        Field(description="CLAHE tile grid size as (width, height) (for contrast_enhanced extractor)"),
+    ] = (8, 8)
     analyser: "LlmConfig | None" = None
 
     def create_frame_extractor(self, analyser_llm: AbstractLlm | None = None) -> FrameImageExtractor:
@@ -144,6 +173,13 @@ class FrameExtractorConfig(BaseModel):
                     resolution=self.resolution,
                     crop_max_resolution=self.crop_max_resolution,
                     max_batch_size=self.max_batch_size,
+                )
+            case FrameExtractorType.CONTRAST_ENHANCED:
+                return ContrastEnhancedFrameImageExtractor(
+                    resolution=self.resolution,
+                    max_batch_size=self.max_batch_size,
+                    clip_limit=self.clip_limit,
+                    tile_grid_size=self.tile_grid_size,
                 )
             case _:
                 raise NotImplementedError(f"Unsupported frame extractor type: {self.extractor_type}")

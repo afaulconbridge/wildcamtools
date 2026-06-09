@@ -19,7 +19,7 @@ from wildcamtools.lib.ai.types import (
     RichResult,
     VerificationResult,
 )
-from wildcamtools.lib.frames import FilterSSIM, Rescaler, resize_with_aspect_ratio
+from wildcamtools.lib.frames import ContrastEnhancer, FilterSSIM, Rescaler, resize_with_aspect_ratio
 from wildcamtools.lib.motion import MogMotion
 from wildcamtools.lib.stats import VideoStats, get_video_stats
 from wildcamtools.lib.vidio import VideoReader
@@ -254,6 +254,63 @@ class RescaledFrameImageExtractor(FrameImageExtractor):
         for frame in frames:
             if not frame.filter_keep:
                 continue
+
+            rescaled_image = resize_with_aspect_ratio(frame.output, self.resolution)
+            image_path = outdir / f"frame_{frame.frame_no:05d}.jpg"
+            cv2.imwrite(str(image_path), rescaled_image)
+            current_batch.append(ExtractedFrame(path=image_path, frame_no=frame.frame_no))
+
+            if len(current_batch) >= self.max_batch_size:
+                all_batches.append(current_batch)
+                current_batch = []
+
+        if current_batch:
+            all_batches.append(current_batch)
+
+        # adjust batch boundaries to make them as equal sized as possible
+        total_frame_count = sum(len(b) for b in all_batches)
+        equalised_batch_count = math.ceil(total_frame_count / self.max_batch_size) if self.max_batch_size > 0 else 1
+        equalised_batch_size = math.ceil(total_frame_count / equalised_batch_count) if equalised_batch_count > 0 else 1
+
+        # Flatten and re-batch
+        flat_pairs = list(itertools.chain(*all_batches))
+        equalised_batches = list(itertools.batched(flat_pairs, equalised_batch_size, strict=False))
+
+        return ExtractedFrames(batches=[ExtractedBatch(selected_frames=list(b)) for b in equalised_batches])
+
+
+class ContrastEnhancedFrameImageExtractor(FrameImageExtractor):
+    """Extracts images with CLAHE contrast enhancement applied."""
+
+    resolution: tuple[int, int]
+    max_batch_size: int
+    contrast_enhancer: ContrastEnhancer
+
+    def __init__(
+        self,
+        resolution: tuple[int, int] = (640, 360),
+        max_batch_size: int = 30,
+        clip_limit: float = 2.0,
+        tile_grid_size: tuple[int, int] = (8, 8),
+    ) -> None:
+        self.resolution = resolution
+        self.max_batch_size = max_batch_size
+        self.contrast_enhancer = ContrastEnhancer(
+            clip_limit=clip_limit,
+            tile_grid_size=tile_grid_size,
+        )
+
+    def extract_images(self, frames: Iterable[Frame], outdir: Path) -> ExtractedFrames:
+        outdir.mkdir(parents=True, exist_ok=True)
+
+        current_batch: list[ExtractedFrame] = []
+        all_batches: list[list[ExtractedFrame]] = []
+
+        for frame in frames:
+            if not frame.filter_keep:
+                continue
+
+            frame = self.contrast_enhancer.handle(frame)
 
             rescaled_image = resize_with_aspect_ratio(frame.output, self.resolution)
             image_path = outdir / f"frame_{frame.frame_no:05d}.jpg"

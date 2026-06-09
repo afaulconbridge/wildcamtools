@@ -8,9 +8,14 @@ from wildcamtools.lib.ai import Backend
 from wildcamtools.lib.ai.llm import create_analyser
 from wildcamtools.lib.ai.pipeline import (
     AICroppedFrameImageExtractor,
+    AiPipeline,
+    ContrastEnhancedFrameImageExtractor,
+    LlmImageBatchQuery,
+    MajorityResultReconciler,
     MotionFrameSelector,
     RescaledFrameImageExtractor,
     SSIMFrameSelector,
+    VerifiedImageBatchQuery,
 )
 from wildcamtools.lib.ai.pipeline_config import (
     AiPipelineConfig,
@@ -24,6 +29,7 @@ from wildcamtools.lib.ai.pipeline_config import (
     ReconcilerConfig,
     ReconcilerType,
 )
+from wildcamtools.lib.ai.types import ConfidenceLevel
 
 
 class TestFrameSelectorConfig:
@@ -334,7 +340,6 @@ class TestFrameExtractorConfig:
         config = FrameExtractorConfig(extractor_type=FrameExtractorType.AI_CROPPED, resolution=(320, 240))
         analyser = create_analyser(backend=Backend.OLLAMA, model="test", url="http://test", api_key=None)
         extractor = config.create_frame_extractor(analyser_llm=analyser)
-        from wildcamtools.lib.ai.pipeline import AICroppedFrameImageExtractor
 
         assert isinstance(extractor, AICroppedFrameImageExtractor)
         assert extractor.resolution == (320, 240)
@@ -368,6 +373,47 @@ class TestFrameExtractorConfig:
     def test_extractor_type_from_dict(self) -> None:
         config = FrameExtractorConfig.model_validate({"extractor_type": "ai_cropped"})
         assert config.extractor_type == FrameExtractorType.AI_CROPPED
+
+    def test_extractor_type_contrast_enhanced(self) -> None:
+        config = FrameExtractorConfig.model_validate({"extractor_type": "contrast_enhanced"})
+        assert config.extractor_type == FrameExtractorType.CONTRAST_ENHANCED
+
+    def test_create_frame_extractor_contrast_enhanced_default(self) -> None:
+        config = FrameExtractorConfig(extractor_type=FrameExtractorType.CONTRAST_ENHANCED)
+        extractor = config.create_frame_extractor()
+        assert isinstance(extractor, ContrastEnhancedFrameImageExtractor)
+        assert extractor.resolution == (640, 360)
+        assert extractor.max_batch_size == 30
+        assert extractor.contrast_enhancer.clip_limit == 2.0
+        assert extractor.contrast_enhancer.tile_grid_size == (8, 8)
+
+    def test_create_frame_extractor_contrast_enhanced_custom(self) -> None:
+        config = FrameExtractorConfig(
+            extractor_type=FrameExtractorType.CONTRAST_ENHANCED,
+            resolution=(1280, 720),
+            max_batch_size=20,
+            clip_limit=3.0,
+            tile_grid_size=(16, 16),
+        )
+        extractor = config.create_frame_extractor()
+        assert isinstance(extractor, ContrastEnhancedFrameImageExtractor)
+        assert extractor.resolution == (1280, 720)
+        assert extractor.max_batch_size == 20
+        assert extractor.contrast_enhancer.clip_limit == 3.0
+        assert extractor.contrast_enhancer.tile_grid_size == (16, 16)
+
+    def test_contrast_enhanced_clip_limit_validation(self) -> None:
+        with pytest.raises(ValidationError) as exc_info:
+            FrameExtractorConfig(extractor_type=FrameExtractorType.CONTRAST_ENHANCED, clip_limit=0.0)
+        assert "gt=0.0" in str(exc_info.value) or "greater than 0" in str(exc_info.value).lower()
+
+    def test_contrast_enhanced_tile_grid_size_validation(self) -> None:
+        with pytest.raises(ValidationError) as exc_info:
+            FrameExtractorConfig(
+                extractor_type=FrameExtractorType.CONTRAST_ENHANCED,
+                tile_grid_size=(0, 8),
+            )
+        assert "gt=0" in str(exc_info.value) or "greater than 0" in str(exc_info.value).lower()
 
 
 class TestLlmConfig:
@@ -468,7 +514,6 @@ class TestImageBatchQueryConfig:
             ImageBatchQueryConfig.model_validate({"prompt": "test", "query_type": "invalid"})
 
     def test_create_llm_image_batch_query(self) -> None:
-        from wildcamtools.lib.ai.pipeline import LlmImageBatchQuery
 
         config = ImageBatchQueryConfig(prompt="test prompt")
         llm = create_analyser(backend=Backend.OLLAMA, model="test", url="http://test", api_key=None)
@@ -479,7 +524,6 @@ class TestImageBatchQueryConfig:
         assert query.llm is llm
 
     def test_create_verified_image_batch_query(self) -> None:
-        from wildcamtools.lib.ai.pipeline import VerifiedImageBatchQuery
 
         config = ImageBatchQueryConfig(
             query_type=ImageBatchQueryType.VERIFIED,
@@ -495,7 +539,6 @@ class TestImageBatchQueryConfig:
         assert query.min_confidence == "high"
 
     def test_create_verified_image_batch_query_with_custom_verification_prompt(self) -> None:
-        from wildcamtools.lib.ai.pipeline import VerifiedImageBatchQuery
 
         config = ImageBatchQueryConfig(
             query_type=ImageBatchQueryType.VERIFIED,
@@ -519,7 +562,6 @@ class TestReconcilerConfig:
         assert config.reconciler_type == ReconcilerType.MAJORITY
 
     def test_create_reconciler(self) -> None:
-        from wildcamtools.lib.ai.pipeline import MajorityResultReconciler
 
         config = ReconcilerConfig()
         reconciler = config.create_reconciler()
@@ -606,7 +648,6 @@ class TestAiPipelineConfig:
         assert restored.query.prompt == original.query.prompt
 
     def test_create_pipeline(self) -> None:
-        from wildcamtools.lib.ai.pipeline import AiPipeline, LlmImageBatchQuery
 
         config = AiPipelineConfig(
             llm=LlmConfig(model="test-model", url="http://localhost:8080/v1"),
@@ -645,7 +686,6 @@ class TestAiPipelineConfig:
         assert pipeline.frame_image_extractor.aicropfinder.expansion == 0.25
 
     def test_create_pipeline_with_verified_query(self) -> None:
-        from wildcamtools.lib.ai.pipeline import VerifiedImageBatchQuery
 
         config = AiPipelineConfig(
             llm=LlmConfig(model="test-model", url="http://localhost:8080/v1"),
@@ -657,8 +697,6 @@ class TestAiPipelineConfig:
         assert pipeline.image_batch_query.min_confidence == "medium"
 
     def test_create_pipeline_with_verified_query_custom_params(self) -> None:
-        from wildcamtools.lib.ai.pipeline import VerifiedImageBatchQuery
-        from wildcamtools.lib.ai.types import ConfidenceLevel
 
         config = AiPipelineConfig(
             llm=LlmConfig(model="test-model", url="http://localhost:8080/v1"),

@@ -1,4 +1,5 @@
 import json
+import logging
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -184,7 +185,6 @@ class TestOllamaLlmSystemMessage:
     def test_system_message_logged_at_debug_level(
         self, mock_client_class: MagicMock, sample_image: Path, caplog: pytest.LogCaptureFixture
     ) -> None:
-        import logging
 
         mock_client = MagicMock()
         mock_client.chat.return_value = MagicMock()

@@ -1,6 +1,7 @@
 import logging
 from pathlib import Path
 
+import av
 import pytest
 
 from wildcamtools.lib.segment import create_segment_process
@@ -96,13 +97,10 @@ def test_pyav_segment_process_with_audio(temp_output_dir: Path, video_path: Path
         output=temp_output_dir,
         duration=2.0,
     )
-
     process.wait(timeout=10.0)
 
     segments = list(temp_output_dir.glob("*.mp4"))
     assert len(segments) > 0
-
-    import av
 
     for segment in segments:
         with av.open(str(segment)) as container:

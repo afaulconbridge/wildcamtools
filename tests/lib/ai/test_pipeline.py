@@ -15,6 +15,7 @@ from wildcamtools.lib.ai.llm.abstract import AbstractLlm
 from wildcamtools.lib.ai.pipeline import (
     AICroppedFrameImageExtractor,
     BatchResult,
+    ContrastEnhancedFrameImageExtractor,
     ExtractedBatch,
     ExtractedFrame,
     ExtractedFrames,
@@ -1270,6 +1271,186 @@ class TestAICroppedFrameImageExtractor:
         image_files = list(subdir.glob("*.jpg"))
         # should be a whole image and a crop foor each frame
         assert len(image_files) == len(sample_frames) * 2
+
+
+class TestContrastEnhancedFrameImageExtractor:
+    """Tests for ContrastEnhancedFrameImageExtractor specific functionality."""
+
+    def test_contrast_enhanced_extractor_initializes_with_params(self) -> None:
+        """Test constructor stores parameters."""
+        extractor = ContrastEnhancedFrameImageExtractor(
+            resolution=(320, 240),
+            max_batch_size=20,
+            clip_limit=2.5,
+            tile_grid_size=(16, 16),
+        )
+        assert extractor.resolution == (320, 240)
+        assert extractor.max_batch_size == 20
+        assert extractor.contrast_enhancer.clip_limit == 2.5
+        assert extractor.contrast_enhancer.tile_grid_size == (16, 16)
+
+    def test_contrast_enhanced_extractor_with_default_values(self) -> None:
+        """Test constructor with default values."""
+        extractor = ContrastEnhancedFrameImageExtractor()
+        assert extractor.resolution == (640, 360)
+        assert extractor.max_batch_size == 30
+        assert extractor.contrast_enhancer.clip_limit == 2.0
+        assert extractor.contrast_enhancer.tile_grid_size == (8, 8)
+
+    def test_extract_images_returns_sequence(
+        self,
+        sample_frames: list[Frame],
+        tmp_path: Path,
+    ) -> None:
+        """Verify extract_images returns a Sequence."""
+        extractor = ContrastEnhancedFrameImageExtractor()
+        result = extractor.extract_images(sample_frames, tmp_path)
+        assert isinstance(result, ExtractedFrames)
+
+    def test_extract_images_creates_files(
+        self,
+        sample_frames: list[Frame],
+        tmp_path: Path,
+    ) -> None:
+        """Verify images are written to output directory."""
+        extractor = ContrastEnhancedFrameImageExtractor()
+        extractor.extract_images(sample_frames, tmp_path)
+
+        image_files = list(tmp_path.glob("*.jpg"))
+        assert len(image_files) == len(sample_frames)
+
+    def test_extract_images_downscales_images(
+        self,
+        sample_frames: list[Frame],
+        tmp_path: Path,
+    ) -> None:
+        """Test output images match target resolution."""
+        resolution = (320, 240)
+        extractor = ContrastEnhancedFrameImageExtractor(resolution=resolution)
+        extractor.extract_images(sample_frames, tmp_path)
+
+        for image_file in tmp_path.glob("*.jpg"):
+            img = cv2.imread(str(image_file))
+            assert img is not None
+            h, w = img.shape[:2]
+            assert w <= resolution[0]
+            assert h <= resolution[1]
+
+    def test_contrast_enhanced_extractor_preserves_aspect_ratio(
+        self,
+        sample_frames: list[Frame],
+        tmp_path: Path,
+    ) -> None:
+        """Test aspect ratio is maintained in output images."""
+        resolution = (320, 240)
+        extractor = ContrastEnhancedFrameImageExtractor(resolution=resolution)
+        extractor.extract_images(sample_frames, tmp_path)
+
+        original_ratio = sample_frames[0].width_raw / sample_frames[0].height_raw
+
+        for image_file in tmp_path.glob("*.jpg"):
+            img = cv2.imread(str(image_file))
+            assert img is not None
+            h, w = img.shape[:2]
+            output_ratio = w / h
+            assert abs(output_ratio - original_ratio) < 0.05
+
+    @pytest.mark.parametrize("resolution", [(128, 72), (640, 360), (800, 600), (1024, 768)])
+    def test_contrast_enhanced_extractor_with_custom_resolution(
+        self,
+        sample_frames: list[Frame],
+        tmp_path: Path,
+        resolution: tuple[int, int],
+    ) -> None:
+        """Test custom resolutions work correctly."""
+        extractor = ContrastEnhancedFrameImageExtractor(resolution=resolution)
+        extractor.extract_images(sample_frames, tmp_path)
+
+        for image_file in tmp_path.glob("*.jpg"):
+            img = cv2.imread(str(image_file))
+            assert img is not None
+            h, w = img.shape[:2]
+            assert w <= resolution[0]
+            assert h <= resolution[1]
+
+    def test_contrast_enhanced_extractor_skips_filtered_frames(
+        self,
+        sample_frames_with_filtering: list[Frame],
+        tmp_path: Path,
+    ) -> None:
+        """Test only filter_keep=True frames are processed."""
+        extractor = ContrastEnhancedFrameImageExtractor()
+        extractor.extract_images(sample_frames_with_filtering, tmp_path)
+
+        image_files = list(tmp_path.glob("*.jpg"))
+        expected_count = sum(1 for f in sample_frames_with_filtering if f.filter_keep)
+        assert len(image_files) == expected_count
+
+    def test_contrast_enhanced_extractor_batch_structure(
+        self,
+        sample_frames: list[Frame],
+        tmp_path: Path,
+    ) -> None:
+        """Test returns list of lists (batches)."""
+        extractor = ContrastEnhancedFrameImageExtractor()
+        result = extractor.extract_images(sample_frames, tmp_path)
+
+        assert isinstance(result, ExtractedFrames)
+        assert len(result.batches) == 1
+        assert len(result.batches[0].selected_frames) == len(sample_frames)
+
+    def test_contrast_enhanced_extractor_max_batch_size(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """Test max_batch_size splits batches correctly."""
+        frames = []
+        for i in range(75):
+            raw = np.zeros((100, 200, 3), dtype=np.uint8)
+            raw[:, :] = [(i * 10) % 256, (i * 20) % 256, (i * 30) % 256]
+            frame = Frame(raw=raw, frame_no=i, filter_keep=True)
+            frames.append(frame)
+        extractor = ContrastEnhancedFrameImageExtractor(max_batch_size=30)
+        result = extractor.extract_images(frames, tmp_path)
+
+        assert len(result.batches) == 3
+        assert len(result.batches[0].selected_frames) == 25
+        assert len(result.batches[1].selected_frames) == 25
+        assert len(result.batches[2].selected_frames) == 25
+
+    def test_extract_images_with_empty_frames(self, tmp_path: Path) -> None:
+        """Test edge case with empty frame list."""
+        extractor = ContrastEnhancedFrameImageExtractor()
+        result = extractor.extract_images([], tmp_path)
+
+        assert result == ExtractedFrames(batches=[])
+
+    def test_contrast_enhanced_extractor_with_all_filtered_frames(
+        self,
+        sample_frames_all_filtered: list[Frame],
+        tmp_path: Path,
+    ) -> None:
+        """Test when all frames have filter_keep=False."""
+        extractor = ContrastEnhancedFrameImageExtractor()
+        result = extractor.extract_images(sample_frames_all_filtered, tmp_path)
+
+        assert result == ExtractedFrames(batches=[])
+        image_files = list(tmp_path.glob("*.jpg"))
+        assert len(image_files) == 0
+
+    def test_extract_images_uses_outdir(
+        self,
+        sample_frames: list[Frame],
+        tmp_path: Path,
+    ) -> None:
+        """Test files are created in correct directory."""
+        subdir = tmp_path / "subdir" / "nested"
+        extractor = ContrastEnhancedFrameImageExtractor()
+        extractor.extract_images(sample_frames, subdir)
+
+        assert subdir.exists()
+        image_files = list(subdir.glob("*.jpg"))
+        assert len(image_files) == len(sample_frames)
 
 
 class TestLlmImageBatchQuery:

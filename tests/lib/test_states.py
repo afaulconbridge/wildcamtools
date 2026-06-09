@@ -4,7 +4,7 @@ from pathlib import Path
 import pytest
 
 from wildcamtools.lib.motion import MogMotion
-from wildcamtools.lib.states import Watcher, WatcherStateEnum, WatcherTransitionMetrics
+from wildcamtools.lib.states import Watcher, WatcherStateEnum, WatcherTransitionMetrics, create_motion_process
 from wildcamtools.lib.vidio import VideoReader
 
 
@@ -39,7 +39,6 @@ def test_states(video_path: str) -> None:
 
 def test_create_motion_process_restart_on_exit_auto_detect_file(video_path: Path) -> None:
     """Test that file paths auto-detect as restart_on_exit=False."""
-    from wildcamtools.lib.states import WatcherTransitionMetrics, create_motion_process
 
     msg_queue: Queue = Queue()
     metrics = WatcherTransitionMetrics()
@@ -63,7 +62,6 @@ def test_create_motion_process_restart_on_exit_auto_detect_file(video_path: Path
 
 def test_create_motion_process_restart_on_exit_auto_detect_rtsp() -> None:
     """Test that RTSP URLs auto-detect as restart_on_exit=True."""
-    from wildcamtools.lib.states import WatcherTransitionMetrics, create_motion_process
 
     msg_queue: Queue = Queue()
     metrics = WatcherTransitionMetrics()
@@ -87,7 +85,6 @@ def test_create_motion_process_restart_on_exit_auto_detect_rtsp() -> None:
 
 def test_create_motion_process_restart_on_exit_explicit_override() -> None:
     """Test explicit restart_on_exit override."""
-    from wildcamtools.lib.states import WatcherTransitionMetrics, create_motion_process
 
     msg_queue: Queue = Queue()
     metrics = WatcherTransitionMetrics()
@@ -116,8 +113,6 @@ def test_motion_window_tracks_amber_to_green() -> None:
     This is a regression test for the bug where windows were only tracked during
     RED state, causing fragmentation when the state machine oscillated rapidly.
     """
-    from wildcamtools.lib.motion import MogMotion
-    from wildcamtools.lib.states import Watcher, WatcherStateEnum, WatcherTransitionMetrics
 
     watcher = Watcher(
         motion=MogMotion(history=10, threshold=16, detect_shadows=False, kernel_size=0.005),

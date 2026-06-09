@@ -440,6 +440,52 @@ class FrameTiler(FrameHandler):
         return frame
 
 
+class ContrastEnhancer(FrameHandler):
+    """Applies CLAHE contrast enhancement to improve visibility in low-light/IR footage."""
+
+    clip_limit: float
+    tile_grid_size: tuple[int, int]
+    clahe: cv2.CLAHE
+
+    def __init__(
+        self,
+        clip_limit: float = 2.0,
+        tile_grid_size: tuple[int, int] = (8, 8),
+    ) -> None:
+        if clip_limit <= 0.0:
+            raise ValueError(f"clip_limit must be positive, got {clip_limit}")
+        if tile_grid_size[0] <= 0 or tile_grid_size[1] <= 0:
+            raise ValueError(f"tile_grid_size values must be positive, got {tile_grid_size}")
+        self.clip_limit = clip_limit
+        self.tile_grid_size = tile_grid_size
+        self.clahe = cv2.createCLAHE(
+            clipLimit=clip_limit,
+            tileGridSize=tile_grid_size,
+        )
+        super().__init__()
+
+    def handle(self, frame: Frame) -> Frame:
+        output = frame.output
+        lab = cv2.cvtColor(output, cv2.COLOR_RGB2LAB)
+        l_channel = lab[:, :, 0]
+        enhanced_l = self.clahe.apply(l_channel)
+        enhanced_lab = lab.copy()
+        enhanced_lab[:, :, 0] = enhanced_l
+        enhanced_rgb = cv2.cvtColor(enhanced_lab, cv2.COLOR_LAB2RGB)
+
+        if frame.crop is not None or frame.crop_bbox is not None:
+            logger.warning("Enhancing contrast of cropped frame, crop will be dropped")
+        if frame.rescale is not None:
+            logger.warning("Enhancing contrast of rescaled frame, rescale will be dropped")
+
+        return Frame(
+            enhanced_rgb,
+            frame_no=frame.frame_no,
+            filter_keep=frame.filter_keep,
+            motion_proportion=frame.motion_proportion,
+        )
+
+
 @dataclass(kw_only=True)
 class CropPanConfig:
     """Configuration for crop and pan features."""

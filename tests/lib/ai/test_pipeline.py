@@ -23,11 +23,13 @@ from wildcamtools.lib.ai.pipeline import (
     FpsRescalingFrameSelector,
     LlmImageBatchQuery,
     MotionFrameSelector,
+    PipelineOutcome,
     RescaledFrameImageExtractor,
     SSIMFrameSelector,
     VerifiedImageBatchQuery,
 )
 from wildcamtools.lib.ai.types import ConfidenceLevel, FrameResult, Result, ResultList, RichResult, VerificationResult
+from wildcamtools.lib.stats import Colourspace, VideoStats
 
 
 @pytest.fixture(name="sample_frames")
@@ -507,6 +509,36 @@ class TestFrameImagePair:
         json_data = pair.model_dump()
         assert json_data == {"frame_no": 123}
 
+    def test_frame_image_pair_round_trip_serialization(self) -> None:
+        """Test ExtractedFrame can be serialized and deserialized (round-trip)."""
+        original = ExtractedFrame(path=Path("/test/image.jpg"), frame_no=42)
+        json_str = original.model_dump_json()
+        deserialized = ExtractedFrame.model_validate_json(json_str)
+        assert deserialized.frame_no == 42
+        assert deserialized.path is None
+
+    def test_frame_image_pair_require_path_with_path_set(self) -> None:
+        """Test require_path() returns path when it's set."""
+        path = Path("/test/image.jpg")
+        pair = ExtractedFrame(path=path, frame_no=42)
+        result = pair.require_path()
+        assert result == path
+        assert isinstance(result, Path)
+
+    def test_frame_image_pair_require_path_with_path_none(self) -> None:
+        """Test require_path() raises ValueError when path is None."""
+        pair = ExtractedFrame(frame_no=42)
+        with pytest.raises(ValueError, match=r"ExtractedFrame\.path is required"):
+            pair.require_path()
+
+    def test_frame_image_pair_require_path_after_deserialization(self) -> None:
+        """Test require_path() raises ValueError after JSON deserialization."""
+        original = ExtractedFrame(path=Path("/test/image.jpg"), frame_no=42)
+        json_str = original.model_dump_json()
+        deserialized = ExtractedFrame.model_validate_json(json_str)
+        with pytest.raises(ValueError, match=r"ExtractedFrame\.path is required"):
+            deserialized.require_path()
+
 
 class TestExtractedBatch:
     """Tests for ExtractedBatch class."""
@@ -557,6 +589,35 @@ class TestBatchResult:
         batch = BatchResult(selected_frames=pairs)
         assert isinstance(batch, ExtractedBatch)
         assert len(batch.selected_frames) == 1
+
+    def test_batch_result_round_trip_serialization(self) -> None:
+        """Test BatchResult can be serialized and deserialized (round-trip)."""
+        pairs = [ExtractedFrame(path=Path(f"frame_{i}.jpg"), frame_no=i) for i in range(3)]
+        result = RichResult(
+            is_animal_present=True,
+            is_animal_unknown=False,
+            defining_features="test features",
+            species_name="Red Fox",
+            confidence=ConfidenceLevel.HIGH,
+        )
+        original = BatchResult(selected_frames=pairs, result=result)
+        json_str = original.model_dump_json()
+        deserialized = BatchResult.model_validate_json(json_str)
+        assert len(deserialized.selected_frames) == 3
+        assert all(frame.path is None for frame in deserialized.selected_frames)
+        assert [f.frame_no for f in deserialized.selected_frames] == [0, 1, 2]
+        assert deserialized.result is not None
+        assert deserialized.result.species_name == "Red Fox"
+
+    def test_batch_result_round_trip_without_result(self) -> None:
+        """Test BatchResult without result can be serialized and deserialized."""
+        pairs = [ExtractedFrame(path=Path("frame.jpg"), frame_no=1)]
+        original = BatchResult(selected_frames=pairs)
+        json_str = original.model_dump_json()
+        deserialized = BatchResult.model_validate_json(json_str)
+        assert len(deserialized.selected_frames) == 1
+        assert deserialized.selected_frames[0].frame_no == 1
+        assert deserialized.result is None
 
 
 class TestExtractedFrames:
@@ -671,6 +732,101 @@ class TestExtractedFramesWithResults:
         assert isinstance(frames, ExtractedFrames)
         assert frames.frame_ids == [[1]]
         assert len(frames) == 1
+
+
+class TestPipelineOutcome:
+    """Tests for PipelineOutcome serialization and round-trip."""
+
+    def test_pipeline_outcome_creation(self) -> None:
+        """Test PipelineOutcome can be created with result, stats, and batches."""
+        result = RichResult(
+            is_animal_present=True,
+            is_animal_unknown=False,
+            defining_features="test",
+            species_name="fox",
+            confidence=ConfidenceLevel.HIGH,
+        )
+        stats = VideoStats(fps=30.0, frame_count=100, x=1920, y=1080, colourspace=Colourspace.RGB)
+        pairs = [ExtractedFrame(path=Path("frame.jpg"), frame_no=1)]
+        batch = BatchResult(selected_frames=pairs, result=result)
+        outcome = PipelineOutcome(result=result, stats=stats, batches=[batch])
+        assert outcome.result.species_name == "fox"
+        assert outcome.stats.fps == 30.0
+        assert len(outcome.batches) == 1
+
+    def test_pipeline_outcome_round_trip_serialization(self) -> None:
+        """Test PipelineOutcome can be serialized and deserialized (round-trip)."""
+        result = RichResult(
+            is_animal_present=True,
+            is_animal_unknown=False,
+            defining_features="test features",
+            species_name="Red Fox",
+            confidence=ConfidenceLevel.HIGH,
+        )
+        stats = VideoStats(fps=30.0, frame_count=100, x=1920, y=1080, colourspace=Colourspace.RGB)
+        pairs = [ExtractedFrame(path=Path(f"frame_{i}.jpg"), frame_no=i) for i in range(3)]
+        batch = BatchResult(selected_frames=pairs, result=result)
+        original = PipelineOutcome(result=result, stats=stats, batches=[batch])
+
+        json_str = original.model_dump_json()
+        deserialized = PipelineOutcome.model_validate_json(json_str)
+
+        assert deserialized.result.species_name == "Red Fox"
+        assert deserialized.stats.fps == 30.0
+        assert deserialized.stats.frame_count == 100
+        assert len(deserialized.batches) == 1
+        assert len(deserialized.batches[0].selected_frames) == 3
+        assert all(frame.path is None for frame in deserialized.batches[0].selected_frames)
+        assert [f.frame_no for f in deserialized.batches[0].selected_frames] == [0, 1, 2]
+
+    def test_pipeline_outcome_round_trip_empty_batches(self) -> None:
+        """Test PipelineOutcome with empty batches can be serialized and deserialized."""
+        result = RichResult(
+            is_animal_present=False,
+            is_animal_unknown=False,
+            defining_features="",
+            species_name="no animal",
+            confidence=ConfidenceLevel.HIGH,
+        )
+        stats = VideoStats(fps=30.0, frame_count=100, x=1920, y=1080, colourspace=Colourspace.RGB)
+        original = PipelineOutcome(result=result, stats=stats, batches=[])
+
+        json_str = original.model_dump_json()
+        deserialized = PipelineOutcome.model_validate_json(json_str)
+
+        assert deserialized.result.is_animal_present is False
+        assert deserialized.stats.fps == 30.0
+        assert len(deserialized.batches) == 0
+
+    def test_pipeline_outcome_round_trip_multiple_batches(self) -> None:
+        """Test PipelineOutcome with multiple batches can be serialized and deserialized."""
+        result1 = RichResult(
+            is_animal_present=True,
+            is_animal_unknown=False,
+            defining_features="features 1",
+            species_name="Fox",
+            confidence=ConfidenceLevel.HIGH,
+        )
+        result2 = RichResult(
+            is_animal_present=True,
+            is_animal_unknown=False,
+            defining_features="features 2",
+            species_name="Badger",
+            confidence=ConfidenceLevel.MEDIUM,
+        )
+        stats = VideoStats(fps=30.0, frame_count=100, x=1920, y=1080, colourspace=Colourspace.RGB)
+        batch1 = BatchResult(selected_frames=[ExtractedFrame(path=Path("f1.jpg"), frame_no=1)], result=result1)
+        batch2 = BatchResult(selected_frames=[ExtractedFrame(path=Path("f2.jpg"), frame_no=2)], result=result2)
+        original = PipelineOutcome(result=result1, stats=stats, batches=[batch1, batch2])
+
+        json_str = original.model_dump_json()
+        deserialized = PipelineOutcome.model_validate_json(json_str)
+
+        assert len(deserialized.batches) == 2
+        assert deserialized.batches[0].result is not None
+        assert deserialized.batches[0].result.species_name == "Fox"
+        assert deserialized.batches[1].result is not None
+        assert deserialized.batches[1].result.species_name == "Badger"
 
 
 class TestRescaledFrameImageExtractor:

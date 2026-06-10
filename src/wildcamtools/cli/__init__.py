@@ -3,6 +3,7 @@ import logging
 import typer
 
 from wildcamtools.cli.ai import app as ai_app
+from wildcamtools.cli.db import app as db_app
 from wildcamtools.cli.frames import app as frames_app
 from wildcamtools.cli.label import app as label_app
 from wildcamtools.cli.motion_mog2 import app as motion_app
@@ -30,6 +31,7 @@ app.add_typer(label_app, name="label")
 app.add_typer(frames_app, name="frames")
 app.add_typer(ai_app, name="ai")
 app.add_typer(results_app, name="results")
+app.add_typer(db_app, name="db")
 
 
 if __name__ == "__main__":

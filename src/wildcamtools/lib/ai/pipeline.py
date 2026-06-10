@@ -31,12 +31,31 @@ class ExtractedFrame(BaseModel):
     """Pairs an image path with its frame number.
 
     Attributes:
-        path: Path to the image file (excluded from JSON serialization)
+        path: Path to the image file (excluded from JSON serialization, optional for deserialization)
         frame_no: Frame number (included in JSON serialization)
     """
 
-    path: Path = Field(exclude=True)
+    path: Path | None = Field(exclude=True, default=None)
     frame_no: int
+
+    def require_path(self) -> Path:
+        """Require that path is set, raising ValueError if not.
+
+        This should be called before accessing path during pipeline execution
+        to ensure the field was properly populated.
+
+        Returns:
+            The path to the image file
+
+        Raises:
+            ValueError: If path is None
+        """
+        if self.path is None:
+            raise ValueError(
+                f"ExtractedFrame.path is required but is None for frame_no={self.frame_no}. "
+                "This indicates a bug in the pipeline execution."
+            )
+        return self.path
 
 
 class ExtractedBatch(BaseModel):
@@ -77,7 +96,7 @@ class ExtractedFrames(BaseModel):
     def get_batches(self) -> Iterator[list[Path]]:
         """Iterate over batches of image paths."""
         for batch in self.batches:
-            yield [pair.path for pair in batch.selected_frames]
+            yield [pair.require_path() for pair in batch.selected_frames]
 
     def __len__(self) -> int:
         """Return number of batches."""
@@ -376,7 +395,7 @@ Return results as a ResultList with species_name and frames array."""
 
             self.aicropfinder.detections = self.aicropfinder.analyser.message_with_schema(
                 message=self.DETECTION_PROMPT,
-                images=[pair.path for pair in batch_pairs],
+                images=[pair.require_path() for pair in batch_pairs],
                 response_class=ResultList,
             )
 
@@ -401,7 +420,7 @@ class ImageBatchQuery(ABC):
     def query_image_batches(self, image_batches: ExtractedFrames) -> ExtractedFramesWithResults:
         batch_results: list[BatchResult] = []
         for batch in image_batches.batches:
-            result = self.query_images([pair.path for pair in batch.selected_frames])
+            result = self.query_images([pair.require_path() for pair in batch.selected_frames])
             batch_results.append(BatchResult(selected_frames=batch.selected_frames, result=result))
         return ExtractedFramesWithResults(batches=batch_results)
 

@@ -3,17 +3,14 @@ from pathlib import Path
 from typing import Annotated
 
 import typer
-from pydantic import BaseModel
 
-from wildcamtools.lib.ai.pipeline import PipelineOutcome
+from wildcamtools.lib.ai.batch_processing import (
+    BatchPipelineOutput,
+    discover_video_files,
+    run_batch_pipeline,
+)
 from wildcamtools.lib.ai.pipeline_config import AiPipelineConfig
 from wildcamtools.lib.ai.pipeline_evaluation import evaluate_ai_pipeline
-
-
-class PipelineRunOutput(BaseModel):
-    config: AiPipelineConfig
-    outcome: PipelineOutcome
-
 
 app = typer.Typer()
 logger = logging.getLogger(__name__)
@@ -45,7 +42,7 @@ def run(
     outcome = pipeline.run(video)
     logger.info("Pipeline execution completed")
 
-    output_data = PipelineRunOutput(config=pipeline_config, outcome=outcome)
+    output_data = BatchPipelineOutput(config=pipeline_config, outcome=outcome)
     json_output = output_data.model_dump_json(indent=2)
 
     if output:
@@ -140,3 +137,92 @@ def run_evaluate(
         typer.secho(json_output)
 
     summary.print_summary()
+
+
+def _validate_run_batch_inputs(config: Path, video_dir: Path, output_dir: Path, max_workers: int | None) -> None:
+    """Validate inputs for run_batch command."""
+    if not config.exists():
+        typer.secho(f"Error: Config file not found: {config}", err=True)
+        raise typer.Exit(code=1)
+    if not config.is_file():
+        typer.secho(f"Error: Config path is not a file: {config}", err=True)
+        raise typer.Exit(code=1)
+    if not video_dir.exists():
+        typer.secho(f"Error: Video directory not found: {video_dir}", err=True)
+        raise typer.Exit(code=1)
+    if not video_dir.is_dir():
+        typer.secho(f"Error: Video path is not a directory: {video_dir}", err=True)
+        raise typer.Exit(code=1)
+    if max_workers is not None and max_workers < 1:
+        typer.secho(f"Error: --max-workers must be at least 1, got {max_workers}", err=True)
+        raise typer.Exit(code=1)
+
+    # Create output directory if it doesn't exist
+    if not output_dir.exists():
+        logger.info("Creating output directory: %s", output_dir)
+        output_dir.mkdir(parents=True, exist_ok=True)
+
+
+def _report_batch_results(results: list) -> None:
+    """Report batch processing results to the user."""
+    success_count = sum(1 for r in results if r.error is None)
+    error_count = sum(1 for r in results if r.error is not None)
+
+    typer.secho("\nBatch processing completed:")
+    typer.secho(f"  Successful: {success_count}")
+    typer.secho(f"  Errors: {error_count}")
+
+    if error_count > 0:
+        typer.secho("\nFailed videos:", err=True)
+        for result in results:
+            if result.error:
+                typer.secho(f"  - {result.video_path}: {result.error}", err=True)
+        raise typer.Exit(code=1)
+
+
+@app.command()
+def run_batch(
+    config: Annotated[Path, typer.Argument(metavar="CONFIG", help="Path to JSON configuration file")],
+    video_dir: Annotated[Path, typer.Argument(metavar="VIDEO_DIR", help="Directory containing video files")],
+    output_dir: Annotated[Path, typer.Argument(metavar="OUTPUT_DIR", help="Directory for JSON output files")],
+    max_workers: Annotated[
+        int | None, typer.Option("-w", "--max-workers", help="Maximum worker processes (default: CPU count)")
+    ] = None,
+    recursive: Annotated[bool, typer.Option("-r", "--recursive", help="Search recursively for video files")] = True,
+    overwrite: Annotated[bool, typer.Option("--overwrite", help="Overwrite existing output files")] = False,
+) -> None:
+    """Run AI pipeline on multiple videos in parallel with resume capability.
+
+    Discovers video files in VIDEO_DIR and processes them using the configured AI pipeline.
+    Output JSON files are written to OUTPUT_DIR with mirrored directory structure.
+
+    By default, skips videos that already have output JSON files (resume capability).
+    Use --overwrite to reprocess videos even if output exists.
+
+    Example:
+        wildcamtools ai run-batch config.json wildlife/ results/ --max-workers 4
+    """
+    _validate_run_batch_inputs(config, video_dir, output_dir, max_workers)
+
+    logger.info("Loading config from %s", config)
+    pipeline_config = AiPipelineConfig.from_json(config)
+
+    logger.info("Discovering video files in %s", video_dir)
+    video_files = discover_video_files(video_dir, recursive=recursive)
+
+    if not video_files:
+        typer.secho("No video files found", err=True)
+        raise typer.Exit(code=1)
+
+    logger.info("Found %d video files", len(video_files))
+
+    results = run_batch_pipeline(
+        video_paths=video_files,
+        video_dir=video_dir,
+        output_dir=output_dir,
+        pipeline_config=pipeline_config,
+        max_workers=max_workers,
+        skip_existing=not overwrite,
+    )
+
+    _report_batch_results(results)

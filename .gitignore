@@ -27,4 +27,7 @@ coverage.xml
 .mypy_cache/
 cover/
 
+# local data
 wildlife
+wildcamtools.db
+results/

@@ -1,11 +1,14 @@
 import logging
-import multiprocessing
-import time
 from pathlib import Path
 
 from pydantic import BaseModel, Field
 
 from wildcamtools.lib.ai.label_comparison_config import LabelComparisonConfig
+from wildcamtools.lib.ai.parallel_processing import (
+    run_parallel_worker_pool_with_labels,
+    time_pipeline_execution,
+    validate_evaluation_paths,
+)
 from wildcamtools.lib.ai.pipeline import PipelineOutcome
 from wildcamtools.lib.ai.pipeline_config import AiPipelineConfig
 from wildcamtools.lib.ai.types import ResultClassification, RichResult
@@ -94,47 +97,24 @@ def _evaluate_video_worker(
     pipeline_config: AiPipelineConfig,
 ) -> _WorkerResult:
     video_path = Path(video_path_str)
-    try:
-        start_time = time.time()
-        pipeline = pipeline_config.create_pipeline()
-        outcome = pipeline.run(video_path)
-        end_time = time.time()
-        processing_time = end_time - start_time
-        # Extract frame numbers from batch_results
-        frame_nos = [pair.frame_no for batch in outcome.batches for pair in batch.selected_frames]
+    outcome, processing_time = time_pipeline_execution(video_path, pipeline_config)
+    # Extract frame numbers from batch_results
+    frame_nos = [pair.frame_no for batch in outcome.batches for pair in batch.selected_frames]
 
-        logger.info(
-            "Video %s: result=%s, frames=%s",
-            video_path.name,
-            outcome.result.species_name,
-            frame_nos,
-        )
+    logger.info(
+        "Video %s: result=%s, frames=%s",
+        video_path.name,
+        outcome.result.species_name,
+        frame_nos,
+    )
 
-        return _WorkerResult(
-            filename=video_path.name,
-            outcome=outcome,
-            processing_time_seconds=processing_time,
-            frame_ids=frame_nos,
-            error=None,
-        )
-    except Exception:
-        logger.exception("Worker failed for video %s", video_path.name)
-        raise
-
-
-def _validate_paths(config_path: Path, labels_path: Path, video_dir: Path | None) -> None:
-    if not config_path.exists():
-        raise FileNotFoundError(f"Config file not found: {config_path}")
-    if not config_path.is_file():
-        raise ValueError(f"Config path is not a file: {config_path}")
-    if not labels_path.exists():
-        raise FileNotFoundError(f"Labels file not found: {labels_path}")
-    if not labels_path.is_file():
-        raise ValueError(f"Labels path is not a file: {labels_path}")
-    if video_dir is not None and not video_dir.exists():
-        raise FileNotFoundError(f"Video directory not found: {video_dir}")
-    if video_dir is not None and not video_dir.is_dir():
-        raise ValueError(f"Video path is not a directory: {video_dir}")
+    return _WorkerResult(
+        filename=video_path.name,
+        outcome=outcome,
+        processing_time_seconds=processing_time,
+        frame_ids=frame_nos,
+        error=None,
+    )
 
 
 def _run_worker_pool(
@@ -144,46 +124,42 @@ def _run_worker_pool(
     max_workers: int | None,
     comparison_config: LabelComparisonConfig,
 ) -> list[PipelineEvaluationResult]:
-    ctx = multiprocessing.get_context("spawn")
     results: list[PipelineEvaluationResult] = []
     comparator = comparison_config.create_comparator()
 
-    with ctx.Pool(processes=max_workers) as pool:
-        futures = []
-        for filename, label in labelled_data.items():
-            video_path = video_dir / filename
-            if not video_path.exists():
-                logger.warning("Video not found: %s", filename)
-                continue
-            future = pool.apply_async(
-                _evaluate_video_worker,
-                args=(str(video_path), pipeline_config),
-            )
-            futures.append((label, future))
+    tasks_with_labels = []
+    for filename, label in labelled_data.items():
+        video_path = video_dir / filename
+        if not video_path.exists():
+            logger.warning("Video not found: %s", filename)
+            continue
+        tasks_with_labels.append((label, str(video_path), pipeline_config))
 
-        for label, future in futures:
-            try:
-                worker_result: _WorkerResult = future.get()
-            except Exception:
-                logger.exception("Worker task failed")
-                continue
-            if not isinstance(worker_result, _WorkerResult):
-                logger.error("Result of unexpected class")
-                continue
-            classification = comparator.compare(worker_result.outcome.result, label)
-            results.append(
-                PipelineEvaluationResult(
-                    filename=worker_result.filename,
-                    result=worker_result.outcome.result,
-                    classification=classification,
-                    label=label,
-                    error=worker_result.error,
-                    comparison_method=comparator.method_name,
-                    processing_time_seconds=worker_result.processing_time_seconds,
-                    frame_ids=worker_result.frame_ids,
-                    stats=worker_result.outcome.stats.model_dump(),
-                )
+    worker_results = run_parallel_worker_pool_with_labels(
+        tasks_with_labels=tasks_with_labels,
+        worker_fn=_evaluate_video_worker,
+        max_workers=max_workers,
+        task_description="videos",
+    )
+
+    for label, worker_result in worker_results:
+        if not isinstance(worker_result, _WorkerResult):
+            logger.error("Result of unexpected class")
+            continue
+        classification = comparator.compare(worker_result.outcome.result, label)
+        results.append(
+            PipelineEvaluationResult(
+                filename=worker_result.filename,
+                result=worker_result.outcome.result,
+                classification=classification,
+                label=label,
+                error=worker_result.error,
+                comparison_method=comparator.method_name,
+                processing_time_seconds=worker_result.processing_time_seconds,
+                frame_ids=worker_result.frame_ids,
+                stats=worker_result.outcome.stats.model_dump(),
             )
+        )
 
     return results
 
@@ -211,12 +187,7 @@ def evaluate_ai_pipeline(
         FileNotFoundError: If config_path, labels_path, or comparison_config_path doesn't exist.
         ValueError: If config_path, labels_path, or comparison_config_path is not a file.
     """
-    _validate_paths(config_path, labels_path, video_dir)
-    if comparison_config_path is not None:
-        if not comparison_config_path.exists():
-            raise FileNotFoundError(f"Label comparison config file not found: {comparison_config_path}")
-        if not comparison_config_path.is_file():
-            raise ValueError(f"Label comparison config path is not a file: {comparison_config_path}")
+    validate_evaluation_paths(config_path, labels_path, video_dir, comparison_config_path)
 
     labelled_data = load_labels(labels_path)
     if video_dir is None:

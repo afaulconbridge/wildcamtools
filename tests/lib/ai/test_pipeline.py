@@ -25,6 +25,8 @@ from wildcamtools.lib.ai.pipeline import (
     MotionFrameSelector,
     PipelineOutcome,
     RescaledFrameImageExtractor,
+    RichResultBatchResult,
+    RichResultPipelineOutcome,
     SSIMFrameSelector,
     VerifiedImageBatchQuery,
 )
@@ -600,9 +602,9 @@ class TestBatchResult:
             species_name="Red Fox",
             confidence=ConfidenceLevel.HIGH,
         )
-        original = BatchResult(selected_frames=pairs, result=result)
+        original = RichResultBatchResult(selected_frames=pairs, result=result)
         json_str = original.model_dump_json()
-        deserialized = BatchResult.model_validate_json(json_str)
+        deserialized = RichResultBatchResult.model_validate_json(json_str)
         assert len(deserialized.selected_frames) == 3
         assert all(frame.path is None for frame in deserialized.selected_frames)
         assert [f.frame_no for f in deserialized.selected_frames] == [0, 1, 2]
@@ -765,11 +767,11 @@ class TestPipelineOutcome:
         )
         stats = VideoStats(fps=30.0, frame_count=100, x=1920, y=1080, colourspace=Colourspace.RGB)
         pairs = [ExtractedFrame(path=Path(f"frame_{i}.jpg"), frame_no=i) for i in range(3)]
-        batch = BatchResult(selected_frames=pairs, result=result)
-        original = PipelineOutcome(result=result, stats=stats, batches=[batch])
+        batch = RichResultBatchResult(selected_frames=pairs, result=result)
+        original = RichResultPipelineOutcome(result=result, stats=stats, batches=[batch])
 
         json_str = original.model_dump_json()
-        deserialized = PipelineOutcome.model_validate_json(json_str)
+        deserialized = RichResultPipelineOutcome.model_validate_json(json_str)
 
         assert deserialized.result.species_name == "Red Fox"
         assert deserialized.stats.fps == 30.0
@@ -789,10 +791,10 @@ class TestPipelineOutcome:
             confidence=ConfidenceLevel.HIGH,
         )
         stats = VideoStats(fps=30.0, frame_count=100, x=1920, y=1080, colourspace=Colourspace.RGB)
-        original = PipelineOutcome(result=result, stats=stats, batches=[])
+        original = RichResultPipelineOutcome(result=result, stats=stats, batches=[])
 
         json_str = original.model_dump_json()
-        deserialized = PipelineOutcome.model_validate_json(json_str)
+        deserialized = RichResultPipelineOutcome.model_validate_json(json_str)
 
         assert deserialized.result.is_animal_present is False
         assert deserialized.stats.fps == 30.0
@@ -815,12 +817,16 @@ class TestPipelineOutcome:
             confidence=ConfidenceLevel.MEDIUM,
         )
         stats = VideoStats(fps=30.0, frame_count=100, x=1920, y=1080, colourspace=Colourspace.RGB)
-        batch1 = BatchResult(selected_frames=[ExtractedFrame(path=Path("f1.jpg"), frame_no=1)], result=result1)
-        batch2 = BatchResult(selected_frames=[ExtractedFrame(path=Path("f2.jpg"), frame_no=2)], result=result2)
-        original = PipelineOutcome(result=result1, stats=stats, batches=[batch1, batch2])
+        batch1 = RichResultBatchResult(
+            selected_frames=[ExtractedFrame(path=Path("f1.jpg"), frame_no=1)], result=result1
+        )
+        batch2 = RichResultBatchResult(
+            selected_frames=[ExtractedFrame(path=Path("f2.jpg"), frame_no=2)], result=result2
+        )
+        original = RichResultPipelineOutcome(result=result1, stats=stats, batches=[batch1, batch2])
 
         json_str = original.model_dump_json()
-        deserialized = PipelineOutcome.model_validate_json(json_str)
+        deserialized = RichResultPipelineOutcome.model_validate_json(json_str)
 
         assert len(deserialized.batches) == 2
         assert deserialized.batches[0].result is not None

@@ -1,5 +1,5 @@
 from enum import StrEnum
-from typing import Annotated
+from typing import Annotated, Literal
 
 from pydantic import BaseModel, Field
 
@@ -128,9 +128,65 @@ class ResultClassification(StrEnum):
     UNKNOWN = "unknown"
 
 
+DEFAULT_BATCH_DESCRIPTION_PROMPT = (
+    "These are sequential frames from a single wildlife camera trap video, in chronological order. "
+    "Write a concise, observational description of what is visible across these frames. "
+    "Mention the subject(s), their appearance, behaviour, and the surrounding environment. "
+    "Stick to what is actually visible; do not speculate."
+)
+
+
+DEFAULT_COMBINE_DESCRIPTION_PROMPT = (
+    "You are given multiple short descriptions of sequential segments of the same wildlife camera video, "
+    "in chronological order. Produce a single coherent description that integrates them, removes redundancy, "
+    "and reads as a natural narrative of the video. Keep the same observational tone. "
+    "Do not invent details that are not present in the segment descriptions.\n\n"
+    "Segment descriptions:\n{descriptions}"
+)
+
+
+NO_ACTIVITY_DESCRIPTION = "No activity detected in this video."
+
+
+class BatchDescription(BaseModel):
+    description: Annotated[
+        str,
+        Field(
+            min_length=1,
+            description="Free-form textual description of a batch of sequential frames.",
+        ),
+    ]
+
+
+class CombinedDescription(BaseModel):
+    description: Annotated[
+        str,
+        Field(
+            min_length=1,
+            description="Final combined textual description of a video, merged from multiple batch descriptions.",
+        ),
+    ]
+    method: Annotated[
+        Literal["llm_combine", "concatenate"],
+        Field(
+            description="How the final description was produced: 'llm_combine' for LLM-merged output, "
+            "'concatenate' for a fallback concatenation of batch descriptions.",
+        ),
+    ]
+    source_count: Annotated[
+        int,
+        Field(strict=True, ge=0, description="Number of batch descriptions that were combined."),
+    ]
+
+
 __all__ = [
+    "DEFAULT_BATCH_DESCRIPTION_PROMPT",
+    "DEFAULT_COMBINE_DESCRIPTION_PROMPT",
+    "NO_ACTIVITY_DESCRIPTION",
     "Backend",
+    "BatchDescription",
     "BoolResponse",
+    "CombinedDescription",
     "ConfidenceLevel",
     "FrameResult",
     "Result",

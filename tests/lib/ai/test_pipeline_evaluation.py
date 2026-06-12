@@ -819,13 +819,17 @@ class TestEvaluateAiPipeline:
     @pytest.fixture
     def sample_config_file(self, tmp_path: Path) -> Path:
         config = {
-            "llm": {
-                "model": "test-model",
-                "backend": "ollama",
-                "url": "http://localhost:8080/v1",
-            },
             "query": {
+                "query_type": "llm",
                 "prompt": "What species is in this image?",
+                "llm": {
+                    "model": "test-model",
+                    "backend": "ollama",
+                    "url": "http://localhost:8080/v1",
+                },
+            },
+            "reconciler": {
+                "reconciler_type": "majority",
             },
         }
         config_file = tmp_path / "config.json"
@@ -1071,13 +1075,17 @@ class TestIntegration:
         config_file = tmp_path / "config.json"
         config_file.write_text(
             json.dumps({
-                "llm": {
-                    "model": "test-model",
-                    "backend": "ollama",
-                    "url": "http://localhost:8080/v1",
-                },
                 "query": {
+                    "query_type": "llm",
                     "prompt": "What species is in this image?",
+                    "llm": {
+                        "model": "test-model",
+                        "backend": "ollama",
+                        "url": "http://localhost:8080/v1",
+                    },
+                },
+                "reconciler": {
+                    "reconciler_type": "majority",
                 },
             })
         )
@@ -1183,13 +1191,17 @@ class TestIntegration:
         config_file = tmp_path / "config.json"
         config_file.write_text(
             json.dumps({
-                "llm": {
-                    "model": "test-model",
-                    "backend": "ollama",
-                    "url": "http://localhost:8080/v1",
-                },
                 "query": {
+                    "query_type": "llm",
                     "prompt": "What species is in this image?",
+                    "llm": {
+                        "model": "test-model",
+                        "backend": "ollama",
+                        "url": "http://localhost:8080/v1",
+                    },
+                },
+                "reconciler": {
+                    "reconciler_type": "majority",
                 },
             })
         )

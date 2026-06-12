@@ -11,9 +11,9 @@ from wildcamtools.lib.ai.pipeline import (
     AiPipeline,
     ContrastEnhancedFrameImageExtractor,
     LlmImageBatchQuery,
-    MajorityResultReconciler,
     MotionFrameSelector,
     RescaledFrameImageExtractor,
+    RichResultMajorityReconciler,
     SSIMFrameSelector,
     VerifiedImageBatchQuery,
 )
@@ -482,7 +482,11 @@ class TestLlmConfig:
 
 class TestImageBatchQueryConfig:
     def test_default_values(self) -> None:
-        config = ImageBatchQueryConfig(prompt="Test prompt")
+        config = ImageBatchQueryConfig(
+            query_type=ImageBatchQueryType.LLM,
+            prompt="Test prompt",
+            llm=LlmConfig(backend=Backend.OLLAMA, model="test"),
+        )
         assert config.query_type == ImageBatchQueryType.LLM
         assert config.prompt == "Test prompt"
         assert config.verification_prompt is None
@@ -494,6 +498,7 @@ class TestImageBatchQueryConfig:
             prompt="Custom prompt",
             verification_prompt="Verify: {initial_species}",
             min_confidence="high",
+            llm=LlmConfig(backend=Backend.OLLAMA, model="test"),
         )
         assert config.query_type == ImageBatchQueryType.VERIFIED
         assert config.prompt == "Custom prompt"
@@ -502,26 +507,40 @@ class TestImageBatchQueryConfig:
 
     def test_empty_prompt(self) -> None:
         with pytest.raises(ValidationError) as exc_info:
-            ImageBatchQueryConfig(prompt="")
+            ImageBatchQueryConfig(
+                query_type=ImageBatchQueryType.LLM,
+                prompt="",
+                llm=LlmConfig(backend=Backend.OLLAMA, model="test"),
+            )
         assert "min_length=1" in str(exc_info.value) or "at least 1" in str(exc_info.value).lower()
 
     def test_strict_type_validation(self) -> None:
         with pytest.raises(ValidationError):
-            ImageBatchQueryConfig(prompt=123)
+            ImageBatchQueryConfig(
+                query_type=ImageBatchQueryType.LLM,
+                prompt=123,  # type: ignore[arg-type]
+                llm=LlmConfig(backend=Backend.OLLAMA, model="test"),
+            )
 
     def test_invalid_query_type(self) -> None:
         with pytest.raises(ValidationError):
-            ImageBatchQueryConfig.model_validate({"prompt": "test", "query_type": "invalid"})
+            ImageBatchQueryConfig.model_validate({
+                "prompt": "test",
+                "query_type": "invalid",
+                "llm": {"backend": "ollama", "model": "test"},
+            })
 
     def test_create_llm_image_batch_query(self) -> None:
 
-        config = ImageBatchQueryConfig(prompt="test prompt")
-        llm = create_analyser(backend=Backend.OLLAMA, model="test", url="http://test", api_key=None)
-        query = config.create_image_batch_query(llm)
+        config = ImageBatchQueryConfig(
+            query_type=ImageBatchQueryType.LLM,
+            prompt="test prompt",
+            llm=LlmConfig(backend=Backend.OLLAMA, model="test"),
+        )
+        query = config.create_image_batch_query()
 
         assert isinstance(query, LlmImageBatchQuery)
         assert query.prompt == "test prompt"
-        assert query.llm is llm
 
     def test_create_verified_image_batch_query(self) -> None:
 
@@ -529,13 +548,12 @@ class TestImageBatchQueryConfig:
             query_type=ImageBatchQueryType.VERIFIED,
             prompt="test prompt",
             min_confidence="high",
+            llm=LlmConfig(backend=Backend.OLLAMA, model="test"),
         )
-        llm = create_analyser(backend=Backend.OLLAMA, model="test", url="http://test", api_key=None)
-        query = config.create_image_batch_query(llm)
+        query = config.create_image_batch_query()
 
         assert isinstance(query, VerifiedImageBatchQuery)
         assert query.prompt == "test prompt"
-        assert query.llm is llm
         assert query.min_confidence == "high"
 
     def test_create_verified_image_batch_query_with_custom_verification_prompt(self) -> None:
@@ -544,9 +562,9 @@ class TestImageBatchQueryConfig:
             query_type=ImageBatchQueryType.VERIFIED,
             prompt="test prompt",
             verification_prompt="custom verify: {initial_species}",
+            llm=LlmConfig(backend=Backend.OLLAMA, model="test"),
         )
-        llm = create_analyser(backend=Backend.OLLAMA, model="test", url="http://test", api_key=None)
-        query = config.create_image_batch_query(llm)
+        query = config.create_image_batch_query()
 
         assert isinstance(query, VerifiedImageBatchQuery)
         assert query.verification_prompt == "custom verify: {initial_species}"
@@ -565,7 +583,7 @@ class TestReconcilerConfig:
 
         config = ReconcilerConfig()
         reconciler = config.create_reconciler()
-        assert isinstance(reconciler, MajorityResultReconciler)
+        assert isinstance(reconciler, RichResultMajorityReconciler)
 
     def test_reconciler_type_serialization(self) -> None:
         config = ReconcilerConfig()
@@ -579,10 +597,15 @@ class TestReconcilerConfig:
 
 class TestAiPipelineConfig:
     def test_minimal_config(self) -> None:
-        config = AiPipelineConfig(llm=LlmConfig(model="test-model"), query=ImageBatchQueryConfig(prompt="test"))
+        config = AiPipelineConfig(
+            query=ImageBatchQueryConfig(
+                query_type=ImageBatchQueryType.LLM,
+                prompt="test",
+                llm=LlmConfig(model="test-model"),
+            ),
+        )
         assert config.frame_selector.selector_type == FrameSelectorType.FPS_RESCALING
         assert config.frame_extractor.resolution == (640, 360)
-        assert config.llm.model == "test-model"
         assert config.query.prompt == "test"
         assert config.reconciler.reconciler_type == ReconcilerType.MAJORITY
 
@@ -590,24 +613,28 @@ class TestAiPipelineConfig:
         config = AiPipelineConfig(
             frame_selector=FrameSelectorConfig(fps=0.5),
             frame_extractor=FrameExtractorConfig(resolution=(1280, 720)),
-            llm=LlmConfig(model="llama-3", backend=Backend.LLAMACPP, url="http://localhost:8080/v1"),
-            query=ImageBatchQueryConfig(prompt="Custom prompt"),
+            query=ImageBatchQueryConfig(
+                query_type=ImageBatchQueryType.LLM,
+                prompt="Custom prompt",
+                llm=LlmConfig(model="llama-3", backend=Backend.LLAMACPP, url="http://localhost:8080/v1"),
+            ),
             reconciler=ReconcilerConfig(reconciler_type=ReconcilerType.MAJORITY),
         )
         assert config.frame_selector.fps == 0.5
         assert config.frame_extractor.resolution == (1280, 720)
-        assert config.llm.backend == Backend.LLAMACPP
+        assert config.query.llm.backend == Backend.LLAMACPP
 
     def test_from_json(self, tmp_path: Path) -> None:
         json_content = """
         {
-            "llm": {
-                "model": "test-model",
-                "backend": "ollama",
-                "url": "http://localhost:8080/v1"
-            },
             "query": {
-                "prompt": "Test prompt from JSON"
+                "query_type": "llm",
+                "prompt": "Test prompt from JSON",
+                "llm": {
+                    "model": "test-model",
+                    "backend": "ollama",
+                    "url": "http://localhost:8080/v1"
+                }
             }
         }
         """
@@ -615,26 +642,35 @@ class TestAiPipelineConfig:
         config_file.write_text(json_content)
 
         config = AiPipelineConfig.from_json(config_file)
-        assert config.llm.model == "test-model"
+        assert config.query.llm.model == "test-model"
         assert config.query.prompt == "Test prompt from JSON"
 
     def test_to_json(self, tmp_path: Path) -> None:
-        config = AiPipelineConfig(llm=LlmConfig(model="test-model"), query=ImageBatchQueryConfig(prompt="test"))
+        config = AiPipelineConfig(
+            query=ImageBatchQueryConfig(
+                query_type=ImageBatchQueryType.LLM,
+                prompt="test",
+                llm=LlmConfig(model="test-model"),
+            ),
+        )
         output_file = tmp_path / "output_config.json"
 
         config.to_json(output_file)
 
         assert output_file.exists()
         loaded_data = json.loads(output_file.read_text())
-        assert loaded_data["llm"]["model"] == "test-model"
+        assert loaded_data["query"]["llm"]["model"] == "test-model"
         assert loaded_data["query"]["prompt"] == "test"
 
     def test_roundtrip_json(self, tmp_path: Path) -> None:
         original = AiPipelineConfig(
             frame_selector=FrameSelectorConfig(fps=2.0),
             frame_extractor=FrameExtractorConfig(resolution=(800, 600)),
-            llm=LlmConfig(model="qwen3.5:cloud"),
-            query=ImageBatchQueryConfig(prompt="Test prompt"),
+            query=ImageBatchQueryConfig(
+                query_type=ImageBatchQueryType.LLM,
+                prompt="Test prompt",
+                llm=LlmConfig(model="qwen3.5:cloud"),
+            ),
             reconciler=ReconcilerConfig(),
         )
 
@@ -644,14 +680,17 @@ class TestAiPipelineConfig:
 
         assert restored.frame_selector.fps == original.frame_selector.fps
         assert restored.frame_extractor.resolution == original.frame_extractor.resolution
-        assert restored.llm.model == original.llm.model
+        assert restored.query.llm.model == original.query.llm.model
         assert restored.query.prompt == original.query.prompt
 
     def test_create_pipeline(self) -> None:
 
         config = AiPipelineConfig(
-            llm=LlmConfig(model="test-model", url="http://localhost:8080/v1"),
-            query=ImageBatchQueryConfig(prompt="test"),
+            query=ImageBatchQueryConfig(
+                query_type=ImageBatchQueryType.LLM,
+                prompt="test",
+                llm=LlmConfig(model="test-model", url="http://localhost:8080/v1"),
+            ),
         )
 
         pipeline = config.create_pipeline()
@@ -664,8 +703,11 @@ class TestAiPipelineConfig:
         config = AiPipelineConfig(
             frame_selector=FrameSelectorConfig(fps=5.0),
             frame_extractor=FrameExtractorConfig(resolution=(1024, 768)),
-            llm=LlmConfig(model="custom-model", url="http://example.com"),
-            query=ImageBatchQueryConfig(prompt="custom prompt"),
+            query=ImageBatchQueryConfig(
+                query_type=ImageBatchQueryType.LLM,
+                prompt="custom prompt",
+                llm=LlmConfig(model="custom-model", url="http://example.com"),
+            ),
             reconciler=ReconcilerConfig(),
         )
 
@@ -677,8 +719,11 @@ class TestAiPipelineConfig:
 
         config = AiPipelineConfig(
             frame_extractor=FrameExtractorConfig(extractor_type=FrameExtractorType.AI_CROPPED),
-            llm=LlmConfig(model="test-model", url="http://localhost:8080/v1"),
-            query=ImageBatchQueryConfig(prompt="test"),
+            query=ImageBatchQueryConfig(
+                query_type=ImageBatchQueryType.LLM,
+                prompt="test",
+                llm=LlmConfig(model="test-model", url="http://localhost:8080/v1"),
+            ),
         )
 
         pipeline = config.create_pipeline()
@@ -688,8 +733,11 @@ class TestAiPipelineConfig:
     def test_create_pipeline_with_verified_query(self) -> None:
 
         config = AiPipelineConfig(
-            llm=LlmConfig(model="test-model", url="http://localhost:8080/v1"),
-            query=ImageBatchQueryConfig(query_type=ImageBatchQueryType.VERIFIED, prompt="test"),
+            query=ImageBatchQueryConfig(
+                query_type=ImageBatchQueryType.VERIFIED,
+                prompt="test",
+                llm=LlmConfig(model="test-model", url="http://localhost:8080/v1"),
+            ),
         )
 
         pipeline = config.create_pipeline()
@@ -699,12 +747,12 @@ class TestAiPipelineConfig:
     def test_create_pipeline_with_verified_query_custom_params(self) -> None:
 
         config = AiPipelineConfig(
-            llm=LlmConfig(model="test-model", url="http://localhost:8080/v1"),
             query=ImageBatchQueryConfig(
                 query_type=ImageBatchQueryType.VERIFIED,
                 prompt="test",
                 verification_prompt="custom verify",
                 min_confidence=ConfidenceLevel.HIGH,
+                llm=LlmConfig(model="test-model", url="http://localhost:8080/v1"),
             ),
         )
 
@@ -722,8 +770,11 @@ class TestAiPipelineConfig:
                 resolution=(320, 240),
                 history=40,
             ),
-            llm=LlmConfig(model="test-model", url="http://localhost:8080/v1"),
-            query=ImageBatchQueryConfig(prompt="test"),
+            query=ImageBatchQueryConfig(
+                query_type=ImageBatchQueryType.LLM,
+                prompt="test",
+                llm=LlmConfig(model="test-model", url="http://localhost:8080/v1"),
+            ),
         )
 
         pipeline = config.create_pipeline()
@@ -736,8 +787,11 @@ class TestAiPipelineConfig:
     def test_create_pipeline_with_motion_selector_default(self) -> None:
         config = AiPipelineConfig(
             frame_selector=FrameSelectorConfig(selector_type=FrameSelectorType.MOTION),
-            llm=LlmConfig(model="test-model", url="http://localhost:8080/v1"),
-            query=ImageBatchQueryConfig(prompt="test"),
+            query=ImageBatchQueryConfig(
+                query_type=ImageBatchQueryType.LLM,
+                prompt="test",
+                llm=LlmConfig(model="test-model", url="http://localhost:8080/v1"),
+            ),
         )
 
         pipeline = config.create_pipeline()
@@ -754,14 +808,15 @@ class TestIntegration:
 
         json_content = """
         {
-            "llm": {
-                "model": "test-model",
-                "backend": "ollama",
-                "url": "http://localhost:8080/v1",
-                "api_key": "${MY_API_KEY}"
-            },
             "query": {
-                "prompt": "Test with env var"
+                "query_type": "llm",
+                "prompt": "Test with env var",
+                "llm": {
+                    "model": "test-model",
+                    "backend": "ollama",
+                    "url": "http://localhost:8080/v1",
+                    "api_key": "${MY_API_KEY}"
+                }
             }
         }
         """
@@ -769,12 +824,15 @@ class TestIntegration:
         config_file.write_text(json_content)
 
         config = AiPipelineConfig.from_json(config_file)
-        assert config.llm.api_key.get_secret_value() == "super-secret-key"
+        assert config.query.llm.api_key.get_secret_value() == "super-secret-key"
 
     def test_create_and_run_pipeline_structure(self) -> None:
         config = AiPipelineConfig(
-            llm=LlmConfig(model="test", url="http://localhost:8080/v1"),
-            query=ImageBatchQueryConfig(prompt="test"),
+            query=ImageBatchQueryConfig(
+                query_type=ImageBatchQueryType.LLM,
+                prompt="test",
+                llm=LlmConfig(model="test", url="http://localhost:8080/v1"),
+            ),
         )
 
         pipeline = config.create_pipeline()

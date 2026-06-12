@@ -5,7 +5,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from wildcamtools.lib.ai.pipeline import PipelineOutcome
+from wildcamtools.lib.ai.pipeline import CombinedPipelineOutcome, PipelineOutcome
 from wildcamtools.lib.ai.pipeline_config import AiPipelineConfig
 
 logger = logging.getLogger(__name__)
@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 def time_pipeline_execution(
     video_path: Path,
     pipeline_config: AiPipelineConfig,
-) -> tuple[PipelineOutcome, float]:
+) -> tuple[PipelineOutcome | CombinedPipelineOutcome, float]:
     """Execute a pipeline and return the outcome with timing information.
 
     Args:

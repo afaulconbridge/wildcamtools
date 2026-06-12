@@ -8,7 +8,7 @@ from typer.testing import CliRunner
 
 from wildcamtools.cli import app
 from wildcamtools.cli.db import PipelineRunOutput
-from wildcamtools.lib.ai.pipeline import PipelineOutcome
+from wildcamtools.lib.ai.pipeline import RichResultPipelineOutcome
 from wildcamtools.lib.ai.pipeline_config import (
     AiPipelineConfig,
     FrameExtractorConfig,
@@ -29,11 +29,14 @@ def sample_result_json() -> str:
     config = AiPipelineConfig(
         frame_selector=FrameSelectorConfig(selector_type="fps_rescaling", fps=5.0),
         frame_extractor=FrameExtractorConfig(extractor_type="rescaled", resolution=(640, 360)),
-        llm=LlmConfig(backend=Backend.OLLAMA, model="test-model"),
-        query=ImageBatchQueryConfig(query_type="llm", prompt="Test prompt"),
+        query=ImageBatchQueryConfig(
+            query_type="llm",
+            prompt="Test prompt",
+            llm=LlmConfig(backend=Backend.OLLAMA, model="test-model"),
+        ),
         reconciler=ReconcilerConfig(reconciler_type="majority"),
     )
-    outcome = PipelineOutcome(
+    outcome = RichResultPipelineOutcome(
         result=RichResult(
             is_animal_present=True,
             is_animal_unknown=False,

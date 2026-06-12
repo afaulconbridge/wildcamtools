@@ -1,0 +1,25 @@
+{
+  "frame_selector": {
+    "selector_type": "fps_rescaling",
+    "fps": 0.5
+  },
+  "frame_extractor": {
+    "extractor_type": "rescaled",
+    "resolution": [
+      640,
+      360
+    ]
+  },
+  "llm": {
+    "backend": "ollama",
+    "model": "gemma4:31b-cloud",
+    "url": "https://ollama.com",
+    "api_key": "${WCT_OLLAMA_API_KEY}"
+  },
+  "query": {
+    "query_type": "description"
+  },
+  "reconciler": {
+    "reconciler_type": "description"
+  }
+}

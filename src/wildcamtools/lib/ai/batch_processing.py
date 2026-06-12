@@ -1,23 +1,34 @@
 import logging
+import time
 from pathlib import Path
+from typing import TypeVar
 
 from pydantic import BaseModel
 
 from wildcamtools.lib.ai.parallel_processing import (
     run_parallel_worker_pool,
-    time_pipeline_execution,
 )
-from wildcamtools.lib.ai.pipeline import PipelineOutcome
+from wildcamtools.lib.ai.pipeline import (
+    CombinedPipelineOutcome,
+    PipelineOutcome,
+)
 from wildcamtools.lib.ai.pipeline_config import AiPipelineConfig
+from wildcamtools.lib.ai.types import RichResult
 
 logger = logging.getLogger(__name__)
 
+R = TypeVar("R", bound=BaseModel)
 
-class BatchPipelineOutput(BaseModel):
+
+class BatchPipelineOutput[R: BaseModel](BaseModel):
     """Output format for batch pipeline processing."""
 
     config: AiPipelineConfig
-    outcome: PipelineOutcome
+    outcome: PipelineOutcome[R] | CombinedPipelineOutcome[R]
+
+
+class RichResultBatchPipelineOutput(BatchPipelineOutput[RichResult]):
+    """Concrete BatchPipelineOutput parameterised on RichResult."""
 
 
 class BatchWorkerResult(BaseModel):
@@ -27,6 +38,12 @@ class BatchWorkerResult(BaseModel):
     output_path: str
     processing_time_seconds: float = 0.0
     error: str | None = None
+
+
+def _build_combined_output[R: BaseModel](
+    outcome: PipelineOutcome[R] | CombinedPipelineOutcome[R], config: AiPipelineConfig
+) -> BatchPipelineOutput[R]:
+    return BatchPipelineOutput[R](config=config, outcome=outcome)
 
 
 def _run_pipeline_worker(
@@ -48,19 +65,22 @@ def _run_pipeline_worker(
     output_path = Path(output_path_str)
 
     try:
-        outcome, processing_time = time_pipeline_execution(video_path, pipeline_config)
+        start_time = time.time()
+        pipeline = pipeline_config.create_pipeline()
+        outcome = pipeline.run(video_path)
+        processing_time = time.time() - start_time
 
-        # Write output JSON
-        output_data = BatchPipelineOutput(config=pipeline_config, outcome=outcome)
+        output_data = _build_combined_output(outcome, pipeline_config)
+        json_output = output_data.model_dump_json(indent=2)
+
         output_path.parent.mkdir(parents=True, exist_ok=True)
-        output_path.write_text(output_data.model_dump_json(indent=2))
+        output_path.write_text(json_output)
 
         logger.info(
-            "Processed %s -> %s (%.2f seconds, result: %s)",
+            "Processed %s -> %s (%.2f seconds)",
             video_path.name,
             output_path.name,
             processing_time,
-            outcome.result.species_name,
         )
 
         return BatchWorkerResult(

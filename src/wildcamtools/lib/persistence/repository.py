@@ -9,7 +9,11 @@ from sqlalchemy import desc, func, select
 from sqlalchemy.orm import selectinload
 from sqlmodel import Session
 
-from wildcamtools.lib.ai.pipeline import PipelineOutcome
+from wildcamtools.lib.ai.pipeline import (
+    CombinedBatchResult,
+    CombinedPipelineOutcome,
+    PipelineOutcome,
+)
 from wildcamtools.lib.ai.pipeline_config import AiPipelineConfig
 from wildcamtools.lib.ai.types import RichResult
 from wildcamtools.lib.persistence.models import (
@@ -115,7 +119,7 @@ def save_pipeline_run(
     session: Session,
     video_path: Path,
     config: AiPipelineConfig,
-    outcome: PipelineOutcome,
+    outcome: PipelineOutcome | CombinedPipelineOutcome,
     recorded_at: datetime | None = None,
 ) -> PipelineRun:
     """Save a pipeline run to the database.
@@ -128,6 +132,7 @@ def save_pipeline_run(
     Note:
         The caller is responsible for committing the session. This function only
         adds objects and flushes to generate IDs.
+        Description data from CombinedPipelineOutcome batches is persisted to the database.
 
     Args:
         session: SQLModel session
@@ -157,10 +162,21 @@ def save_pipeline_run(
     session.add(run)
     session.flush()
 
+    # Handle both PipelineOutcome and CombinedPipelineOutcome batch structures
     for batch in outcome.batches:
-        if batch.result is None:
-            continue
-        batch_result_data = _rich_result_to_classification(batch.result)
+        if isinstance(batch, CombinedBatchResult):
+            classification_result = batch.classification
+            if classification_result is None:
+                continue
+            batch_result_data = _rich_result_to_classification(classification_result)
+            # Extract description text from BatchDescription object
+            description_text = batch.description.description if batch.description else None
+        else:
+            if batch.result is None:
+                continue
+            batch_result_data = _rich_result_to_classification(batch.result)
+            description_text = None
+
         batch_result = _get_or_create_classification_result(session, batch_result_data)
 
         frame_numbers = json.dumps([pair.frame_no for pair in batch.selected_frames])
@@ -169,6 +185,7 @@ def save_pipeline_run(
             run_id=run.id,
             frame_numbers=frame_numbers,
             result=batch_result,
+            description=description_text,
         )
         session.add(pipeline_batch)
 

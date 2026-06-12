@@ -6,6 +6,7 @@ import tempfile
 from abc import ABC, abstractmethod
 from collections.abc import Iterable, Iterator, Sequence
 from pathlib import Path
+from typing import TypeVar
 
 import cv2
 from pydantic import BaseModel, Field
@@ -14,6 +15,11 @@ from wildcamtools.lib import Frame
 from wildcamtools.lib.ai.crop import AICropFinder
 from wildcamtools.lib.ai.llm.abstract import AbstractLlm
 from wildcamtools.lib.ai.types import (
+    DEFAULT_BATCH_DESCRIPTION_PROMPT,
+    DEFAULT_COMBINE_DESCRIPTION_PROMPT,
+    NO_ACTIVITY_DESCRIPTION,
+    BatchDescription,
+    CombinedDescription,
     ConfidenceLevel,
     ResultList,
     RichResult,
@@ -25,6 +31,8 @@ from wildcamtools.lib.stats import VideoStats, get_video_stats
 from wildcamtools.lib.vidio import VideoReader
 
 logger = logging.getLogger(__name__)
+
+R = TypeVar("R", bound=BaseModel)
 
 
 class ExtractedFrame(BaseModel):
@@ -68,7 +76,7 @@ class ExtractedBatch(BaseModel):
     selected_frames: list[ExtractedFrame]
 
 
-class BatchResult(ExtractedBatch):
+class BatchResult[R: BaseModel](ExtractedBatch):
     """Batch with AI result attached.
 
     Attributes:
@@ -76,7 +84,25 @@ class BatchResult(ExtractedBatch):
         result: RichResult from AI analysis (None before processing)
     """
 
-    result: RichResult | None = None
+    result: R | None = None
+
+
+class RichResultBatchResult(BatchResult[RichResult]):
+    """Concrete BatchResult parameterised on RichResult.
+
+    This concrete subclass exists so that JSON round-trip serialisation works
+    (Pydantic cannot reconstruct a parameterised generic without a concrete
+    type). Behaviour is identical to BatchResult[RichResult].
+    """
+
+
+class BatchDescriptionBatchResult(BatchResult[BatchDescription]):
+    """Concrete BatchResult parameterised on BatchDescription.
+
+    Used for the description pipeline so that JSON round-trip serialisation
+    works (Pydantic cannot reconstruct a parameterised generic without a
+    concrete type).
+    """
 
 
 class ExtractedFrames(BaseModel):
@@ -103,32 +129,79 @@ class ExtractedFrames(BaseModel):
         return len(self.batches)
 
 
-class ExtractedFramesWithResults(ExtractedFrames):
+class ExtractedFramesWithResults[R: BaseModel](ExtractedFrames):
     """Container for extracted frame batches with AI results.
 
     Attributes:
         batches: List of BatchResult objects (contains results after AI processing)
     """
 
-    batches: Sequence[BatchResult]  # type: ignore[assignment]
+    batches: Sequence[BatchResult[R]]  # type: ignore[assignment]
 
-    def get_batch_results(self) -> list[RichResult]:
+    def get_batch_results(self) -> list[R]:
         """Extract non-None results from batches."""
         return [batch.result for batch in self.batches if batch.result is not None]
 
 
-class PipelineOutcome(BaseModel):
+class RichResultExtractedFramesWithResults(ExtractedFramesWithResults[RichResult]):
+    """Concrete ExtractedFramesWithResults parameterised on RichResult."""
+
+
+class PipelineOutcome[R: BaseModel](BaseModel):
     """Container for pipeline execution results with intermediate stage data.
 
     Attributes:
-        result: The final RichResult from the AI pipeline
+        result: The final result from the AI pipeline
         stats: Video statistics captured at the start of processing
-        batch_results: List of BatchResult objects with frames and per-batch AI results
+        batches: List of BatchResult objects with frames and per-batch AI results
     """
 
-    result: RichResult
+    result: R
     stats: VideoStats
-    batches: list[BatchResult] = Field(default_factory=list)
+    batches: list[BatchResult[R]] = Field(default_factory=list)
+
+
+class RichResultPipelineOutcome(PipelineOutcome[RichResult]):
+    """Concrete PipelineOutcome parameterised on RichResult.
+
+    This concrete subclass exists so that JSON round-trip serialisation works
+    (Pydantic cannot reconstruct a parameterised generic without a concrete
+    type). Behaviour is identical to PipelineOutcome[RichResult].
+    """
+
+
+class BatchDescriptionPipelineOutcome(PipelineOutcome[BatchDescription]):
+    """Concrete PipelineOutcome parameterised on BatchDescription."""
+
+
+class CombinedBatchResult(BaseModel):
+    """Batch result containing both classification and description.
+
+    Attributes:
+        selected_frames: List of extracted frames
+        classification: RichResult from classification (None if classification not run)
+        description: BatchDescription from description (None if description not run)
+    """
+
+    selected_frames: list[ExtractedFrame]
+    classification: RichResult | None = None
+    description: BatchDescription | None = None
+
+
+class CombinedPipelineOutcome[R: BaseModel](BaseModel):
+    """Pipeline outcome containing both classification and description results.
+
+    Attributes:
+        result: The final classification result
+        description: Combined description result (None if description not enabled)
+        stats: Video statistics
+        batches: List of CombinedBatchResult with both classification and description per batch
+    """
+
+    result: R
+    description: BatchDescription | None = None
+    stats: VideoStats
+    batches: list[CombinedBatchResult] = Field(default_factory=list)
 
 
 CONFIDENCE_ORDER: dict[ConfidenceLevel, int] = {
@@ -416,48 +489,66 @@ Return results as a ResultList with species_name and frames array."""
         return ExtractedFrames(batches=[ExtractedBatch(selected_frames=b) for b in output_batches])
 
 
-class ImageBatchQuery(ABC):
-    def query_image_batches(self, image_batches: ExtractedFrames) -> ExtractedFramesWithResults:
-        batch_results: list[BatchResult] = []
+class ImageBatchQuery[R: BaseModel](ABC):
+    def query_image_batches(self, image_batches: ExtractedFrames) -> ExtractedFramesWithResults[R]:
+        batch_results: list[BatchResult[R]] = []
         for batch in image_batches.batches:
             result = self.query_images([pair.require_path() for pair in batch.selected_frames])
-            batch_results.append(BatchResult(selected_frames=batch.selected_frames, result=result))
-        return ExtractedFramesWithResults(batches=batch_results)
+            batch_results.append(BatchResult[R](selected_frames=batch.selected_frames, result=result))
+        return ExtractedFramesWithResults[R](batches=batch_results)
 
     @abstractmethod
-    def query_images(self, images: Sequence[Path]) -> RichResult: ...
+    def query_images(self, images: Sequence[Path]) -> R: ...
 
 
-class LlmImageBatchQuery(ImageBatchQuery):
+class LlmImageBatchQuery[R: BaseModel](ImageBatchQuery[R]):
     llm: AbstractLlm
     prompt: str
+    response_class: type[R]
 
     def __init__(
         self,
         llm: AbstractLlm,
         prompt: str,
+        response_class: type[R] = RichResult,  # type: ignore[assignment]
     ) -> None:
         self.llm = llm
         self.prompt = prompt
+        self.response_class = response_class
 
-    def query_images(self, images: Sequence[Path]) -> RichResult:
+    def query_images(self, images: Sequence[Path]) -> R:
         images_list = sorted(images)
         if not images_list:
             logger.warning("Empty image batch received")
             raise ValueError("Empty image batch")
         logger.info("Sending %d images to analyser", len(images_list))
-        result: RichResult = self.llm.message_with_schema(
+        result: R = self.llm.message_with_schema(
             message=self.prompt,
             images=images_list,
-            response_class=RichResult,
+            response_class=self.response_class,
         )
         logger.info("Received response from analyser")
         return result
 
 
-class VerifiedImageBatchQuery(ImageBatchQuery):
+class DescriptionImageBatchQuery(LlmImageBatchQuery[BatchDescription]):
+    """Convenience subclass of LlmImageBatchQuery that returns BatchDescription.
+
+    If no prompt is provided, the default batch description prompt is used.
+    """
+
+    def __init__(
+        self,
+        llm: AbstractLlm,
+        prompt: str = DEFAULT_BATCH_DESCRIPTION_PROMPT,
+    ) -> None:
+        super().__init__(llm=llm, prompt=prompt, response_class=BatchDescription)
+
+
+class VerifiedImageBatchQuery[R: BaseModel](ImageBatchQuery[R]):
     llm: AbstractLlm
     prompt: str
+    response_class: type[R]
     verification_prompt: str
     min_confidence: ConfidenceLevel
 
@@ -465,29 +556,35 @@ class VerifiedImageBatchQuery(ImageBatchQuery):
         self,
         llm: AbstractLlm,
         prompt: str,
+        response_class: type[R] = RichResult,  # type: ignore[assignment]
         verification_prompt: str | None = None,
         min_confidence: ConfidenceLevel = ConfidenceLevel.MEDIUM,
     ) -> None:
         self.llm = llm
         self.prompt = prompt
+        self.response_class = response_class
         self.verification_prompt = verification_prompt or DEFAULT_VERIFICATION_PROMPT
         self.min_confidence = min_confidence
 
-    def query_images(self, images: Sequence[Path]) -> RichResult:
+    def query_images(self, images: Sequence[Path]) -> R:
         images_list = sorted(images)
         if not images_list:
             logger.warning("Empty image batch received")
             raise ValueError("Empty image batch")
 
         logger.debug("Sending %d images to analyser for initial classification", len(images_list))
-        initial_result: RichResult = self.llm.message_with_schema(
+        initial_result: R = self.llm.message_with_schema(
             message=self.prompt,
             images=images_list,
-            response_class=RichResult,
+            response_class=self.response_class,
         )
-        logger.debug("Initial classification: %s", initial_result.species_name)
+        # Note: VerifiedImageBatchQuery expects R to have species_name, confidence, is_animal_unknown fields
+        # This is enforced by the typical usage with RichResult as the default response_class
+        logger.debug("Initial classification: %s", getattr(initial_result, "species_name", initial_result))
 
-        verification_message = self.verification_prompt.format(initial_species=initial_result.species_name)
+        verification_message = self.verification_prompt.format(
+            initial_species=getattr(initial_result, "species_name", "")
+        )
         verification_result: VerificationResult = self.llm.message_with_schema(
             message=verification_message,
             images=images_list,
@@ -495,8 +592,10 @@ class VerifiedImageBatchQuery(ImageBatchQuery):
         )
 
         # update confidence and species name from verification
-        initial_result.confidence = verification_result.confidence
-        initial_result.species_name = verification_result.species_name
+        if hasattr(initial_result, "confidence"):
+            initial_result.confidence = verification_result.confidence
+        if hasattr(initial_result, "species_name"):
+            initial_result.species_name = verification_result.species_name
 
         if not verification_result.verified or not self._meets_confidence_threshold(verification_result.confidence):
             logger.debug(
@@ -504,7 +603,8 @@ class VerifiedImageBatchQuery(ImageBatchQuery):
                 verification_result.confidence,
                 self.min_confidence,
             )
-            initial_result.is_animal_unknown = True
+            if hasattr(initial_result, "is_animal_unknown"):
+                initial_result.is_animal_unknown = True
 
         return initial_result
 
@@ -512,15 +612,15 @@ class VerifiedImageBatchQuery(ImageBatchQuery):
         return CONFIDENCE_ORDER[confidence] >= CONFIDENCE_ORDER[self.min_confidence]
 
 
-class ResultReconciler(ABC):
+class ResultReconciler[R: BaseModel](ABC):
     @abstractmethod
-    def reconcile_results(self, results: Iterable[RichResult]) -> RichResult: ...
+    def reconcile_results(self, results: Iterable[R]) -> R: ...
 
 
-class MajorityResultReconciler(ResultReconciler):
-    """Reconciles multiple results by selecting the most common value.
+class RichResultMajorityReconciler(ResultReconciler[RichResult]):
+    """Reconciles multiple RichResult classifications by selecting the most common species.
 
-    Uses equality comparison (__eq__) to determine uniqueness.
+    Uses equality comparison on species_name to determine uniqueness.
     In case of ties, returns the first-seen result among those tied.
 
     Raises:
@@ -558,43 +658,148 @@ class MajorityResultReconciler(ResultReconciler):
         return species_results[0][1][0]
 
 
-class AiPipeline:
+class ConcatenatingDescriptionReconciler(ResultReconciler[BatchDescription]):
+    """Concatenates batch descriptions into a single description.
+
+    Joins descriptions with double newlines and wraps the result in a new
+    BatchDescription. The output reflects the input order. An empty input
+    yields the no-activity placeholder.
+    """
+
+    def reconcile_results(self, results: Iterable[BatchDescription]) -> BatchDescription:
+        results_list = list(results)
+        if not results_list:
+            return BatchDescription(description=NO_ACTIVITY_DESCRIPTION)
+        joined = "\n\n".join(r.description for r in results_list)
+        return BatchDescription(description=joined)
+
+    @property
+    def method_name(self) -> str:
+        return "concatenate"
+
+
+class LlmDescriptionReconciler(ResultReconciler[BatchDescription]):
+    """Reconciles multiple batch descriptions into a single final description using an LLM.
+
+    When the input contains zero or one batch descriptions, no LLM call is made
+    and the description is returned unchanged. With two or more batch descriptions,
+    the LLM is invoked with the configured `combine_prompt` to produce a merged
+    `CombinedDescription`. If the LLM call fails, the configured `fallback`
+    reconciler is used (default: ConcatenatingDescriptionReconciler).
+
+    The `last_method_name` property reflects the method actually used for the
+    most recent `reconcile_results` call, so callers can record whether the
+    LLM-combine path or the fallback path produced the final description.
+    """
+
+    def __init__(
+        self,
+        llm: AbstractLlm,
+        prompt: str | None = None,
+        fallback: ConcatenatingDescriptionReconciler | None = None,
+    ) -> None:
+        self.llm = llm
+        self.prompt = prompt or DEFAULT_COMBINE_DESCRIPTION_PROMPT
+        self.fallback = fallback or ConcatenatingDescriptionReconciler()
+        self.last_method_name: str = self.method_name
+
+    def reconcile_results(self, results: Iterable[BatchDescription]) -> BatchDescription:
+        results_list = list(results)
+        if not results_list:
+            self.last_method_name = self.method_name
+            return BatchDescription(description=NO_ACTIVITY_DESCRIPTION)
+        if len(results_list) == 1:
+            self.last_method_name = self.method_name
+            return results_list[0]
+
+        formatted_descriptions = "\n\n".join(f"[Segment {i + 1}]\n{r.description}" for i, r in enumerate(results_list))
+        message = self.prompt.format(descriptions=formatted_descriptions)
+        try:
+            combined: CombinedDescription = self.llm.message_with_schema(
+                message=message,
+                images=(),
+                response_class=CombinedDescription,
+            )
+        except Exception:
+            logger.exception("LLM combine failed, falling back to concatenation")
+            self.last_method_name = self.fallback.method_name
+            return self.fallback.reconcile_results(results_list)
+
+        self.last_method_name = self.method_name
+        return BatchDescription(description=combined.description)
+
+    @property
+    def method_name(self) -> str:
+        return "llm_combine"
+
+
+class AiPipeline[R: BaseModel]:
+    empty_result: R
+    description_query: DescriptionImageBatchQuery | None = None
+    description_reconciler: ResultReconciler[BatchDescription] | None = None
+
     def __init__(
         self,
         frame_selector: FrameSelector,
         frame_image_extractor: FrameImageExtractor,
-        image_batch_query: ImageBatchQuery,
-        result_reconciler: ResultReconciler,
+        image_batch_query: ImageBatchQuery[R],
+        result_reconciler: ResultReconciler[R],
+        empty_result: R,
+        description_query: DescriptionImageBatchQuery | None = None,
+        description_reconciler: ResultReconciler[BatchDescription] | None = None,
     ) -> None:
         self.frame_selector = frame_selector
         self.frame_image_extractor = frame_image_extractor
         self.image_batch_query = image_batch_query
         self.result_reconciler = result_reconciler
+        self.empty_result = empty_result
+        self.description_query = description_query
+        self.description_reconciler = description_reconciler
 
-    def run(self, video: Path) -> PipelineOutcome:
+    def run(self, video: Path) -> PipelineOutcome[R] | CombinedPipelineOutcome[R]:
         stats = get_video_stats(video)
-        # select frames from the video
-        # e.g. fps, similarity
         frames = self.frame_selector.select_frames(video)
         with tempfile.TemporaryDirectory() as tmpdir:
             tmpdir_path = Path(tmpdir)
-            # extract images from frames into files
-            # e.g. downscale, tile, crop
             extracted_frames = self.frame_image_extractor.extract_images(frames, tmpdir_path)
             if len(extracted_frames) == 0:
-                # no images extracted
-                result = RichResult(
-                    is_animal_present=False,
-                    is_animal_unknown=False,
-                    defining_features="",
-                    species_name="no animal",
-                    confidence=ConfidenceLevel.HIGH,
-                )
-                return PipelineOutcome(result=result, stats=stats, batches=[])
-            # send each batch to the AI for identification
+                if self.description_query is not None:
+                    return CombinedPipelineOutcome[R](
+                        result=self.empty_result,
+                        description=BatchDescription(description=NO_ACTIVITY_DESCRIPTION),
+                        stats=stats,
+                        batches=[],
+                    )
+                return PipelineOutcome[R](result=self.empty_result, stats=stats, batches=[])
+
             enriched_frames = self.image_batch_query.query_image_batches(extracted_frames)
-            # reconcile multiple identifications (if applicable)
             query_results = enriched_frames.get_batch_results()
             consolidated_result = self.result_reconciler.reconcile_results(query_results)
 
-        return PipelineOutcome(result=consolidated_result, stats=stats, batches=list(enriched_frames.batches))
+            if self.description_query is not None and self.description_reconciler is not None:
+                description_enriched = self.description_query.query_image_batches(extracted_frames)
+                description_results = description_enriched.get_batch_results()
+                combined_description = self.description_reconciler.reconcile_results(description_results)
+
+                combined_batches = []
+                for classification_batch, description_batch in zip(
+                    enriched_frames.batches, description_enriched.batches, strict=True
+                ):
+                    combined_batches.append(
+                        CombinedBatchResult(
+                            selected_frames=classification_batch.selected_frames,
+                            classification=classification_batch.result,  # type: ignore[arg-type] # CombinedBatchResult.classification is RichResult|None; classification_batch.result is R|None where R=RichResult in this context
+                            description=description_batch.result,
+                        )
+                    )
+
+                return CombinedPipelineOutcome[R](
+                    result=consolidated_result,
+                    description=BatchDescription(
+                        description=combined_description.description,
+                    ),
+                    stats=stats,
+                    batches=combined_batches,
+                )
+
+        return PipelineOutcome[R](result=consolidated_result, stats=stats, batches=list(enriched_frames.batches))

@@ -5,7 +5,7 @@ from typing import Annotated, Any
 import typer
 from pydantic import BaseModel
 
-from wildcamtools.lib.ai.pipeline import PipelineOutcome
+from wildcamtools.lib.ai.pipeline import CombinedPipelineOutcome, RichResultPipelineOutcome
 from wildcamtools.lib.ai.pipeline_config import AiPipelineConfig
 from wildcamtools.lib.persistence.database import create_engine_and_tables, get_session
 from wildcamtools.lib.persistence.filename_datetime import infer_recorded_at
@@ -19,7 +19,7 @@ class PipelineRunOutput(BaseModel):
     """Output format from ai run command."""
 
     config: AiPipelineConfig
-    outcome: PipelineOutcome
+    outcome: RichResultPipelineOutcome | CombinedPipelineOutcome
 
 
 def _is_video_file(path: Path) -> bool:

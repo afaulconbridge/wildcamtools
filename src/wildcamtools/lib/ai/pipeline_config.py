@@ -1,9 +1,9 @@
 import os
 from enum import StrEnum
 from pathlib import Path
-from typing import Annotated, Self
+from typing import Annotated, Any, Self
 
-from pydantic import AnyHttpUrl, BaseModel, ConfigDict, Field, SecretStr, field_validator
+from pydantic import AnyHttpUrl, BaseModel, ConfigDict, Field, SecretStr, field_validator, model_validator
 
 from wildcamtools.lib.ai.crop import AICropFinder
 from wildcamtools.lib.ai.llm import create_analyser
@@ -11,20 +11,31 @@ from wildcamtools.lib.ai.llm.abstract import AbstractLlm
 from wildcamtools.lib.ai.pipeline import (
     AICroppedFrameImageExtractor,
     AiPipeline,
+    ConcatenatingDescriptionReconciler,
     ContrastEnhancedFrameImageExtractor,
+    DescriptionImageBatchQuery,
     FpsRescalingFrameSelector,
     FrameImageExtractor,
     FrameSelector,
     ImageBatchQuery,
+    LlmDescriptionReconciler,
     LlmImageBatchQuery,
-    MajorityResultReconciler,
     MotionFrameSelector,
     RescaledFrameImageExtractor,
     ResultReconciler,
+    RichResultMajorityReconciler,
     SSIMFrameSelector,
     VerifiedImageBatchQuery,
 )
-from wildcamtools.lib.ai.types import Backend, ConfidenceLevel
+from wildcamtools.lib.ai.types import (
+    DEFAULT_BATCH_DESCRIPTION_PROMPT,
+    DEFAULT_COMBINE_DESCRIPTION_PROMPT,
+    NO_ACTIVITY_DESCRIPTION,
+    Backend,
+    BatchDescription,
+    ConfidenceLevel,
+    RichResult,
+)
 
 
 class FrameSelectorType(StrEnum):
@@ -41,11 +52,13 @@ class FrameExtractorType(StrEnum):
 
 class ReconcilerType(StrEnum):
     MAJORITY = "majority"
+    DESCRIPTION = "description"
 
 
 class ImageBatchQueryType(StrEnum):
     LLM = "llm"
     VERIFIED = "verified"
+    DESCRIPTION = "description"
 
 
 class FrameSelectorConfig(BaseModel):
@@ -221,7 +234,27 @@ class LlmConfig(BaseModel):
 
 class ImageBatchQueryConfig(BaseModel):
     query_type: ImageBatchQueryType = ImageBatchQueryType.LLM
-    prompt: Annotated[str, Field(strict=True, min_length=1, description="Prompt sent to LLM")]
+    llm: LlmConfig
+    prompt: Annotated[
+        str | None,
+        Field(
+            strict=True,
+            min_length=1,
+            description=(
+                "Prompt sent to the LLM. Required for 'llm' and 'verified' query types; "
+                "ignored for 'description' (use 'description_prompt' instead)."
+            ),
+        ),
+    ] = None
+    description_prompt: Annotated[
+        str | None,
+        Field(
+            min_length=1,
+            description=(
+                "Custom prompt used for the description query. If unset, the default description prompt is used."
+            ),
+        ),
+    ] = None
     verification_prompt: Annotated[
         str | None,
         Field(
@@ -231,47 +264,119 @@ class ImageBatchQueryConfig(BaseModel):
     ] = None
     min_confidence: ConfidenceLevel = ConfidenceLevel.MEDIUM
 
-    def create_image_batch_query(self, llm: AbstractLlm) -> ImageBatchQuery:
+    @model_validator(mode="after")
+    def _check_prompt_requirements(self) -> Self:
+        if self.query_type in (ImageBatchQueryType.LLM, ImageBatchQueryType.VERIFIED) and not self.prompt:
+            raise ValueError(
+                f"'prompt' is required when query_type is '{self.query_type.value}'. "
+                "Provide a non-empty 'prompt' in the query config."
+            )
+        return self
+
+    def effective_description_prompt(self) -> str:
+        """Return the description prompt to use, falling back to the default."""
+        return self.description_prompt or DEFAULT_BATCH_DESCRIPTION_PROMPT
+
+    def create_image_batch_query(self) -> ImageBatchQuery[Any]:
         """Create an ImageBatchQuery instance based on the configuration.
 
-        Args:
-            llm: The LLM instance to use for queries.
-
         Returns:
-            ImageBatchQuery: The configured image batch query instance (LlmImageBatchQuery or VerifiedImageBatchQuery).
-            Both return RichResult.
+            The configured image batch query instance.
         """
+        llm = self.llm.create_llm()
         match self.query_type:
             case ImageBatchQueryType.LLM:
+                if not self.prompt:
+                    raise ValueError("'prompt' is required for the 'llm' query type")
                 return LlmImageBatchQuery(llm=llm, prompt=self.prompt)
             case ImageBatchQueryType.VERIFIED:
+                if not self.prompt:
+                    raise ValueError("'prompt' is required for the 'verified' query type")
                 return VerifiedImageBatchQuery(
                     llm=llm,
                     prompt=self.prompt,
                     verification_prompt=self.verification_prompt,
                     min_confidence=self.min_confidence,
                 )
+            case ImageBatchQueryType.DESCRIPTION:
+                return DescriptionImageBatchQuery(llm=llm, prompt=self.effective_description_prompt())
             case _:
                 raise NotImplementedError(f"Unsupported query type: {self.query_type}")
 
 
 class ReconcilerConfig(BaseModel):
     reconciler_type: ReconcilerType = ReconcilerType.MAJORITY
+    combine_prompt: Annotated[
+        str | None,
+        Field(
+            min_length=1,
+            description=(
+                "Custom prompt for combining batch descriptions into a final description. "
+                "Uses {descriptions} placeholder. Used when reconciler_type is 'description'."
+            ),
+        ),
+    ] = None
+    llm: LlmConfig | None = Field(
+        default=None,
+        description=(
+            "Optional separate LLM configuration for the description reconciler. "
+            "If unset, the main pipeline LLM is used."
+        ),
+    )
 
-    def create_reconciler(self) -> ResultReconciler:
+    def create_reconciler(self, fallback_llm: AbstractLlm | None = None) -> ResultReconciler[Any]:
         """Create a ResultReconciler instance based on the configuration.
 
+        Args:
+            fallback_llm: LLM to use if the reconciler needs an LLM but no dedicated one is configured.
+
         Returns:
-            ResultReconciler: The configured reconciler instance (returns RichResult).
+            The configured reconciler instance.
 
         Raises:
             NotImplementedError: If the reconciler_type is not supported.
         """
         match self.reconciler_type:
             case ReconcilerType.MAJORITY:
-                return MajorityResultReconciler()
+                return RichResultMajorityReconciler()
+            case ReconcilerType.DESCRIPTION:
+                if self.llm is not None:
+                    reconciler_llm: AbstractLlm = self.llm.create_llm()
+                elif fallback_llm is not None:
+                    reconciler_llm = fallback_llm
+                else:
+                    raise ValueError(
+                        "An LLM is required for the description reconciler. "
+                        "Provide one via 'llm' in the reconciler config or as a fallback."
+                    )
+                return LlmDescriptionReconciler(
+                    llm=reconciler_llm,
+                    prompt=self.combine_prompt,
+                    fallback=ConcatenatingDescriptionReconciler(),
+                )
             case _:
                 raise NotImplementedError(f"Unsupported reconciler type: {self.reconciler_type}")
+
+
+class DescriptionConfig(BaseModel):
+    llm: LlmConfig
+    description_prompt: Annotated[
+        str | None,
+        Field(
+            min_length=1,
+            description="Custom prompt for per-batch descriptions. Uses default if not provided.",
+        ),
+    ] = None
+    combine_prompt: Annotated[
+        str | None,
+        Field(
+            min_length=1,
+            description=(
+                "Custom prompt for combining batch descriptions. Uses {descriptions} placeholder. "
+                "Uses default if not provided."
+            ),
+        ),
+    ] = None
 
 
 class AiPipelineConfig(BaseModel):
@@ -280,18 +385,25 @@ class AiPipelineConfig(BaseModel):
             "example": {
                 "frame_selector": {"selector_type": "fps_rescaling", "fps": 1.0},
                 "frame_extractor": {"extractor_type": "rescaled", "resolution": [640, 360]},
-                "llm": {"backend": "ollama", "model": "qwen3.5:cloud"},
-                "query": {"query_type": "llm", "prompt": "What species is in this image?"},
+                "query": {
+                    "query_type": "llm",
+                    "prompt": "What species is in this image?",
+                    "llm": {"backend": "ollama", "model": "qwen3.5:cloud"},
+                },
                 "reconciler": {"reconciler_type": "majority"},
+                "description": {
+                    "llm": {"backend": "ollama", "model": "gemma4:31b-cloud"},
+                    "description_prompt": "Describe what is happening in these frames.",
+                },
             }
         }
     )
 
     frame_selector: FrameSelectorConfig = Field(default_factory=FrameSelectorConfig)
     frame_extractor: FrameExtractorConfig = Field(default_factory=FrameExtractorConfig)
-    llm: LlmConfig
     query: ImageBatchQueryConfig
     reconciler: ReconcilerConfig = Field(default_factory=ReconcilerConfig)
+    description: DescriptionConfig | None = None
 
     @classmethod
     def from_json(cls, path: Path) -> Self:
@@ -302,16 +414,64 @@ class AiPipelineConfig(BaseModel):
         json_str = self.model_dump_json(indent=indent)
         path.write_text(json_str)
 
-    def create_pipeline(self) -> AiPipeline:
+    def create_pipeline(self) -> AiPipeline[Any]:
         frame_selector = self.frame_selector.create_frame_selector()
-        llm = self.llm.create_llm()
-        frame_extractor = self.frame_extractor.create_frame_extractor(analyser_llm=llm)
-        image_batch_query = self.query.create_image_batch_query(llm)
-        reconciler = self.reconciler.create_reconciler()
+        query_llm = self.query.llm.create_llm()
+
+        # For AI crop extractor, use query LLM if no dedicated analyser configured
+        analyser_llm = None
+        if self.frame_extractor.analyser is not None:
+            analyser_llm = self.frame_extractor.analyser.create_llm()
+        else:
+            analyser_llm = query_llm
+
+        frame_extractor = self.frame_extractor.create_frame_extractor(analyser_llm=analyser_llm)
+        image_batch_query = self.query.create_image_batch_query()
+
+        # Use query LLM as fallback for reconciler
+        reconciler = self.reconciler.create_reconciler(fallback_llm=query_llm)
+
+        if self.query.query_type == ImageBatchQueryType.DESCRIPTION:
+            empty_result: BatchDescription = BatchDescription(description=NO_ACTIVITY_DESCRIPTION)
+            return AiPipeline[BatchDescription](
+                frame_selector=frame_selector,
+                frame_image_extractor=frame_extractor,
+                image_batch_query=image_batch_query,
+                result_reconciler=reconciler,
+                empty_result=empty_result,
+            )
+
+        # Build description pipeline components if description config is provided
+        description_query: DescriptionImageBatchQuery | None = None
+        description_reconciler: ResultReconciler[BatchDescription] | None = None
+
+        if self.description is not None:
+            description_llm = self.description.llm.create_llm()
+            description_prompt = self.description.description_prompt or DEFAULT_BATCH_DESCRIPTION_PROMPT
+            description_query = DescriptionImageBatchQuery(llm=description_llm, prompt=description_prompt)
+
+            combine_prompt = self.description.combine_prompt or DEFAULT_COMBINE_DESCRIPTION_PROMPT
+            description_reconciler = LlmDescriptionReconciler(
+                llm=description_llm,
+                prompt=combine_prompt,
+                fallback=ConcatenatingDescriptionReconciler(),
+            )
+
+        # For classification pipelines, use RichResult as the empty result
+        empty_rich_result = RichResult(
+            is_animal_present=False,
+            is_animal_unknown=False,
+            defining_features="",
+            species_name="no animal",
+            confidence=ConfidenceLevel.HIGH,
+        )
 
         return AiPipeline(
             frame_selector=frame_selector,
             frame_image_extractor=frame_extractor,
             image_batch_query=image_batch_query,
             result_reconciler=reconciler,
+            empty_result=empty_rich_result,
+            description_query=description_query,
+            description_reconciler=description_reconciler,
         )

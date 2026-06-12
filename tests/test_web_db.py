@@ -90,7 +90,11 @@ def sample_pipeline_config() -> AiPipelineConfig:
         frame_selector=FrameSelectorConfig(selector_type="fps_rescaling", fps=5.0),
         frame_extractor=FrameExtractorConfig(extractor_type="rescaled", resolution=(640, 360)),
         llm=LlmConfig(backend=Backend.OLLAMA, model="test-model"),
-        query=ImageBatchQueryConfig(query_type="llm", prompt="Test prompt"),
+        query=ImageBatchQueryConfig(
+            query_type="llm",
+            prompt="Test prompt",
+            llm=LlmConfig(backend=Backend.OLLAMA, model="test-model"),
+        ),
         reconciler=ReconcilerConfig(reconciler_type="majority"),
     )
 

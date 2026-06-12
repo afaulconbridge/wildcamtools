@@ -9,7 +9,7 @@ from wildcamtools.lib.ai.parallel_processing import (
     time_pipeline_execution,
     validate_evaluation_paths,
 )
-from wildcamtools.lib.ai.pipeline import PipelineOutcome
+from wildcamtools.lib.ai.pipeline import CombinedPipelineOutcome, PipelineOutcome
 from wildcamtools.lib.ai.pipeline_config import AiPipelineConfig
 from wildcamtools.lib.ai.types import ResultClassification, RichResult
 from wildcamtools.lib.labels import load_labels
@@ -21,7 +21,7 @@ class _WorkerResult(BaseModel):
     """Result from worker process before label comparison."""
 
     filename: str
-    outcome: PipelineOutcome
+    outcome: PipelineOutcome | CombinedPipelineOutcome
     processing_time_seconds: float = 0.0
     frame_ids: list[int] = Field(default_factory=list)
     error: str | None = None

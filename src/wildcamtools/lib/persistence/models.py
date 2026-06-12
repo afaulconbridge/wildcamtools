@@ -85,6 +85,7 @@ class PipelineBatch(SQLModel, table=True):
     """Batch of frames processed in a pipeline run.
 
     Contains frame numbers and the classification result for that batch.
+    Optionally contains a description for the batch when description generation is enabled.
     """
 
     __tablename__ = "pipelinebatch"
@@ -93,6 +94,7 @@ class PipelineBatch(SQLModel, table=True):
     run_id: int = Field(foreign_key="pipelinerun.id", ondelete="CASCADE")
     frame_numbers: str
     result_id: int | None = Field(default=None, foreign_key="classificationresult.id", ondelete="CASCADE")
+    description: str | None = Field(default=None, description="Optional description of the batch frames")
 
     run: PipelineRun | None = Relationship(back_populates="batches")
     result: ClassificationResult | None = Relationship()

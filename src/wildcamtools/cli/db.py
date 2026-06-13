@@ -8,6 +8,7 @@ from pydantic import BaseModel
 from wildcamtools.lib.ai.pipeline import PipelineOutcome
 from wildcamtools.lib.ai.pipeline_config import AiPipelineConfig
 from wildcamtools.lib.persistence.database import create_engine_and_tables, get_session
+from wildcamtools.lib.persistence.filename_datetime import infer_recorded_at
 from wildcamtools.lib.persistence.repository import save_pipeline_run
 
 app = typer.Typer()
@@ -77,6 +78,7 @@ def _import_single_result(
     video: Path,
     database: Path,
     engine: Any | None = None,
+    filename_date_format: str | None = None,
 ) -> bool:
     """Import a single result file into the database.
 
@@ -99,10 +101,20 @@ def _import_single_result(
             typer.secho(f"Error: Failed to connect to database: {e}", err=True)
             return False
 
+    recorded_at = infer_recorded_at(video.name, filename_date_format)
+    if recorded_at is not None:
+        logger.info("Inferred recorded_at=%s for filename=%s", recorded_at, video.name)
+
     logger.info("Importing result into database")
     with get_session(engine) as session:
         try:
-            run = save_pipeline_run(session, video.absolute(), data.config, data.outcome)
+            run = save_pipeline_run(
+                session,
+                video.absolute(),
+                data.config,
+                data.outcome,
+                recorded_at=recorded_at,
+            )
             session.commit()
             typer.secho(f"Successfully imported pipeline run: {video} (id={run.id})", fg="green")
         except Exception as e:
@@ -113,7 +125,9 @@ def _import_single_result(
             return True
 
 
-def _import_single_file_mode(input_path: Path, video_path: Path, database: Path) -> None:
+def _import_single_file_mode(
+    input_path: Path, video_path: Path, database: Path, filename_date_format: str | None
+) -> None:
     """Handle single file import mode."""
     if not input_path.is_file():
         typer.secho(f"Error: Input path is not a file: {input_path}", err=True)
@@ -130,12 +144,12 @@ def _import_single_file_mode(input_path: Path, video_path: Path, database: Path)
         typer.secho(f"Error: Video file must be a .mp4 or .MP4 file: {video_path}", err=True)
         raise typer.Exit(code=1)
 
-    success = _import_single_result(input_path, video_path, database)
+    success = _import_single_result(input_path, video_path, database, filename_date_format=filename_date_format)
     if not success:
         raise typer.Exit(code=1)
 
 
-def _import_directory_mode(video_dir: Path, result_dir: Path, database: Path) -> None:
+def _import_directory_mode(video_dir: Path, result_dir: Path, database: Path, filename_date_format: str | None) -> None:
     """Handle directory bulk import mode."""
     logger.info("Processing directories: %s and %s", video_dir, result_dir)
     matches, video_warnings, result_warnings = _find_matching_pairs(video_dir, result_dir)
@@ -163,7 +177,13 @@ def _import_directory_mode(video_dir: Path, result_dir: Path, database: Path) ->
     error_count = 0
 
     for video_file, result_file in matches:
-        if _import_single_result(result_file, video_file, database, engine):
+        if _import_single_result(
+            result_file,
+            video_file,
+            database,
+            engine,
+            filename_date_format=filename_date_format,
+        ):
             success_count += 1
         else:
             error_count += 1
@@ -196,6 +216,14 @@ def import_result(
     database: Annotated[
         Path, typer.Option("-d", "--database", help="SQLite database path (default: wildcamtools.db)")
     ] = Path("wildcamtools.db"),
+    filename_date_format: Annotated[
+        str | None,
+        typer.Option(
+            "--filename-date-format",
+            metavar="STRFTIME",
+            help="Optional strftime pattern used to infer a 'recorded_at' timestamp from the video filename (e.g. '%Y%m%d%H%M%S').",
+        ),
+    ] = None,
 ) -> None:
     """Import pipeline result JSON file(s) into the database.
 
@@ -225,6 +253,6 @@ def import_result(
         raise typer.Exit(code=1)
 
     if input_is_dir:
-        _import_directory_mode(video_path, input_path, database)
+        _import_directory_mode(video_path, input_path, database, filename_date_format)
     else:
-        _import_single_file_mode(input_path, video_path, database)
+        _import_single_file_mode(input_path, video_path, database, filename_date_format)

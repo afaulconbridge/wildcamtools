@@ -1,6 +1,7 @@
 """Tests for the persistence layer."""
 
 import tempfile
+from datetime import datetime
 from pathlib import Path
 
 import pytest
@@ -20,6 +21,7 @@ from wildcamtools.lib.ai.pipeline_config import (
 )
 from wildcamtools.lib.ai.types import Backend, ConfidenceLevel, RichResult
 from wildcamtools.lib.persistence.database import create_engine_and_tables, get_session
+from wildcamtools.lib.persistence.filename_datetime import infer_recorded_at
 from wildcamtools.lib.persistence.models import (
     ClassificationResult,
     Video,
@@ -246,3 +248,98 @@ def test_classification_result_unique_constraint(
         count_result = session.exec(stmt)
         count = count_result.scalar()
         assert count == 1
+
+
+def test_infer_recorded_at_valid_format() -> None:
+    """Inference should return a datetime when the filename matches the format."""
+    result = infer_recorded_at("20230816202116_VD_00001.MP4", "%Y%m%d%H%M%S")
+    assert result == datetime(2023, 8, 16, 20, 21, 16)
+
+
+def test_infer_recorded_at_no_format() -> None:
+    """Inference should return None when no format is supplied."""
+    assert infer_recorded_at("20230816202116_VD_00001.MP4", None) is None
+    assert infer_recorded_at("20230816202116_VD_00001.MP4", "") is None
+
+
+def test_infer_recorded_at_invalid_returns_none() -> None:
+    """Inference should silently return None for non-matching filenames."""
+    assert infer_recorded_at("nope.mp4", "%Y%m%d%H%M%S") is None
+
+
+def test_infer_recorded_at_empty_filename() -> None:
+    """Inference should return None for an empty filename."""
+    assert infer_recorded_at("", "%Y%m%d%H%M%S") is None
+
+
+def test_infer_recorded_at_accepts_absolute_path() -> None:
+    """Inference should use only the basename of a path."""
+    result = infer_recorded_at("/some/dir/20230816202116_VD_00001.MP4", "%Y%m%d%H%M%S")
+    assert result == datetime(2023, 8, 16, 20, 21, 16)
+
+
+def test_video_recorded_at_persisted(db_engine, sample_video_stats, sample_rich_result, sample_pipeline_config) -> None:
+    """save_pipeline_run should persist recorded_at on the Video row."""
+    outcome = PipelineOutcome(
+        result=sample_rich_result,
+        stats=sample_video_stats,
+        batches=[],
+    )
+    video_path = Path("/test/videos/20230816202116_VD_00001.MP4")
+    recorded = datetime(2023, 8, 16, 20, 21, 16)
+
+    with get_session(db_engine) as session:
+        save_pipeline_run(session, video_path, sample_pipeline_config, outcome, recorded_at=recorded)
+        session.commit()
+
+    with get_session(db_engine) as session:
+        video = session.get(Video, str(video_path))
+        assert video is not None
+        assert video.recorded_at == recorded
+
+
+def test_video_recorded_at_does_not_overwrite_existing(
+    db_engine, sample_video_stats, sample_rich_result, sample_pipeline_config
+) -> None:
+    """A second import must not clobber a previously-set recorded_at."""
+    outcome = PipelineOutcome(
+        result=sample_rich_result,
+        stats=sample_video_stats,
+        batches=[],
+    )
+    video_path = Path("/test/videos/persist_clip.mp4")
+    original = datetime(2024, 1, 2, 3, 4, 5)
+
+    with get_session(db_engine) as session:
+        save_pipeline_run(session, video_path, sample_pipeline_config, outcome, recorded_at=original)
+        session.commit()
+
+    with get_session(db_engine) as session:
+        save_pipeline_run(session, video_path, sample_pipeline_config, outcome, recorded_at=None)
+        session.commit()
+
+    with get_session(db_engine) as session:
+        video = session.get(Video, str(video_path))
+        assert video is not None
+        assert video.recorded_at == original
+
+
+def test_video_recorded_at_default_none(
+    db_engine, sample_video_stats, sample_rich_result, sample_pipeline_config
+) -> None:
+    """Without a recorded_at argument the column should remain None."""
+    outcome = PipelineOutcome(
+        result=sample_rich_result,
+        stats=sample_video_stats,
+        batches=[],
+    )
+    video_path = Path("/test/videos/no_timestamp.mp4")
+
+    with get_session(db_engine) as session:
+        save_pipeline_run(session, video_path, sample_pipeline_config, outcome)
+        session.commit()
+
+    with get_session(db_engine) as session:
+        video = session.get(Video, str(video_path))
+        assert video is not None
+        assert video.recorded_at is None

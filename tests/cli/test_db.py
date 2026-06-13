@@ -233,3 +233,107 @@ def test_db_import_result_directory_mode_no_matches(temp_video_file: Path):
 
         assert result.exit_code == 1
         assert "No matching video-result pairs found" in result.stderr
+
+
+def test_db_import_with_filename_date_format(temp_result_file: Path, tmp_path: Path) -> None:
+    """Importing with --filename-date-format should populate recorded_at."""
+    db_path = tmp_path / "test.db"
+    video_path = tmp_path / "20230816202116_VD_00001.mp4"
+    video_path.write_text("fake video")
+
+    result = runner.invoke(
+        app,
+        [
+            "db",
+            "import",
+            str(temp_result_file),
+            str(video_path),
+            "-d",
+            str(db_path),
+            "--filename-date-format",
+            "%Y%m%d%H%M%S",
+        ],
+    )
+
+    assert result.exit_code == 0, result.stdout + result.stderr
+    assert "Successfully imported pipeline run" in result.stdout
+
+    from sqlmodel import Session, create_engine
+
+    from wildcamtools.lib.persistence.models import Video
+
+    engine = create_engine(f"sqlite:///{db_path}")
+    with Session(engine) as session:
+        video = session.get(Video, str(video_path.absolute()))
+        assert video is not None
+        assert video.recorded_at is not None
+        assert video.recorded_at.year == 2023
+        assert video.recorded_at.month == 8
+        assert video.recorded_at.day == 16
+        assert video.recorded_at.hour == 20
+        assert video.recorded_at.minute == 21
+        assert video.recorded_at.second == 16
+
+
+def test_db_import_without_format_leaves_recorded_at_null(temp_result_file: Path, tmp_path: Path) -> None:
+    """Importing without --filename-date-format should leave recorded_at as None."""
+    db_path = tmp_path / "test.db"
+    video_path = tmp_path / "no_timestamp.mp4"
+    video_path.write_text("fake video")
+
+    result = runner.invoke(
+        app,
+        [
+            "db",
+            "import",
+            str(temp_result_file),
+            str(video_path),
+            "-d",
+            str(db_path),
+        ],
+    )
+
+    assert result.exit_code == 0, result.stdout + result.stderr
+
+    from sqlmodel import Session, create_engine
+
+    from wildcamtools.lib.persistence.models import Video
+
+    engine = create_engine(f"sqlite:///{db_path}")
+    with Session(engine) as session:
+        video = session.get(Video, str(video_path.absolute()))
+        assert video is not None
+        assert video.recorded_at is None
+
+
+def test_db_import_with_non_matching_format(temp_result_file: Path, tmp_path: Path) -> None:
+    """A format that does not match the filename should leave recorded_at as None."""
+    db_path = tmp_path / "test.db"
+    video_path = tmp_path / "no_timestamp_here.mp4"
+    video_path.write_text("fake video")
+
+    result = runner.invoke(
+        app,
+        [
+            "db",
+            "import",
+            str(temp_result_file),
+            str(video_path),
+            "-d",
+            str(db_path),
+            "--filename-date-format",
+            "%Y%m%d%H%M%S",
+        ],
+    )
+
+    assert result.exit_code == 0, result.stdout + result.stderr
+
+    from sqlmodel import Session, create_engine
+
+    from wildcamtools.lib.persistence.models import Video
+
+    engine = create_engine(f"sqlite:///{db_path}")
+    with Session(engine) as session:
+        video = session.get(Video, str(video_path.absolute()))
+        assert video is not None
+        assert video.recorded_at is None

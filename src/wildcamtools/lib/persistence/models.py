@@ -31,6 +31,7 @@ class Video(SQLModel, table=True):
 
     filename: str = Field(primary_key=True)
     stat_id: int | None = Field(default=None, foreign_key="videostat.id", ondelete="CASCADE")
+    recorded_at: datetime | None = Field(default=None, index=True)
 
     stat: VideoStat | None = Relationship()
     runs: list["PipelineRun"] = Relationship(back_populates="video")

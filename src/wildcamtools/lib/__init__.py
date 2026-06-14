@@ -24,6 +24,7 @@ class Frame:
     tiling_rows: int | None = None
     tiling_width: int | None = None
     tiling_height: int | None = None
+    timestamp: float | None = None
 
     @property
     def output(self) -> cv2.typing.MatLike:

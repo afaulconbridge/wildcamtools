@@ -200,6 +200,7 @@ class WatcherManager:
         self.motion_process = create_motion_process(
             rtsp_stream=self.rtsp_stream,
             msg_queue=self.msg_queue,
+            history=self.history,
             threshold=self.threshold,
             kernel_size=self.kernel_size,
             scale=self.scale,
@@ -253,6 +254,7 @@ class WatcherManager:
             self.motion_process = create_motion_process(
                 rtsp_stream=self.rtsp_stream,
                 msg_queue=self.msg_queue,
+                history=self.history,
                 threshold=self.threshold,
                 kernel_size=self.kernel_size,
                 scale=self.scale,
@@ -451,7 +453,9 @@ def watch(
     ] = 4,  # no. segments # TODO calculate from offset_start and segment_duration
     offset_start: Annotated[float, typer.Option(metavar="FLOAT", envvar="WCT_OFFSET_START")] = 10.0,  # seconds
     offset_end: Annotated[float, typer.Option(metavar="FLOAT", envvar="WCT_OFFSET_END")] = 10.0,  # seconds
-    history: Annotated[int, typer.Option(metavar="INT", envvar="WCT_HISTORY")] = 30,  # frames
+    history: Annotated[
+        float, typer.Option(metavar="FLOAT", envvar="WCT_HISTORY")
+    ] = 10.0,  # seconds; controls both the MOG2 background model frame count (history * fps) and the state machine's preparing_duration
     threshold: Annotated[int, typer.Option(metavar="INT", envvar="WCT_THRESHOLD")] = 16,  # < 128?
     kernel_size: Annotated[float, typer.Option(metavar="FLOAT", envvar="WCT_KERNEL_SIZE")] = 0.005,  # proportion
     scale: Annotated[float, typer.Option(metavar="FLOAT", envvar="WCT_SCALE")] = 0.25,  # <1.0
@@ -464,7 +468,9 @@ def watch(
     amber_to_green_proportion_max: Annotated[
         float, typer.Option(metavar="FLOAT", envvar="WCT_AMBER_2_GREEN_MAX")
     ] = 0.0075,
-    amber_to_red_duration: Annotated[int, typer.Option(metavar="INT", envvar="WCT_AMBER_2_RED_DURATION")] = 5,  # frames
+    amber_to_red_duration: Annotated[
+        float, typer.Option(metavar="FLOAT", envvar="WCT_AMBER_2_RED_DURATION")
+    ] = 5.0,  # seconds
     red_to_red_amber_proportion_max: Annotated[
         float, typer.Option(metavar="FLOAT", envvar="WCT_RED_2_RED_AMBER_MAX")
     ] = 0.0075,
@@ -472,8 +478,8 @@ def watch(
         float, typer.Option(metavar="FLOAT", envvar="WCT_RED_AMBER_2_RED_MIN")
     ] = 0.01,
     red_amber_to_green_duration: Annotated[
-        int, typer.Option(metavar="INT", envvar="WCT_RED_AMBER_2_GREEN_DURATION")
-    ] = 5,  # frames
+        float, typer.Option(metavar="FLOAT", envvar="WCT_RED_AMBER_2_GREEN_DURATION")
+    ] = 5.0,  # seconds
     motion_mask: Annotated[Path | None, typer.Option(metavar="PATH", envvar="WCT_MOTION_MASK")] = None,
 ) -> None:
     if motion_mask:
@@ -497,6 +503,12 @@ def watch(
     if kernel_size < 0 or kernel_size > 1:
         raise typer.BadParameter("kernel_size must be a float proportion between 0 and 1")
 
+    # The MOG2 background subtractor's ``history`` parameter is in number of
+    # frames. Convert the state machine's seconds-based warm-up into frames
+    # at the target FPS so the background model has roughly the same amount
+    # of training data.
+    mog_history = max(1, round(history * fps))
+
     transition_metrics = WatcherTransitionMetrics(
         preparing_duration=history,
         green_to_amber_motion_min=green_to_amber_motion_min,
@@ -513,7 +525,7 @@ def watch(
         keep_count=keep_count,
         offset_start=offset_start,
         offset_end=offset_end,
-        history=history,
+        history=mog_history,
         threshold=threshold,
         kernel_size=kernel_size,
         scale=scale,

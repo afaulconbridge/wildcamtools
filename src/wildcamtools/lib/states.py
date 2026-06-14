@@ -59,13 +59,14 @@ class WatcherStateEnum(StrEnum):
 
 
 class WatcherTransitionMetrics(BaseModel):
-    preparing_duration: int = 10
+    # All duration fields are in seconds (wall-clock time of the frame).
+    preparing_duration: float = 10.0
     green_to_amber_motion_min: float = 0.1
     amber_to_green_proportion_max: float = 0.075
-    amber_to_red_duration: int = 1
+    amber_to_red_duration: float = 1.0
     red_to_red_amber_proportion_max: float = 0.075
     red_amber_to_red_proportion_min: float = 0.1
-    red_amber_to_green_duration: int = 1
+    red_amber_to_green_duration: float = 1.0
 
 
 class StateTransitionWindowMetrics(BaseModel):
@@ -86,9 +87,17 @@ class MotionWindow(BaseModel):
     """
     Represents a motion detection window with frame and time boundaries.
 
-    Note: Frame numbers use source video indices (native FPS, e.g., 30 fps),
-    not post-filtering indices. When using Rescaler with fps < native_fps,
-    frame_no values will be spaced (e.g., 0, 6, 12, ... for 30fps source at 5fps).
+    Note: ``start_frame``/``end_frame`` are in **source video indices** (native
+    FPS, e.g., 30 fps), not post-filtering indices. When using Rescaler with
+    ``fps < native_fps``, ``frame_no`` values will be spaced (e.g., 0, 6, 12,
+    ... for 30fps source at 5fps). ``start_time``/``end_time`` are wall-clock
+    timestamps captured from the frame's PTS.
+
+    The state machine itself interprets duration-based thresholds
+    (``preparing_duration``, ``amber_to_red_duration``,
+    ``red_amber_to_green_duration``) in **seconds**, using the frame's
+    timestamp — not frame counts. So the behavior is independent of the
+    source/rescaled FPS configuration.
     """
 
     start_frame: int
@@ -121,15 +130,22 @@ class Watcher(FrameHandler):
     state: WatcherStateEnum
     transition_metrics: WatcherTransitionMetrics
     transition_window_metrics: dict[WatcherStateEnum, StateTransitionWindowMetrics]
-    amber_start: int | None
-    red_start: int | None
-    red_amber_start: int | None
+    # Timestamps (in seconds, from Frame.timestamp) of when each motion state
+    # was entered. Used for time-based duration calculations in the state
+    # machine. The state machine interprets ``amber_to_red_duration`` and
+    # ``red_amber_to_green_duration`` as seconds, not frame counts, so its
+    # behavior is independent of the source/rescaled FPS.
+    preparing_start: float | None
+    amber_start: float | None
+    red_start: float | None
+    red_amber_start: float | None
 
     def __init__(self, motion: MogMotion, transition_metrics: WatcherTransitionMetrics) -> None:
         self.motion = motion
         self.state = WatcherStateEnum.PREPARING
         self.transition_metrics = transition_metrics
         self.transition_window_metrics = {}
+        self.preparing_start = None
         self.amber_start = None
         self.red_start = None
         self.red_amber_start = None
@@ -144,7 +160,7 @@ class Watcher(FrameHandler):
         return output
 
     def _update_state_transition_window_metrics(self, frame: Frame, next_state: WatcherStateEnum) -> None:
-        if next_state != self.state or next_state not in self.transition_window_metrics:
+        if next_state not in self.transition_window_metrics:
             self.transition_window_metrics[next_state] = StateTransitionWindowMetrics(
                 minimum=frame.motion_proportion,
                 maximum=frame.motion_proportion,
@@ -174,7 +190,13 @@ class Watcher(FrameHandler):
 
     def _handle_preparing_state(self, frame: Frame) -> WatcherStateEnum:
         """Handle transition from PREPARING state."""
-        if frame.frame_no >= self.transition_metrics.preparing_duration:
+        if self.preparing_start is None and frame.timestamp is not None:
+            self.preparing_start = frame.timestamp
+        if (
+            self.preparing_start is not None
+            and frame.timestamp is not None
+            and frame.timestamp - self.preparing_start >= self.transition_metrics.preparing_duration
+        ):
             return WatcherStateEnum.GREEN
         return WatcherStateEnum.PREPARING
 
@@ -183,9 +205,8 @@ class Watcher(FrameHandler):
         if frame.motion_proportion > self.transition_metrics.green_to_amber_motion_min:
             if self.transition_metrics.amber_to_red_duration == 0:
                 return WatcherStateEnum.RED
-            else:
-                self.amber_start = frame.frame_no
-                return WatcherStateEnum.AMBER
+            self.amber_start = frame.timestamp
+            return WatcherStateEnum.AMBER
         return WatcherStateEnum.GREEN
 
     def _handle_amber_state(self, frame: Frame) -> WatcherStateEnum:
@@ -194,9 +215,10 @@ class Watcher(FrameHandler):
             return WatcherStateEnum.GREEN
         if (
             self.amber_start is not None
-            and frame.frame_no >= self.amber_start + self.transition_metrics.amber_to_red_duration
+            and frame.timestamp is not None
+            and frame.timestamp - self.amber_start >= self.transition_metrics.amber_to_red_duration
         ):
-            self.red_start = frame.frame_no
+            self.red_start = frame.timestamp
             return WatcherStateEnum.RED
         return WatcherStateEnum.AMBER
 
@@ -205,19 +227,19 @@ class Watcher(FrameHandler):
         if frame.motion_proportion < self.transition_metrics.red_to_red_amber_proportion_max:
             if self.transition_metrics.red_amber_to_green_duration == 0:
                 return WatcherStateEnum.GREEN
-            else:
-                self.red_amber_start = frame.frame_no
-                return WatcherStateEnum.RED_AMBER
+            self.red_amber_start = frame.timestamp
+            return WatcherStateEnum.RED_AMBER
         return WatcherStateEnum.RED
 
     def _handle_red_amber_state(self, frame: Frame) -> WatcherStateEnum:
         """Handle transition from RED_AMBER state."""
         if frame.motion_proportion > self.transition_metrics.red_amber_to_red_proportion_min:
-            self.red_start = frame.frame_no
+            self.red_start = frame.timestamp
             return WatcherStateEnum.RED
         if (
             self.red_amber_start is not None
-            and frame.frame_no >= self.red_amber_start + self.transition_metrics.red_amber_to_green_duration
+            and frame.timestamp is not None
+            and frame.timestamp - self.red_amber_start >= self.transition_metrics.red_amber_to_green_duration
         ):
             return WatcherStateEnum.GREEN
         return WatcherStateEnum.RED_AMBER
@@ -256,7 +278,13 @@ def _load_and_resize_mask(mask_path: Path | None, width: int, height: int, scale
     return mask
 
 
-def enqueue_motion_windows(
+def _should_yield_motion_window(watcher: Watcher) -> bool:
+    """Check if a motion window should be yielded (must have reached RED state)."""
+    red_metrics = watcher.transition_window_metrics.get(WatcherStateEnum.RED)
+    return red_metrics is not None and red_metrics.count > 0
+
+
+def enqueue_motion_windows(  # noqa: C901
     rtsp_stream: str,
     queue: Queue,
     history: int,
@@ -271,9 +299,15 @@ def enqueue_motion_windows(
     """
     Extract motion windows from video stream.
 
-    Note: Frame numbers in returned MotionWindow objects use source video indices
-    (native FPS), not post-filtering indices. When using Rescaler with fps < native_fps,
-    frame_no values will be spaced (e.g., 0, 6, 12, ... for 30fps source at 5fps).
+    ``start_frame``/``end_frame`` on the returned ``MotionWindow`` objects use
+    source video indices (native FPS), not post-filtering indices. When using
+    Rescaler with ``fps < native_fps``, ``frame_no`` values will be spaced
+    (e.g., 0, 6, 12, ... for 30fps source at 5fps).
+
+    The Watcher state machine interprets duration-based thresholds
+    (``preparing_duration``, ``amber_to_red_duration``,
+    ``red_amber_to_green_duration``) in seconds (using ``Frame.timestamp``),
+    so the behavior is independent of source/rescaled FPS.
     """
 
     def _find_motion_times(source: str, stats: VideoStats, watcher: Watcher) -> Generator[MotionWindow]:
@@ -288,18 +322,26 @@ def enqueue_motion_windows(
                 frame = rescaler.handle(frame)
                 if not frame.filter_keep:
                     continue
+                # If a new motion window is about to start (GREEN -> AMBER/RED),
+                # reset the watcher's per-window metrics before processing the
+                # entry frame. This scopes the metrics to just the new window
+                # and gives exact min/max/mean/count (no lifetime accumulation
+                # or approximation).
+                if start_frame is None and start_time is None and prev_state == WatcherStateEnum.GREEN:
+                    watcher.transition_window_metrics = {}
                 frame = watcher.handle(frame)
                 last_frame_no = frame.frame_no
                 # Start tracking when transitioning from GREEN to any motion state (AMBER or RED)
                 # This handles both normal transitions (GREEN->AMBER) and zero-duration transitions (GREEN->RED)
                 if start_frame is None and start_time is None:
-                    if prev_state == WatcherStateEnum.GREEN and watcher.state in (
+                    if watcher.state in (
                         WatcherStateEnum.AMBER,
                         WatcherStateEnum.RED,
                     ):
                         start_frame = frame.frame_no
                         start_time = datetime.now(UTC)
                 # End tracking when returning to GREEN from any motion state
+                # Only yield windows that reached RED state (discard GREEN->AMBER->GREEN)
                 elif (
                     start_frame is not None
                     and start_time is not None
@@ -311,6 +353,15 @@ def enqueue_motion_windows(
                         WatcherStateEnum.RED_AMBER,
                     )
                 ):
+                    if not _should_yield_motion_window(watcher):
+                        logger.debug(
+                            "Discarding motion window %d-%d: never reached RED state",
+                            start_frame,
+                            last_frame_no,
+                        )
+                        start_frame = None
+                        start_time = None
+                        continue
                     end_frame = frame.frame_no
                     end_time = datetime.now(UTC)
                     yield MotionWindow(
@@ -319,7 +370,7 @@ def enqueue_motion_windows(
                         end_frame=end_frame,
                         end_time=end_time,
                         transition_metrics=watcher.transition_metrics,
-                        transition_window_metrics=watcher.transition_window_metrics,
+                        transition_window_metrics=dict(watcher.transition_window_metrics),
                     )
                     start_frame = None
                     start_time = None
@@ -327,15 +378,23 @@ def enqueue_motion_windows(
                 prev_state = watcher.state
 
             # Yield any pending window if video ended during motion
+            # Only yield if the window reached RED state
             if start_frame is not None and start_time is not None and last_frame_no is not None:
-                yield MotionWindow(
-                    start_frame=start_frame,
-                    start_time=start_time,
-                    end_frame=last_frame_no,
-                    end_time=datetime.now(UTC),
-                    transition_metrics=watcher.transition_metrics,
-                    transition_window_metrics=watcher.transition_window_metrics,
-                )
+                if _should_yield_motion_window(watcher):
+                    yield MotionWindow(
+                        start_frame=start_frame,
+                        start_time=start_time,
+                        end_frame=last_frame_no,
+                        end_time=datetime.now(UTC),
+                        transition_metrics=watcher.transition_metrics,
+                        transition_window_metrics=dict(watcher.transition_window_metrics),
+                    )
+                else:
+                    logger.debug(
+                        "Discarding pending motion window %d-%d: never reached RED state",
+                        start_frame,
+                        last_frame_no,
+                    )
 
     stats = get_video_stats(rtsp_stream)
     processed_mask = _load_and_resize_mask(
@@ -362,6 +421,7 @@ def enqueue_motion_windows(
 def create_motion_process(
     rtsp_stream: str,
     msg_queue: Queue,
+    history: int,
     threshold: float,
     kernel_size: float,
     scale: float,
@@ -371,12 +431,20 @@ def create_motion_process(
     motion_mask: Path | None = None,
     restart_on_exit: bool | None = None,
 ) -> MotionProcessWrapper:
+    """Spawn a motion-detection process.
+
+    The ``history`` parameter is the number of frames the MOG2 background
+    subtractor uses to build its initial background model. This is separate
+    from ``transition_metrics.preparing_duration`` (which is the state
+    machine's warm-up time in seconds). Callers are expected to convert
+    seconds to frames at the target FPS.
+    """
     motion_process = Process(
         target=enqueue_motion_windows,
         kwargs={
             "rtsp_stream": rtsp_stream,
             "queue": msg_queue,
-            "history": transition_metrics.preparing_duration,
+            "history": history,
             "threshold": threshold,
             "kernel_size": kernel_size,
             "scale": scale,

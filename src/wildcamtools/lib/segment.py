@@ -211,11 +211,12 @@ class VideoSegmenter:
             if frame.time is not None
             else (frame.pts * self._video_stream.time_base if frame.pts is not None else None)
         )
+        timestamp: float | None = float(frame_time) if frame_time is not None else None
         self._maybe_rotate_segment(frame_time)
         self._write_frame_to_segment(frame)
 
         rgb_frame = frame.to_rgb().to_ndarray()
-        result = Frame(raw=rgb_frame, frame_no=self._frame_no)
+        result = Frame(raw=rgb_frame, frame_no=self._frame_no, timestamp=timestamp)
         self._frame_no += 1
         return result
 

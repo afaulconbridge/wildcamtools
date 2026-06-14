@@ -57,7 +57,13 @@ class FileFrameSourceCV2(FrameSource):
 
         ret, raw = self.cap.read()
         if ret:
-            frame = Frame(raw=raw, frame_no=self.frame_no)
+            # OpenCV VideoCapture exposes the current frame's position in
+            # milliseconds via CAP_PROP_POS_MSEC. When unset the property
+            # returns 0.0, which is indistinguishable from a real zero
+            # timestamp — we only treat a negative return as "no timestamp".
+            timestamp_ms = self.cap.get(cv2.CAP_PROP_POS_MSEC) if self.cap else 0.0
+            timestamp: float | None = float(timestamp_ms) / 1000.0 if timestamp_ms >= 0 else None
+            frame = Frame(raw=raw, frame_no=self.frame_no, timestamp=timestamp)
             self.frame_no += 1
             return frame
         else:
@@ -195,9 +201,26 @@ class VideoReader(FrameSource):
                 interpolation=cv2.INTER_LINEAR,
             )
 
-        result = Frame(raw=rgb_frame, frame_no=self.frame_no)
+        timestamp = self._get_frame_timestamp(frame)
+        if timestamp is None and self._target_fps is not None and self._target_fps > 0:
+            # Fallback: estimate from frame_no at the target FPS
+            timestamp = self.frame_no / self._target_fps
+        result = Frame(raw=rgb_frame, frame_no=self.frame_no, timestamp=timestamp)
         self.frame_no += 1
         return result
+
+    def _get_frame_timestamp(self, frame: av.VideoFrame) -> float | None:
+        """Extract a wall-clock-ish timestamp (in seconds) from an av.VideoFrame.
+
+        Returns None if the timestamp cannot be determined. The returned value
+        is the frame's presentation time in seconds; for RTSP this is wall time
+        since stream start, for files it is the timestamp within the file.
+        """
+        if frame.time is not None:
+            return float(frame.time)
+        if frame.pts is not None and self._stream and self._stream.time_base:
+            return float(frame.pts * self._stream.time_base)
+        return None
 
     def _should_drop_frame(self, frame: av.VideoFrame) -> bool:
         if self._target_fps is None:

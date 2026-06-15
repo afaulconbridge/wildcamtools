@@ -1,4 +1,4 @@
-name: Dull Code Review
+name: Full Code Review
 
 on:
   schedule:
@@ -41,7 +41,7 @@ jobs:
             '5. Create at most 5 issues in this run' \
             '' \
             'Prioritize critical and high severity issues. Start your response with STATUS: COMPLETE and include a summary of issues found, created, and skipped.' \
-            > /tmp/review_prompt.txt
+            > review_prompt.txt
 
       - name: Run Weekly Code Review
         env:
@@ -49,7 +49,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           opencode models --provider ollama-cloud
-          OUTPUT=$(opencode run --model 'ollama-cloud/gemma4:31b' --agent code-reviewer --file AGENTS.md --file /tmp/review_prompt.txt) || {
+          OUTPUT=$(opencode run --model 'ollama-cloud/gemma4:31b' --agent code-reviewer --file AGENTS.md < review_prompt.txt)  || {
             echo "OpenCode failed to execute."
             exit 1
           }

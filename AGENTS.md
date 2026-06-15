@@ -2,36 +2,42 @@
 
 ## High-Signal Commands
 
+- Install deps: `uv sync --locked --all-extras --dev`
 - Run tests: `uv run pytest`
 - Lint: `uv run ruff check .`
 - Format: `uv run ruff format .`
 - Typecheck: `uv run mypy src`
-- CLI Entrypoint: `uv run wildcamtools` (or `python -m wildcamtools`)
+- CLI: `uv run wildcamtools` or `python -m wildcamtools`
+- System deps (for tests): `ffmpeg`, `libblas-dev`
 
 ## Architecture & Flow
 
 - **Purpose**: Motion-detected wildlife clip generation with lookback.
-- **Pipeline**: Camera $\to$ MediaMTX (RTSP) $\to$ FFMPEG Segmenter $\to$ Storage $\to$ Motion Detection $\to$ Clip Concat.
+- **Pipeline**: Camera → MediaMTX (RTSP) → FFMPEG Segmenter → Storage → Motion Detection → Clip Concat.
 - **Project Structure**:
     - `src/wildcamtools/lib`: Core business logic (motion, rtsp, segments, etc.).
-    - `src/wildcamtools/cli`: CLI tool implementation. Avoid adding business logic here, try to keep it to only code related to the CLI.
-    - `deployment/`: Camera-side setup scripts.
-    - `tests/`: Pytest suite with binaries in `tests/bin` (e.g., mediamtx).
+    - `src/wildcamtools/cli`: CLI commands only (typer subcommands). No business logic.
+    - `src/wildcamtools/web`: Web UI components (streamlit).
+    - `deployment/`: Camera-side systemd setup scripts.
+    - `tests/`: Pytest suite; `tests/bin` contains test binaries (e.g., mediamtx mock).
 
 ## Conventions & Quirks
 
-- **Python Version**: Strict `==3.13.*` and use appropriate language features when applicable
-- **OpenCV**: Uses `opencv-contrib-python-headless` to avoid GUI dependencies; `uv` override prevents `opencv-python` installation.
-- **Dependencies**: Managed via `uv` (checked via `uv.lock`).
-    - AI dependencies (openai, ollama) can be used only in `src/wildcamtools/lib/ai`.
-    - CLI dependencies (typer, click) can be used only in `src/wildcamtools/cli`.
-    - persistence dependencies (sqlalchemy, sqlmodel) can be used only in `src/wildcamtools/lib/persistence`.
-- **Verification Order**: `ruff format` $\to$ `ruff check` $\to$ `mypy` $\to$ `pytest`.
-- **Logging**: Use python logging module and %-string formatting.
-- **Tests**: Write tests to ensure new functionallity is mainitained in future. When tests fail, assume the test is the correct behaviour modify the code rather than test unnless you can see that the test is flawed.
-- **Code review**: After each significant change, Use a code-review subagent to review changes, then use another sub-agent to fix any problems identified, then repeat until review passes.
+- **Python Version**: Strict `==3.13.*`.
+- **OpenCV**: Uses `opencv-contrib-python-headless`; `uv` override blocks `opencv-python`.
+- **Dependency Boundaries** (enforced by convention):
+    - AI deps (openai, ollama): only in `src/wildcamtools/lib/ai`.
+    - CLI deps (typer, click): only in `src/wildcamtools/cli`.
+    - Persistence deps (sqlalchemy, sqlmodel): only in `src/wildcamtools/lib/persistence`.
+- **Verification Order**: `ruff format` → `ruff check` → `mypy` → `pytest`.
+- **Logging**: Use `logging` module with %-formatting (not f-strings).
+- **Tests**: When tests fail, assume the test is correct and fix the code unless the test is clearly flawed.
+- **Code Review**: After significant changes, run the code-review subagent, fix issues, then re-review until it passes.
+- **Imports**: No lazy imports. Refactor to avoid circular dependencies instead.
 
+## CLI Structure
 
-## Best practices
-- **Lazy imports**: Imports that are not at the top of a python file are to be avoided. Prefer to create additional files and refactor code to avoid circular dependency issues, rather than creating lazy imports.
-- **After editing a python file**: Use `uv run ruff format {filename}` after each edit to ensure that python files are correctly formatted.
+The CLI uses `typer` with subcommands registered in `src/wildcamtools/cli/__init__.py`:
+- `motion`, `segment`, `watch`, `rtsp`, `frames`, `label`, `ai`, `results`, `db`, `rescale`, `perftest`
+
+Add new commands by creating a module in `src/wildcamtools/cli/` and registering it in `__init__.py`.

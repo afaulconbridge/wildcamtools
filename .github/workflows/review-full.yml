@@ -1,0 +1,56 @@
+name: Dull Code Review
+
+on:
+  schedule:
+    - cron: "0 4 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  review-full:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Install OpenCode
+        run: |
+          curl -fsSL -o install.sh https://opencode.ai/install
+          echo "fc3c1b2123f49b6df545a7622e5127d21cd794b15134fc3b66e1ca49f7fb297e  install.sh" | sha256sum -c -
+          bash install.sh
+
+      - name: Setup Ollama Cloud auth
+        run: |
+          mkdir -p ~/.local/share/opencode
+          echo '{"ollama-cloud":{"type":"api","key":"${{ secrets.OLLAMA_CLOUD_API_KEY }}"}}' > ~/.local/share/opencode/auth.json
+
+      - name: Create Review Prompt
+        run: |
+          printf '%s\n' \
+            'Perform a comprehensive code review of the ENTIRE repository on the main branch (not just a diff). Review all code including src/, tests/, .github/workflows/, configuration files, and .opencode/ agents.' \
+            '' \
+            'For each issue you find:' \
+            '1. Document: file location, line numbers, problem description, why it is a problem, and proposed solution' \
+            '2. Check if there are already 20 or more open GitHub issues - if so, STOP and do not create any new issues' \
+            "3. Search existing GitHub issues using 'gh issue list --state open --search \"<keywords>\"' to check for duplicates" \
+            "4. If no duplicate exists and we have fewer than 20 open issues, use the 'create-github-issue' skill to create a new issue" \
+            '5. Create at most 5 issues in this run' \
+            '' \
+            'Prioritize critical and high severity issues. Start your response with STATUS: COMPLETE and include a summary of issues found, created, and skipped.' \
+            > /tmp/review_prompt.txt
+
+      - name: Run Weekly Code Review
+        env:
+          OLLAMA_CLOUD_API_KEY: ${{ secrets.OLLAMA_CLOUD_API_KEY }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          opencode models --provider ollama-cloud
+          OUTPUT=$(opencode run --model 'ollama-cloud/gemma4:31b' --agent code-reviewer --file AGENTS.md --file /tmp/review_prompt.txt) || {
+            echo "OpenCode failed to execute."
+            exit 1
+          }
+          echo "$OUTPUT"

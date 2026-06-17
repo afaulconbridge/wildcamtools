@@ -16,6 +16,7 @@ from wildcamtools.lib.motion import MogMotion
 from wildcamtools.lib.stats import VideoStats, get_video_stats
 from wildcamtools.lib.utils import is_stream_url
 from wildcamtools.lib.vidio import VideoReader
+from wildcamtools.lib.watch_config import WatchConfig
 
 logger = logging.getLogger(__name__)
 
@@ -98,6 +99,15 @@ class MotionWindow(BaseModel):
     ``red_amber_to_green_duration``) in **seconds**, using the frame's
     timestamp — not frame counts. So the behavior is independent of the
     source/rescaled FPS configuration.
+
+    Attributes:
+        start_frame: First frame number in the motion window
+        start_time: Start timestamp of the motion window
+        end_frame: Last frame number in the motion window (None if still active)
+        end_time: End timestamp of the motion window (None if still active)
+        transition_metrics: State machine transition thresholds used
+        transition_window_metrics: Per-state motion statistics during the window
+        config: Configuration used for motion detection (for traceability)
     """
 
     start_frame: int
@@ -106,6 +116,7 @@ class MotionWindow(BaseModel):
     end_time: datetime | None
     transition_metrics: WatcherTransitionMetrics
     transition_window_metrics: dict[WatcherStateEnum, StateTransitionWindowMetrics]
+    config: WatchConfig
 
 
 class Watcher(FrameHandler):
@@ -287,14 +298,8 @@ def _should_yield_motion_window(watcher: Watcher) -> bool:
 def enqueue_motion_windows(  # noqa: C901
     rtsp_stream: str,
     queue: Queue,
-    history: int,
-    threshold: int,
-    kernel_size: float,
-    scale: float,
-    fps: float,
-    hwaccel: str,
-    transition_metrics: WatcherTransitionMetrics,
-    motion_mask: Path | None = None,
+    config: WatchConfig,
+    hwaccel: str = "",
 ) -> None:
     """
     Extract motion windows from video stream.
@@ -308,6 +313,12 @@ def enqueue_motion_windows(  # noqa: C901
     (``preparing_duration``, ``amber_to_red_duration``,
     ``red_amber_to_green_duration``) in seconds (using ``Frame.timestamp``),
     so the behavior is independent of source/rescaled FPS.
+
+    Args:
+        rtsp_stream: RTSP URL or file path to process
+        queue: Queue to put MotionWindow instances into
+        config: WatchConfig with motion detection parameters
+        hwaccel: Hardware acceleration method (deployment-specific)
     """
 
     def _find_motion_times(source: str, stats: VideoStats, watcher: Watcher) -> Generator[MotionWindow]:
@@ -315,8 +326,20 @@ def enqueue_motion_windows(  # noqa: C901
         start_time: datetime | None = None
         prev_state: WatcherStateEnum | None = None
         last_frame_no: int | None = None
-        logger.debug("Reading %s at %sx%s@%s (%s)", source, stats.x, stats.y, fps, scale)
-        rescaler = Rescaler(stats, int(stats.x * scale), int(stats.y * scale), fps)
+        logger.debug(
+            "Reading %s at %sx%s@%s (%s)",
+            source,
+            stats.x,
+            stats.y,
+            config.motion_detection.fps,
+            config.motion_detection.scale,
+        )
+        rescaler = Rescaler(
+            stats,
+            int(stats.x * config.motion_detection.scale),
+            int(stats.y * config.motion_detection.scale),
+            config.motion_detection.fps,
+        )
         with VideoReader(source, hwaccel=hwaccel if hwaccel else None) as video_input:
             for frame in video_input:
                 frame = rescaler.handle(frame)
@@ -371,6 +394,7 @@ def enqueue_motion_windows(  # noqa: C901
                         end_time=end_time,
                         transition_metrics=watcher.transition_metrics,
                         transition_window_metrics=dict(watcher.transition_window_metrics),
+                        config=config,
                     )
                     start_frame = None
                     start_time = None
@@ -388,6 +412,7 @@ def enqueue_motion_windows(  # noqa: C901
                         end_time=datetime.now(UTC),
                         transition_metrics=watcher.transition_metrics,
                         transition_window_metrics=dict(watcher.transition_window_metrics),
+                        config=config,
                     )
                 else:
                     logger.debug(
@@ -398,21 +423,21 @@ def enqueue_motion_windows(  # noqa: C901
 
     stats = get_video_stats(rtsp_stream)
     processed_mask = _load_and_resize_mask(
-        mask_path=motion_mask,
+        mask_path=config.motion_mask,
         width=stats.x,
         height=stats.y,
-        scale=scale,
+        scale=config.motion_detection.scale,
     )
 
     watcher = Watcher(
         motion=MogMotion(
-            history=history,
-            threshold=threshold,
+            history=config.get_mog_history(),
+            threshold=config.motion_detection.threshold,
             detect_shadows=False,
-            kernel_size=kernel_size,
+            kernel_size=config.motion_detection.kernel_size,
             motion_mask=processed_mask,
         ),
-        transition_metrics=transition_metrics,
+        transition_metrics=config.transition_metrics.to_transition_metrics(),
     )
     for motion in _find_motion_times(rtsp_stream, stats, watcher):
         queue.put(motion)
@@ -421,15 +446,9 @@ def enqueue_motion_windows(  # noqa: C901
 def create_motion_process(
     rtsp_stream: str,
     msg_queue: Queue,
-    history: int,
-    threshold: float,
-    kernel_size: float,
-    scale: float,
-    fps: float,
-    hwaccel: str,
-    transition_metrics: WatcherTransitionMetrics,
-    motion_mask: Path | None = None,
+    config: WatchConfig,
     restart_on_exit: bool | None = None,
+    hwaccel: str = "",
 ) -> MotionProcessWrapper:
     """Spawn a motion-detection process.
 
@@ -438,20 +457,24 @@ def create_motion_process(
     from ``transition_metrics.preparing_duration`` (which is the state
     machine's warm-up time in seconds). Callers are expected to convert
     seconds to frames at the target FPS.
+
+    Args:
+        rtsp_stream: RTSP URL or file path to process
+        msg_queue: Queue to put MotionWindow instances into
+        config: WatchConfig with motion detection parameters
+        restart_on_exit: Whether to restart the process on exit (auto-detected if None)
+        hwaccel: Hardware acceleration method (deployment-specific)
+
+    Returns:
+        MotionProcessWrapper instance
     """
     motion_process = Process(
         target=enqueue_motion_windows,
         kwargs={
             "rtsp_stream": rtsp_stream,
             "queue": msg_queue,
-            "history": history,
-            "threshold": threshold,
-            "kernel_size": kernel_size,
-            "scale": scale,
-            "fps": fps,
+            "config": config,
             "hwaccel": hwaccel,
-            "transition_metrics": transition_metrics,
-            "motion_mask": motion_mask,
         },
         daemon=True,
         name="wildcamtools-motion",

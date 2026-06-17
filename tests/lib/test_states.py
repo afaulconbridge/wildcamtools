@@ -14,6 +14,7 @@ from wildcamtools.lib.states import (
     create_motion_process,
 )
 from wildcamtools.lib.vidio import VideoReader
+from wildcamtools.lib.watch_config import WatchConfig
 
 
 @pytest.mark.skip(reason="Test video lacks sufficient motion to trigger all state transitions")
@@ -49,18 +50,12 @@ def test_create_motion_process_restart_on_exit_auto_detect_file(video_path: Path
     """Test that file paths auto-detect as restart_on_exit=False."""
 
     msg_queue: Queue = Queue()
-    metrics = WatcherTransitionMetrics()
+    config = WatchConfig(rtsp_stream=str(video_path))
 
     process = create_motion_process(
         rtsp_stream=str(video_path),
         msg_queue=msg_queue,
-        history=50,
-        threshold=16,
-        kernel_size=0.005,
-        scale=0.25,
-        fps=5.0,
-        hwaccel="",
-        transition_metrics=metrics,
+        config=config,
         restart_on_exit=None,  # Auto-detect
     )
 
@@ -73,18 +68,12 @@ def test_create_motion_process_restart_on_exit_auto_detect_rtsp() -> None:
     """Test that RTSP URLs auto-detect as restart_on_exit=True."""
 
     msg_queue: Queue = Queue()
-    metrics = WatcherTransitionMetrics()
+    config = WatchConfig(rtsp_stream="rtsp://localhost:8554/stream")
 
     process = create_motion_process(
         rtsp_stream="rtsp://localhost:8554/stream",
         msg_queue=msg_queue,
-        history=50,
-        threshold=16,
-        kernel_size=0.005,
-        scale=0.25,
-        fps=5.0,
-        hwaccel="",
-        transition_metrics=metrics,
+        config=config,
         restart_on_exit=None,  # Auto-detect
     )
 
@@ -97,19 +86,13 @@ def test_create_motion_process_restart_on_exit_explicit_override() -> None:
     """Test explicit restart_on_exit override."""
 
     msg_queue: Queue = Queue()
-    metrics = WatcherTransitionMetrics()
+    config = WatchConfig(rtsp_stream="samples/synth/synth_0.0100_1.000.mp4")
 
     # Override file to restart
     process = create_motion_process(
         rtsp_stream="samples/synth/synth_0.0100_1.000.mp4",
         msg_queue=msg_queue,
-        history=50,
-        threshold=16,
-        kernel_size=0.005,
-        scale=0.25,
-        fps=5.0,
-        hwaccel="",
-        transition_metrics=metrics,
+        config=config,
         restart_on_exit=True,  # Explicit override
     )
 
@@ -382,26 +365,19 @@ def test_motion_window_metrics_are_scoped_per_window(video_path: Path) -> None:
     from wildcamtools.lib.states import enqueue_motion_windows
 
     q: Queue = Queue()
-    metrics = WatcherTransitionMetrics(
-        preparing_duration=10.0,
-        green_to_amber_motion_min=0.01,
-        amber_to_green_proportion_max=0.0075,
-        amber_to_red_duration=2.0,
-        red_to_red_amber_proportion_max=0.0075,
-        red_amber_to_red_proportion_min=0.01,
-        red_amber_to_green_duration=2.0,
-    )
+    config = WatchConfig(rtsp_stream=str(video_path))
+    config.transition_metrics.preparing_duration = 10.0
+    config.transition_metrics.green_to_amber_motion_min = 0.01
+    config.transition_metrics.amber_to_green_proportion_max = 0.0075
+    config.transition_metrics.amber_to_red_duration = 2.0
+    config.transition_metrics.red_to_red_amber_proportion_max = 0.0075
+    config.transition_metrics.red_amber_to_red_proportion_min = 0.01
+    config.transition_metrics.red_amber_to_green_duration = 2.0
+
     enqueue_motion_windows(
         rtsp_stream=str(video_path),
         queue=q,
-        history=10,
-        threshold=16,
-        kernel_size=0.005,
-        scale=0.25,
-        fps=5.0,
-        hwaccel="",
-        transition_metrics=metrics,
-        motion_mask=None,
+        config=config,
     )
 
     windows = []
@@ -450,26 +426,19 @@ def test_motion_windows_without_red_are_discarded() -> None:
     writer.release()
 
     q: Queue = Queue()
-    metrics = WatcherTransitionMetrics(
-        preparing_duration=0.5,
-        green_to_amber_motion_min=0.01,
-        amber_to_green_proportion_max=0.0075,
-        amber_to_red_duration=3.0,  # 3s in AMBER before RED
-        red_to_red_amber_proportion_max=0.0075,
-        red_amber_to_red_proportion_min=0.01,
-        red_amber_to_green_duration=1.0,
-    )
+    config = WatchConfig(rtsp_stream=str(test_path))
+    config.transition_metrics.preparing_duration = 0.5
+    config.transition_metrics.green_to_amber_motion_min = 0.01
+    config.transition_metrics.amber_to_green_proportion_max = 0.0075
+    config.transition_metrics.amber_to_red_duration = 3.0  # 3s in AMBER before RED
+    config.transition_metrics.red_to_red_amber_proportion_max = 0.0075
+    config.transition_metrics.red_amber_to_red_proportion_min = 0.01
+    config.transition_metrics.red_amber_to_green_duration = 1.0
+
     enqueue_motion_windows(
         rtsp_stream=str(test_path),
         queue=q,
-        history=5,
-        threshold=16,
-        kernel_size=0.005,
-        scale=0.25,
-        fps=5.0,
-        hwaccel="",
-        transition_metrics=metrics,
-        motion_mask=None,
+        config=config,
     )
 
     windows = []
@@ -519,26 +488,19 @@ def test_per_window_scoping_resets_between_windows() -> None:
     writer.release()
 
     q: Queue = Queue()
-    metrics = WatcherTransitionMetrics(
-        preparing_duration=0.5,  # 0.5s warm-up
-        green_to_amber_motion_min=0.01,
-        amber_to_green_proportion_max=0.0075,
-        amber_to_red_duration=3.0,  # 3s in AMBER before RED
-        red_to_red_amber_proportion_max=0.0075,
-        red_amber_to_red_proportion_min=0.01,
-        red_amber_to_green_duration=1.0,  # 1s in RED_AMBER before GREEN
-    )
+    config = WatchConfig(rtsp_stream=str(test_path))
+    config.transition_metrics.preparing_duration = 0.5  # 0.5s warm-up
+    config.transition_metrics.green_to_amber_motion_min = 0.01
+    config.transition_metrics.amber_to_green_proportion_max = 0.0075
+    config.transition_metrics.amber_to_red_duration = 3.0  # 3s in AMBER before RED
+    config.transition_metrics.red_to_red_amber_proportion_max = 0.0075
+    config.transition_metrics.red_amber_to_red_proportion_min = 0.01
+    config.transition_metrics.red_amber_to_green_duration = 1.0  # 1s in RED_AMBER before GREEN
+
     enqueue_motion_windows(
         rtsp_stream=str(test_path),
         queue=q,
-        history=5,
-        threshold=16,
-        kernel_size=0.005,
-        scale=0.25,
-        fps=5.0,
-        hwaccel="",
-        transition_metrics=metrics,
-        motion_mask=None,
+        config=config,
     )
 
     windows = []

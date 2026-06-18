@@ -1,0 +1,344 @@
+name: Automation Fix
+
+on:
+  schedule:
+    - cron: "0 4 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  issues: write
+  pull-requests: write
+  actions: read
+
+jobs:
+  fix-failing-pr:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+      actions: read
+    outputs:
+      pr_found: ${{ steps.find-pr.outputs.pr_found }}
+      pr_number: ${{ steps.find-pr.outputs.pr_number }}
+      pr_branch: ${{ steps.find-pr.outputs.pr_branch }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Install OpenCode
+        run: |
+          curl -fsSL -o install.sh https://opencode.ai/install
+          echo "fc3c1b2123f49b6df545a7622e5127d21cd794b15134fc3b66e1ca49f7fb297e  install.sh" | sha256sum -c -
+          bash install.sh
+
+      - name: Setup Ollama Cloud auth
+        run: |
+          mkdir -p ~/.local/share/opencode
+          echo '{"ollama-cloud":{"type":"api","key":"${{ secrets.OLLAMA_CLOUD_API_KEY }}"}}' > ~/.local/share/opencode/auth.json
+
+      - name: Find oldest failing automated PR
+        id: find-pr
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Find all open PRs with automated label, sorted by oldest first
+          PR_LIST=$(gh pr list --label "automated" --state open --base main --json number,headRefName,createdAt --jq 'sort_by(.createdAt) | .[0]')
+
+          if [ -z "$PR_LIST" ] || [ "$PR_LIST" = "null" ]; then
+            echo "No open automated PRs found"
+            echo "pr_found=false" >> "${GITHUB_OUTPUT}"
+            exit 0
+          fi
+
+          PR_NUMBER=$(echo "$PR_LIST" | jq -r '.number')
+          PR_BRANCH=$(echo "$PR_LIST" | jq -r '.headRefName')
+
+          echo "Checking PR #$PR_NUMBER on branch $PR_BRANCH for failing review workflow"
+
+          # Check if the review workflow has failed for this PR
+          # Look for any failed runs (not just the latest)
+          RUNS=$(gh run list --pr "$PR_NUMBER" --workflow "Code Review" --json status,conclusion,databaseId --jq '[.[] | select(.status == "completed" and .conclusion == "failure")] | sort_by(.databaseId) | .[0]')
+
+          if [ -z "$RUNS" ] || [ "$RUNS" = "null" ] || [ "$RUNS" = "[]" ]; then
+            echo "No failed review workflow runs found for PR #$PR_NUMBER"
+            echo "pr_found=false" >> "${GITHUB_OUTPUT}"
+            exit 0
+          fi
+
+          RUN_ID=$(echo "$RUNS" | jq -r '.databaseId')
+          echo "Found failing review run #$RUN_ID for PR #$PR_NUMBER"
+          {
+            echo "pr_found=true"
+            echo "pr_number=${PR_NUMBER}"
+            echo "pr_branch=${PR_BRANCH}"
+          } >> "${GITHUB_OUTPUT}"
+
+      - name: Checkout PR branch
+        if: steps.find-pr.outputs.pr_found == 'true'
+        env:
+          PR_BRANCH: ${{ steps.find-pr.outputs.pr_branch }}
+        run: |
+          git fetch origin "refs/heads/$PR_BRANCH:refs/remotes/origin/$PR_BRANCH"
+          git checkout "$PR_BRANCH"
+
+      - name: Get diff for review
+        if: steps.find-pr.outputs.pr_found == 'true'
+        env:
+          HEAD_REF: ${{ steps.find-pr.outputs.pr_branch }}
+          BASE_REF: main
+        run: |
+          git fetch origin "$HEAD_REF"
+          git fetch origin "$BASE_REF"
+          git diff origin/"$BASE_REF"..origin/"$HEAD_REF" > diff.txt
+
+      - name: Get review workflow logs
+        if: steps.find-pr.outputs.pr_found == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ steps.find-pr.outputs.pr_number }}
+        run: |
+          # Get the failed run ID
+          RUN_ID=$(gh run list --pr "$PR_NUMBER" --workflow "Code Review" --json status,conclusion,databaseId --jq '[.[] | select(.status == "completed" and .conclusion == "failure")] | sort_by(.databaseId) | .[0].databaseId')
+
+          if [ -n "$RUN_ID" ]; then
+            # Download the logs from the failed run
+            gh run view "$RUN_ID" --log > review_logs.txt 2>&1 || echo "Could not fetch logs"
+          fi
+
+      - name: Run OpenCode to fix review issues
+        if: steps.find-pr.outputs.pr_found == 'true'
+        timeout-minutes: 30
+        env:
+          OLLAMA_CLOUD_API_KEY: ${{ secrets.OLLAMA_CLOUD_API_KEY }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ steps.find-pr.outputs.pr_number }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          opencode models --provider ollama-cloud
+
+          # Create prompt for fixing review issues with actual review output
+          {
+            printf '%s\n' \
+              'Review the diff and any review workflow logs provided. Fix all issues identified.' \
+              'For each fix:' \
+              '1. Make the necessary code changes' \
+              '2. Ensure the changes follow existing code conventions' \
+              '3. Do not add comments unless they are necessary for clarity' \
+              '' \
+              'After making all fixes, create a single commit with all changes.'
+          } > fix_prompt.txt
+
+          # Append review logs if available
+          if [ -f review_logs.txt ]; then
+            {
+              echo ""
+              echo "Review workflow logs:"
+              echo "===================="
+              cat review_logs.txt
+            } >> fix_prompt.txt
+          fi
+
+          OUTPUT=$(opencode run --model 'ollama-cloud/gemma4:31b' --agent build --file diff.txt < fix_prompt.txt) || {
+            echo "OpenCode failed to execute."
+            exit 1
+          }
+          echo "$OUTPUT"
+
+      - name: Commit and push fixes
+        if: steps.find-pr.outputs.pr_found == 'true'
+        env:
+          PR_NUMBER: ${{ steps.find-pr.outputs.pr_number }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          if git diff --quiet; then
+            echo "No changes to commit"
+            exit 0
+          fi
+
+          git add -A
+          git commit -m "🤖 Fix review issues for PR #$PR_NUMBER"
+          git push origin HEAD
+
+  solve-issue:
+    runs-on: ubuntu-latest
+    needs: fix-failing-pr
+    if: |
+      always() &&
+      needs.fix-failing-pr.result == 'success' &&
+      needs.fix-failing-pr.outputs.pr_found == 'false'
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: write
+      actions: read
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          ref: main
+
+      - name: Install OpenCode
+        run: |
+          curl -fsSL -o install.sh https://opencode.ai/install
+          echo "fc3c1b2123f49b6df545a7622e5127d21cd794b15134fc3b66e1ca49f7fb297e  install.sh" | sha256sum -c -
+          bash install.sh
+
+      - name: Setup Ollama Cloud auth
+        run: |
+          mkdir -p ~/.local/share/opencode
+          echo '{"ollama-cloud":{"type":"api","key":"${{ secrets.OLLAMA_CLOUD_API_KEY }}"}}' > ~/.local/share/opencode/auth.json
+
+      - name: Find oldest automation issue without PR
+        id: find-issue
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Find all open issues with automated label, sorted by oldest first
+          ISSUE_LIST=$(gh issue list --label "automated" --state open --json number,title,body,createdAt --jq 'sort_by(.createdAt)')
+
+          if [ -z "$ISSUE_LIST" ] || [ "$(echo "$ISSUE_LIST" | jq 'length')" -eq 0 ]; then
+            echo "No open automated issues found"
+            echo "issue_found=false" >> "${GITHUB_OUTPUT}"
+            exit 0
+          fi
+
+          NUM_ISSUES=$(echo "$ISSUE_LIST" | jq 'length')
+
+          # Check each issue to see if it has an associated PR
+          for ((i=0; i<NUM_ISSUES; i++)); do
+            ISSUE_NUMBER=$(echo "$ISSUE_LIST" | jq -r ".[$i].number")
+            ISSUE_TITLE=$(echo "$ISSUE_LIST" | jq -r ".[$i].title")
+            ISSUE_BODY=$(echo "$ISSUE_LIST" | jq -r ".[$i].body // \"\"")
+
+            # Check if there's a PR associated with this issue using GitHub's native linking
+            # Get all open PRs and check their closingIssuesReferences
+            ASSOCIATED_PR=$(gh pr list --state open --json number,closingIssuesReferences --jq "[.[] | select(.closingIssuesReferences != null and (.closingIssuesReferences | map(.number) | contains([$ISSUE_NUMBER])))] | .[0].number // empty")
+
+            if [ -z "$ASSOCIATED_PR" ]; then
+              echo "Found issue #$ISSUE_NUMBER without associated PR: $ISSUE_TITLE"
+              {
+                echo "issue_found=true"
+                echo "issue_number=$ISSUE_NUMBER"
+                echo "issue_title=$ISSUE_TITLE"
+              } >> "${GITHUB_OUTPUT}"
+              echo "$ISSUE_BODY" > issue_body.txt
+              exit 0
+            fi
+
+            echo "Issue #$ISSUE_NUMBER already has PR #$ASSOCIATED_PR associated"
+          done
+
+          echo "All automated issues have associated PRs"
+          echo "issue_found=false" >> "${GITHUB_OUTPUT}"
+
+      - name: Create branch for issue
+        id: create-branch
+        if: steps.find-issue.outputs.issue_found == 'true'
+        env:
+          ISSUE_NUMBER: ${{ steps.find-issue.outputs.issue_number }}
+        run: |
+          BRANCH_NAME="automated/issue-$ISSUE_NUMBER"
+          git checkout -b "$BRANCH_NAME"
+          echo "branch_name=$BRANCH_NAME" >> "${GITHUB_OUTPUT}"
+
+      - name: Create plan for issue
+        if: steps.find-issue.outputs.issue_found == 'true'
+        timeout-minutes: 30
+        env:
+          OLLAMA_CLOUD_API_KEY: ${{ secrets.OLLAMA_CLOUD_API_KEY }}
+          ISSUE_NUMBER: ${{ steps.find-issue.outputs.issue_number }}
+          ISSUE_TITLE: ${{ steps.find-issue.outputs.issue_title }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          opencode models --provider ollama-cloud
+
+          # Create prompt for planning
+          printf '%s\n' \
+            'Analyze this GitHub issue and create a detailed implementation plan.' \
+            'The plan should:' \
+            '1. Identify all files that need to be modified or created' \
+            '2. List specific changes needed for each file' \
+            '3. Consider existing code conventions and patterns' \
+            '4. Be specific and actionable' \
+            '' \
+            'Output the plan in a structured format that can be used to implement the solution.' \
+            > plan_prompt.txt
+
+          cat issue_body.txt >> plan_prompt.txt
+
+          OUTPUT=$(opencode run --model 'ollama-cloud/gemma4:31b' --agent plan < plan_prompt.txt) || {
+            echo "OpenCode failed to create plan."
+            exit 1
+          }
+          echo "$OUTPUT" > plan_output.txt
+
+      - name: Implement solution
+        if: steps.find-issue.outputs.issue_found == 'true'
+        timeout-minutes: 30
+        env:
+          OLLAMA_CLOUD_API_KEY: ${{ secrets.OLLAMA_CLOUD_API_KEY }}
+          ISSUE_NUMBER: ${{ steps.find-issue.outputs.issue_number }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          opencode models --provider ollama-cloud
+
+          # Create prompt for implementation
+          printf '%s\n' \
+            'Implement the solution based on this plan.' \
+            'Follow these guidelines:' \
+            '1. Make all necessary code changes' \
+            '2. Follow existing code conventions' \
+            '3. Ensure tests pass if applicable' \
+            '4. Repeatedly review changes using code-review sub-agent and fix issues until review passes' \
+            '' \
+            'Make all changes to the codebase.' \
+            > build_prompt.txt
+
+          cat plan_output.txt >> build_prompt.txt
+
+          OUTPUT=$(opencode run --model 'ollama-cloud/gemma4:31b' --agent build < build_prompt.txt) || {
+            echo "OpenCode failed to implement solution."
+            exit 1
+          }
+          echo "$OUTPUT"
+
+      - name: Commit and push solution
+        if: steps.find-issue.outputs.issue_found == 'true'
+        env:
+          ISSUE_NUMBER: ${{ steps.find-issue.outputs.issue_number }}
+          ISSUE_TITLE: ${{ steps.find-issue.outputs.issue_title }}
+          BRANCH_NAME: ${{ steps.create-branch.outputs.branch_name }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          if git diff --quiet; then
+            echo "No changes to commit"
+            exit 0
+          fi
+
+          git add -A
+          git commit -m "🤖 Solve issue #$ISSUE_NUMBER: $ISSUE_TITLE"
+          git push -u origin "$BRANCH_NAME"
+
+      - name: Create PR for issue
+        if: steps.find-issue.outputs.issue_found == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          ISSUE_NUMBER: ${{ steps.find-issue.outputs.issue_number }}
+          ISSUE_TITLE: ${{ steps.find-issue.outputs.issue_title }}
+          BRANCH_NAME: ${{ steps.create-branch.outputs.branch_name }}
+        run: |
+          # Create PR (GitHub will auto-link via "Fixes #" keyword)
+          PR_NUMBER=$(gh pr create \
+            --base main \
+            --head "$BRANCH_NAME" \
+            --title "🤖 Automation: $ISSUE_TITLE" \
+            --label "automation" || echo "Warning: Could not apply automation label")
+
+          echo "Created PR $PR_NUMBER for issue #$ISSUE_NUMBER"

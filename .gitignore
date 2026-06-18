@@ -31,3 +31,9 @@ cover/
 wildlife
 wildcamtools.db
 results/
+
+# automation files that might be added by accident
+build_prompt.txt
+issue_body.txt
+plan_output.txt
+plan_prompt.txt

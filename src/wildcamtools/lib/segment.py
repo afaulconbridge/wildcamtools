@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import threading
+from collections import deque
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Literal, Self
@@ -52,7 +53,8 @@ class VideoSegmenter:
     _segment_count: int
     _last_segment_time: float
     _segment_file: Path | None
-    _decoded_frames: list[av.VideoFrame]
+    _decoded_frames: deque[av.VideoFrame]
+    MAX_DECODED_FRAMES = 30
     _fps: float | None
     _segment_start_frame: int
     _segment_start_time: datetime | None
@@ -77,7 +79,7 @@ class VideoSegmenter:
         self._segment_count = 0
         self._last_segment_time = 0.0
         self._segment_file = None
-        self._decoded_frames: list[av.VideoFrame] = []
+        self._decoded_frames: deque[av.VideoFrame] = deque()
         self._fps = None
         self._segment_start_frame = 0
         self._segment_start_time = None
@@ -197,6 +199,8 @@ class VideoSegmenter:
             decoded = packet.decode()
             for frame in decoded:
                 if isinstance(frame, av.VideoFrame):
+                    if len(self._decoded_frames) >= self.MAX_DECODED_FRAMES:
+                        return
                     self._decoded_frames.append(frame)
             if self._decoded_frames:
                 break
@@ -205,7 +209,7 @@ class VideoSegmenter:
         """Process and return the next buffered frame."""
         if not self._video_stream:
             raise VideoNotInContextError()
-        frame = self._decoded_frames.pop(0)
+        frame = self._decoded_frames.popleft()
         frame_time = (
             frame.time
             if frame.time is not None

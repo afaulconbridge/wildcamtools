@@ -1,0 +1,42 @@
+The issue is that `_decoded_frames` in `VideoReader` and `VideoSegmenter` is an unbounded list. In long-running RTSP streams, if the consumer is slower than the decoder, this list will grow indefinitely, leading to memory exhaustion because `av.VideoFrame` objects hold native memory.
+
+### Implementation Plan
+
+#### 1. Files to be Modified
+- `src/wildcamtools/lib/vidio.py`
+- `src/wildcamtools/lib/segment.py`
+
+#### 2. Specific Changes
+
+**In both `VideoReader` (`vidio.py`) and `VideoSegmenter` (`segment.py`):**
+
+- **Introduce a Buffer Limit**: Add a constant or a parameter to define the maximum number of decoded frames to buffer (e.g., `MAX_DECODED_FRAMES = 30`).
+- **Modify `_decode_next_packet`**:
+    - Change the loop logic to stop appending frames once `len(self._decoded_frames) >= self.MAX_DECODED_FRAMES`.
+    - Ensure that if a packet contains multiple frames, we don't overfill the buffer.
+- **Update Type Hint**: If using `collections.deque` (recommended for efficient `pop(0)`), update the type hint for `_decoded_frames` from `list[av.VideoFrame]` to `deque[av.VideoFrame]`.
+
+**Detailed changes for `VideoReader` (`vidio.py`):**
+- Import `deque` from `collections`.
+- In `__init__`, initialize `self._decoded_frames = deque(maxlen=MAX_DECODED_FRAMES)`.
+- In `_decode_next_packet`, the `append` operation on a `deque` with `maxlen` will automatically drop the oldest frame. However, to avoid losing frames and instead implement backpressure/blocking, we should check the length before decoding.
+- **Better Approach**: Use a simple check: `if len(self._decoded_frames) >= self.MAX_DECODED_FRAMES: break` inside the `for frame in decoded` loop in `_decode_next_packet`.
+
+**Detailed changes for `VideoSegmenter` (`segment.py`):**
+- Same logic as `VideoReader`. Import `deque` or implement the length check in `_decode_next_packet` (Line 198-200).
+
+#### 3. Conventions & Patterns
+- **Type Safety**: Maintain `av.VideoFrame` type hints.
+- **Error Handling**: Ensure `StopIteration` is still raised correctly when the stream actually ends.
+- **Consistency**: Both classes implement a similar "decode-buffer-process" pattern; the fix must be applied consistently to both.
+
+#### 4. Actionable Steps
+1. Define a reasonable `MAX_DECODED_FRAMES` (e.g., 30-60 frames, typically 1-2 seconds of video).
+2. In `src/wildcamtools/lib/vidio.py`:
+    - Update `_decoded_frames` initialization to use a `deque` or keep as `list` but add length checks.
+    - Update `_decode_next_packet` to stop decoding once the limit is reached.
+3. In `src/wildcamtools/lib/segment.py`:
+    - Repeat the same logic as above.
+4. Verify that `pop(0)` (for lists) or `popleft()` (for deques) is used correctly.
+5. Run `uv run pytest` to ensure no regressions in video reading or segmentation.
+6. Run `uv run mypy src` and `uv run ruff check .` for linting/typing.

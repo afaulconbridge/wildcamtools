@@ -1,4 +1,5 @@
 import logging
+from collections import deque
 from fractions import Fraction
 from pathlib import Path
 from typing import Any, Literal, Self
@@ -88,7 +89,8 @@ class VideoReader(FrameSource):
     _stream: av.VideoStream | None
     _target_fps: float | None
     _last_pts: float | None
-    _decoded_frames: list[av.VideoFrame]
+    _decoded_frames: deque[av.VideoFrame]
+    MAX_DECODED_FRAMES = 30
 
     def __init__(
         self,
@@ -111,7 +113,7 @@ class VideoReader(FrameSource):
         self._stream = None
         self._target_fps = None
         self._last_pts = None
-        self._decoded_frames: list[av.VideoFrame] = []
+        self._decoded_frames: deque[av.VideoFrame] = deque()
 
         if hwaccel is not None:
             logger.warning("Hardware acceleration (hwaccel) is not yet implemented")
@@ -177,6 +179,8 @@ class VideoReader(FrameSource):
             decoded = packet.decode()
             for frame in decoded:
                 if isinstance(frame, av.VideoFrame):
+                    if len(self._decoded_frames) >= self.MAX_DECODED_FRAMES:
+                        return
                     self._decoded_frames.append(frame)
             if self._decoded_frames:
                 break
@@ -184,7 +188,7 @@ class VideoReader(FrameSource):
     def _process_next_buffered_frame(self) -> Frame:
         """Process and return the next buffered frame."""
         while True:
-            frame = self._decoded_frames.pop(0)
+            frame = self._decoded_frames.popleft()
             if not self._should_drop_frame(frame):
                 break
             if not self._decoded_frames:

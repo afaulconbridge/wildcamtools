@@ -339,6 +339,7 @@ jobs:
             --base main \
             --head "$BRANCH_NAME" \
             --title "🤖 Automation: $ISSUE_TITLE" \
+            --body '' \
             --label "automation" || echo "Warning: Could not apply automation label")
 
           echo "Created PR $PR_NUMBER for issue #$ISSUE_NUMBER"

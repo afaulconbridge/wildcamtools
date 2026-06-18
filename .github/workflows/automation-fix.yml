@@ -27,6 +27,20 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+
+      - name: Install package dependencies
+        uses: awalsh128/cache-apt-pkgs-action@latest
+        with:
+          packages: ffmpeg
+          version: 1.0
+
+      - name: Install project and python dependencies
+        run: uv sync --locked --all-extras --dev
+
       - name: Install OpenCode
         run: |
           curl -fsSL -o install.sh https://opencode.ai/install
@@ -180,6 +194,20 @@ jobs:
         with:
           fetch-depth: 0
           ref: main
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+
+      - name: Install package dependencies
+        uses: awalsh128/cache-apt-pkgs-action@latest
+        with:
+          packages: ffmpeg
+          version: 1.0
+
+      - name: Install project and python dependencies
+        run: uv sync --locked --all-extras --dev
 
       - name: Install OpenCode
         run: |

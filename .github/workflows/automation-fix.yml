@@ -312,13 +312,18 @@ jobs:
 
       - name: Implement solution
         if: steps.find-issue.outputs.issue_found == 'true'
-        timeout-minutes: 30
+        timeout-minutes: 45
         env:
           OLLAMA_CLOUD_API_KEY: ${{ secrets.OLLAMA_CLOUD_API_KEY }}
           ISSUE_NUMBER: ${{ steps.find-issue.outputs.issue_number }}
+          ISSUE_TITLE: ${{ steps.find-issue.outputs.issue_title }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}
         run: |
           opencode models --provider ollama-cloud
+
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
 
           # Create prompt for implementation
           printf '%s\n' \
@@ -328,6 +333,7 @@ jobs:
             '2. Follow existing code conventions' \
             '3. Ensure tests pass if applicable' \
             '4. Repeatedly review changes using code-review sub-agent and fix issues until review passes' \
+            "5. Commit the solution to the branch in a single commit with message: 🤖 Solve issue #${ISSUE_NUMBER}: ${ISSUE_TITLE}"\
             '' \
             'Make all changes to the codebase.' \
             > build_prompt.txt
@@ -339,25 +345,6 @@ jobs:
             exit 1
           }
           echo "$OUTPUT"
-
-      - name: Commit and push solution
-        if: steps.find-issue.outputs.issue_found == 'true'
-        env:
-          ISSUE_NUMBER: ${{ steps.find-issue.outputs.issue_number }}
-          ISSUE_TITLE: ${{ steps.find-issue.outputs.issue_title }}
-          BRANCH_NAME: ${{ steps.create-branch.outputs.branch_name }}
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-
-          if git diff --quiet; then
-            echo "No changes to commit"
-            exit 0
-          fi
-
-          git add -A
-          git commit -m "🤖 Solve issue #$ISSUE_NUMBER: $ISSUE_TITLE"
-          git push -u origin "$BRANCH_NAME"
 
       - name: Create PR for issue
         if: steps.find-issue.outputs.issue_found == 'true'

@@ -325,7 +325,7 @@ class _PyAVSegmentProcess:
         output_streams: dict[int, av.stream.Stream] = {}
         output_container: av.container.OutputContainer | None = None
         segment_start_frame: int = 0
-        prev_packet_frame: int = -1
+        last_packet_time: float | None = None
 
         for packet in input_container.demux():
             if self._stop_event.is_set():
@@ -338,21 +338,15 @@ class _PyAVSegmentProcess:
             if packet_time is None:
                 continue
 
-            # Calculate frame number from packet time using rounded multiplication to avoid drift
-            current_frame = round(packet_time * (self._fps or 30.0))
-            if prev_packet_frame < 0:
-                # First packet, initialize frame counter
-                self._global_frame_no = current_frame
-            elif current_frame >= prev_packet_frame:
-                self._global_frame_no += current_frame - prev_packet_frame
-            else:
-                logger.warning("Out-of-order packet detected: %d < %d", current_frame, prev_packet_frame)
-                self._global_frame_no += max(0, current_frame - prev_packet_frame)
-            prev_packet_frame = current_frame
+            # Increment global frame number for video packets to avoid timestamp drift
+            if packet.stream.type == "video":
+                self._global_frame_no += 1
 
             if segment_start_time is None:
                 segment_start_time = packet_time
                 segment_start_frame = self._global_frame_no
+
+            last_packet_time = packet_time
 
             if self._should_rotate_segment(packet_time, segment_start_time):
                 if output_container:
@@ -383,7 +377,7 @@ class _PyAVSegmentProcess:
                 start_frame=segment_start_frame,
                 end_frame=self._global_frame_no,
                 start_time=segment_start_time,
-                end_time=prev_packet_frame / (self._fps or 30.0),
+                end_time=last_packet_time,
             )
             segment_count += 1
 

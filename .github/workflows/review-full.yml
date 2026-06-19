@@ -2,7 +2,7 @@ name: Full Code Review
 
 on:
   schedule:
-    - cron: "0 4 * * 1"
+    - cron: "12 4 * * 1"
   workflow_dispatch:
 
 permissions:

@@ -2,7 +2,7 @@ name: Automation Fix
 
 on:
   schedule:
-    - cron: "0 4 * * *"
+    - cron: "42 4 * * *"
   workflow_dispatch:
 
 permissions:
@@ -192,7 +192,7 @@ jobs:
           mkdir -p ~/.local/share/opencode
           echo '{"ollama-cloud":{"type":"api","key":"${{ secrets.OLLAMA_CLOUD_API_KEY }}"}}' > ~/.local/share/opencode/auth.json
 
-      - name: Find oldest automation issue without PR
+      - name: Find oldest automated issue without PR
         id: find-issue
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -340,6 +340,6 @@ jobs:
             --head "$BRANCH_NAME" \
             --title "🤖 Automation: $ISSUE_TITLE" \
             --body '' \
-            --label "automation" || echo "Warning: Could not apply automation label")
+            --label "automated")
 
           echo "Created PR $PR_NUMBER for issue #$ISSUE_NUMBER"

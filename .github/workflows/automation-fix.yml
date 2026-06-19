@@ -41,6 +41,9 @@ jobs:
       - name: Install project and python dependencies
         run: uv sync --locked --all-extras --dev
 
+      - name: Install prek
+        run: uv run prek install
+
       - name: Install OpenCode
         run: |
           curl -fsSL -o install.sh https://opencode.ai/install
@@ -208,6 +211,9 @@ jobs:
 
       - name: Install project and python dependencies
         run: uv sync --locked --all-extras --dev
+
+      - name: Install prek
+        run: uv run prek install
 
       - name: Install OpenCode
         run: |

@@ -356,7 +356,11 @@ jobs:
 
       - name: Push branch to remote
         if: steps.find-issue.outputs.issue_found == 'true'
+        env:
+          ISSUE_NUMBER: ${{ steps.find-issue.outputs.issue_number }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          BRANCH_NAME="automated/issue-$ISSUE_NUMBER"
           git push -u origin "$BRANCH_NAME"
 
       - name: Create PR for issue

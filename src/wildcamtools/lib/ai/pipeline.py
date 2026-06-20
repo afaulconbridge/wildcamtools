@@ -458,34 +458,36 @@ Return results as a ResultList with species_name and frames array."""
         output_batches: list[list[ExtractedFrame]] = []
 
         for batch in all_batches:
-            # for each image in this batch, produce a downscaled file
-            batch_pairs: list[ExtractedFrame] = []
-            for frame in batch:
-                rescaled_image = resize_with_aspect_ratio(frame.output, self.resolution)
-                image_path = outdir / f"frame_{frame.frame_no:05d}.jpg"
-                cv2.imwrite(str(image_path), rescaled_image)
-                batch_pairs.append(ExtractedFrame(path=image_path, frame_no=frame.frame_no))
+            with tempfile.TemporaryDirectory() as tmpdir:
+                tmpdir_path = Path(tmpdir)
+                # for each image in this batch, produce a downscaled file
+                batch_pairs: list[ExtractedFrame] = []
+                for frame in batch:
+                    rescaled_image = resize_with_aspect_ratio(frame.output, self.resolution)
+                    image_path = tmpdir_path / f"frame_{frame.frame_no:05d}.jpg"
+                    cv2.imwrite(str(image_path), rescaled_image)
+                    batch_pairs.append(ExtractedFrame(path=image_path, frame_no=frame.frame_no))
 
-            self.aicropfinder.detections = self.aicropfinder.analyser.message_with_schema(
-                message=self.DETECTION_PROMPT,
-                images=[pair.require_path() for pair in batch_pairs],
-                response_class=ResultList,
-            )
+                self.aicropfinder.detections = self.aicropfinder.analyser.message_with_schema(
+                    message=self.DETECTION_PROMPT,
+                    images=[pair.require_path() for pair in batch_pairs],
+                    response_class=ResultList,
+                )
 
-            # align bbox with original and crop
+                # align bbox with original and crop
 
-            batch_crop_pairs: list[ExtractedFrame] = []
-            for frame in batch:
-                frame = self.aicropfinder.handle(frame)
-                if not frame.filter_keep or frame.crop is None:
-                    continue
-                rescaled_image = resize_with_aspect_ratio(frame.crop, self.crop_max_resolution)
-                image_path = outdir / f"frame_crop_{frame.frame_no:05d}.jpg"
-                cv2.imwrite(str(image_path), rescaled_image)
-                batch_crop_pairs.append(ExtractedFrame(path=image_path, frame_no=frame.frame_no))
+                batch_crop_pairs: list[ExtractedFrame] = []
+                for frame in batch:
+                    frame = self.aicropfinder.handle(frame)
+                    if not frame.filter_keep or frame.crop is None:
+                        continue
+                    rescaled_image = resize_with_aspect_ratio(frame.crop, self.crop_max_resolution)
+                    image_path = outdir / f"frame_crop_{frame.frame_no:05d}.jpg"
+                    cv2.imwrite(str(image_path), rescaled_image)
+                    batch_crop_pairs.append(ExtractedFrame(path=image_path, frame_no=frame.frame_no))
 
-            if batch_crop_pairs:
-                output_batches.append(batch_crop_pairs)
+                if batch_crop_pairs:
+                    output_batches.append(batch_crop_pairs)
         return ExtractedFrames(batches=[ExtractedBatch(selected_frames=b) for b in output_batches])
 
 

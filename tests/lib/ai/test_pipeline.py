@@ -1431,8 +1431,8 @@ class TestAICroppedFrameImageExtractor:
 
         assert subdir.exists()
         image_files = list(subdir.glob("*.jpg"))
-        # should be a whole image and a crop foor each frame
-        assert len(image_files) == len(sample_frames) * 2
+        # should be only cropped images
+        assert len(image_files) == len(sample_frames)
 
 
 class TestContrastEnhancedFrameImageExtractor:

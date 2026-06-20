@@ -274,8 +274,16 @@ jobs:
         if: steps.find-issue.outputs.issue_found == 'true'
         env:
           ISSUE_NUMBER: ${{ steps.find-issue.outputs.issue_number }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           BRANCH_NAME="automated/issue-$ISSUE_NUMBER"
+
+          if gh api repos/${{ github.repository }}/branches/"$BRANCH_NAME" &>/dev/null; then
+            echo "Branch $BRANCH_NAME already exists. Exiting."
+            echo "branch_name=$BRANCH_NAME" >> "${GITHUB_OUTPUT}"
+            exit 0
+          fi
+
           git checkout -b "$BRANCH_NAME"
           echo "branch_name=$BRANCH_NAME" >> "${GITHUB_OUTPUT}"
 
@@ -345,6 +353,11 @@ jobs:
             exit 1
           }
           echo "$OUTPUT"
+
+      - name: Push branch to remote
+        if: steps.find-issue.outputs.issue_found == 'true'
+        run: |
+          git push -u origin "$BRANCH_NAME"
 
       - name: Create PR for issue
         if: steps.find-issue.outputs.issue_found == 'true'

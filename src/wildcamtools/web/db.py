@@ -14,7 +14,6 @@ from wildcamtools.lib.persistence.repository import (
     StatisticsSummary,
     aggregate_statistics,
     count_pipeline_runs_filtered,
-    get_classification_result,
     list_all_video_filenames,
     list_pipeline_runs_filtered,
     list_recent_pipeline_runs,
@@ -168,7 +167,7 @@ def _display_video_and_results(session: Session, selected_video: str, video_dir:
     for run in runs:
         timestamp_str = run.timestamp.strftime("%Y-%m-%d %H:%M:%S")
         with st.expander(f"Run ID: {run.id} ({timestamp_str})"):
-            classification = get_classification_result(session, run.final_result_id)
+            classification = run.final_result
             display_run_info(run, classification)
 
             st.subheader("Configuration")

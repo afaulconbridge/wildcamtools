@@ -24,6 +24,7 @@ def is_stream_url(input_: str | Path) -> bool:
 
     Returns:
         True if input is a stream URL, False if it's a file path
+
     """
     input_str = str(input_)
     return input_str.startswith(("rtsp://", "rtmp://", "http://", "https://"))

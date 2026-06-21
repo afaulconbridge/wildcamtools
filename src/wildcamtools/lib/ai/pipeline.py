@@ -41,6 +41,7 @@ class ExtractedFrame(BaseModel):
     Attributes:
         path: Path to the image file (excluded from JSON serialization, optional for deserialization)
         frame_no: Frame number (included in JSON serialization)
+
     """
 
     path: Path | None = Field(exclude=True, default=None)
@@ -57,11 +58,12 @@ class ExtractedFrame(BaseModel):
 
         Raises:
             ValueError: If path is None
+
         """
         if self.path is None:
             raise ValueError(
                 f"ExtractedFrame.path is required but is None for frame_no={self.frame_no}. "
-                "This indicates a bug in the pipeline execution."
+                "This indicates a bug in the pipeline execution.",
             )
         return self.path
 
@@ -71,6 +73,7 @@ class ExtractedBatch(BaseModel):
 
     Attributes:
         frame_image_pairs: List of FrameImagePair objects (atomic pairing)
+
     """
 
     selected_frames: list[ExtractedFrame]
@@ -82,6 +85,7 @@ class BatchResult[R: BaseModel](ExtractedBatch):
     Attributes:
         frame_image_pairs: List of FrameImagePair (inherited)
         result: RichResult from AI analysis (None before processing)
+
     """
 
     result: R | None = None
@@ -110,6 +114,7 @@ class ExtractedFrames(BaseModel):
 
     Attributes:
         batches: List of ExtractedBatch objects
+
     """
 
     batches: list[ExtractedBatch]
@@ -134,6 +139,7 @@ class ExtractedFramesWithResults[R: BaseModel](ExtractedFrames):
 
     Attributes:
         batches: List of BatchResult objects (contains results after AI processing)
+
     """
 
     batches: Sequence[BatchResult[R]]  # type: ignore[assignment]
@@ -154,6 +160,7 @@ class PipelineOutcome[R: BaseModel](BaseModel):
         result: The final result from the AI pipeline
         stats: Video statistics captured at the start of processing
         batches: List of BatchResult objects with frames and per-batch AI results
+
     """
 
     result: R
@@ -181,6 +188,7 @@ class CombinedBatchResult(BaseModel):
         selected_frames: List of extracted frames
         classification: RichResult from classification (None if classification not run)
         description: BatchDescription from description (None if description not run)
+
     """
 
     selected_frames: list[ExtractedFrame]
@@ -196,6 +204,7 @@ class CombinedPipelineOutcome[R: BaseModel](BaseModel):
         description: Combined description result (None if description not enabled)
         stats: Video statistics
         batches: List of CombinedBatchResult with both classification and description per batch
+
     """
 
     result: R
@@ -585,7 +594,7 @@ class VerifiedImageBatchQuery[R: BaseModel](ImageBatchQuery[R]):
         logger.debug("Initial classification: %s", getattr(initial_result, "species_name", initial_result))
 
         verification_message = self.verification_prompt.format(
-            initial_species=getattr(initial_result, "species_name", "")
+            initial_species=getattr(initial_result, "species_name", ""),
         )
         verification_result: VerificationResult = self.llm.message_with_schema(
             message=verification_message,
@@ -627,6 +636,7 @@ class RichResultMajorityReconciler(ResultReconciler[RichResult]):
 
     Raises:
         ValueError: If results iterable is empty.
+
     """
 
     def reconcile_results(self, results: Iterable[RichResult]) -> RichResult:
@@ -785,14 +795,16 @@ class AiPipeline[R: BaseModel]:
 
                 combined_batches = []
                 for classification_batch, description_batch in zip(
-                    enriched_frames.batches, description_enriched.batches, strict=True
+                    enriched_frames.batches,
+                    description_enriched.batches,
+                    strict=True,
                 ):
                     combined_batches.append(
                         CombinedBatchResult(
                             selected_frames=classification_batch.selected_frames,
                             classification=classification_batch.result,  # type: ignore[arg-type] # CombinedBatchResult.classification is RichResult|None; classification_batch.result is R|None where R=RichResult in this context
                             description=description_batch.result,
-                        )
+                        ),
                     )
 
                 return CombinedPipelineOutcome[R](

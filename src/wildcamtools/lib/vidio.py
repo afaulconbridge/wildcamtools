@@ -67,8 +67,7 @@ class FileFrameSourceCV2(FrameSource):
             frame = Frame(raw=raw, frame_no=self.frame_no, timestamp=timestamp)
             self.frame_no += 1
             return frame
-        else:
-            raise StopIteration
+        raise StopIteration
 
 
 class VideoReader(FrameSource):
@@ -255,8 +254,7 @@ class VideoReader(FrameSource):
 
 
 class VideoWriter:
-    """
-    Context-managed video writer using PyAV for direct library access.
+    """Context-managed video writer using PyAV for direct library access.
     Accepts numpy arrays (HxWx3 RGB or HxWx4 RGBA) and writes to video files.
     """
 
@@ -298,8 +296,7 @@ class VideoWriter:
         return False
 
     def write(self, frame: np.ndarray) -> None:
-        """
-        Write a single frame to the output video.
+        """Write a single frame to the output video.
         Infers dimensions from the first frame.
         """
         if frame.ndim == 2:

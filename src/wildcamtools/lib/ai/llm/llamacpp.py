@@ -54,7 +54,7 @@ class LlamaCppLlm(AbstractLlm):
             {
                 "type": "text",
                 "text": message,
-            }
+            },
         ]
 
         for image_base64 in image_bytes:

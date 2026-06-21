@@ -40,6 +40,7 @@ def _find_matching_pairs(video_dir: Path, result_dir: Path) -> tuple[list[tuple[
         - matches: list of (video_path, result_path) tuples
         - video_warnings: list of warning messages for videos without results
         - result_warnings: list of warning messages for results without videos
+
     """
     video_files = set()
     result_files = set()
@@ -67,7 +68,7 @@ def _find_matching_pairs(video_dir: Path, result_dir: Path) -> tuple[list[tuple[
         expected_video_path = rel_result_path.with_suffix(".mp4")
         if expected_video_path not in video_files:
             result_warnings.append(
-                f"Warning: No matching video file for result: {rel_result_path} (expected: {expected_video_path})"
+                f"Warning: No matching video file for result: {rel_result_path} (expected: {expected_video_path})",
             )
 
     return matches, video_warnings, result_warnings
@@ -126,7 +127,10 @@ def _import_single_result(
 
 
 def _import_single_file_mode(
-    input_path: Path, video_path: Path, database: Path, filename_date_format: str | None
+    input_path: Path,
+    video_path: Path,
+    database: Path,
+    filename_date_format: str | None,
 ) -> None:
     """Handle single file import mode."""
     if not input_path.is_file():
@@ -214,7 +218,8 @@ def import_result(
         ),
     ],
     database: Annotated[
-        Path, typer.Option("-d", "--database", help="SQLite database path (default: wildcamtools.db)")
+        Path,
+        typer.Option("-d", "--database", help="SQLite database path (default: wildcamtools.db)"),
     ] = Path("wildcamtools.db"),
     filename_date_format: Annotated[
         str | None,

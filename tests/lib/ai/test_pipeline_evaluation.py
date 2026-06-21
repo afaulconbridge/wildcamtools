@@ -415,7 +415,7 @@ class TestPipelineEvaluationSummary:
                         confidence=ConfidenceLevel.HIGH,
                     ),
                     label="otter",
-                )
+                ),
             )
         for i in range(incorrect):
             results.append(
@@ -430,7 +430,7 @@ class TestPipelineEvaluationSummary:
                         confidence=ConfidenceLevel.HIGH,
                     ),
                     label="otter",
-                )
+                ),
             )
         summary = PipelineEvaluationSummary(
             results=results,
@@ -853,12 +853,14 @@ class TestEvaluateAiPipeline:
         ]
         labels_file = tmp_path / "labels.jsonl"
         with open(labels_file, "w") as f:
-            for label in labels:
-                f.write(json.dumps(label) + "\n")
+            f.writelines(json.dumps(label) + "\n" for label in labels)
         return labels_file
 
     def test_missing_config_file(
-        self, tmp_path: Path, sample_comparison_config_file: Path, sample_labels_file: Path
+        self,
+        tmp_path: Path,
+        sample_comparison_config_file: Path,
+        sample_labels_file: Path,
     ) -> None:
         with pytest.raises(FileNotFoundError, match="Config file not found"):
             evaluate_ai_pipeline(
@@ -868,7 +870,10 @@ class TestEvaluateAiPipeline:
             )
 
     def test_config_not_file(
-        self, tmp_path: Path, sample_comparison_config_file: Path, sample_labels_file: Path
+        self,
+        tmp_path: Path,
+        sample_comparison_config_file: Path,
+        sample_labels_file: Path,
     ) -> None:
         with pytest.raises(ValueError, match="Config path is not a file"):
             evaluate_ai_pipeline(
@@ -878,7 +883,10 @@ class TestEvaluateAiPipeline:
             )
 
     def test_missing_labels_file(
-        self, tmp_path: Path, sample_config_file: Path, sample_comparison_config_file: Path
+        self,
+        tmp_path: Path,
+        sample_config_file: Path,
+        sample_comparison_config_file: Path,
     ) -> None:
         with pytest.raises(FileNotFoundError, match="Labels file not found"):
             evaluate_ai_pipeline(
@@ -888,7 +896,10 @@ class TestEvaluateAiPipeline:
             )
 
     def test_labels_not_file(
-        self, tmp_path: Path, sample_config_file: Path, sample_comparison_config_file: Path
+        self,
+        tmp_path: Path,
+        sample_config_file: Path,
+        sample_comparison_config_file: Path,
     ) -> None:
         with pytest.raises(ValueError, match="Labels path is not a file"):
             evaluate_ai_pipeline(
@@ -1087,14 +1098,14 @@ class TestIntegration:
                 "reconciler": {
                     "reconciler_type": "majority",
                 },
-            })
+            }),
         )
 
         comparison_config_file = tmp_path / "comparison_config.json"
         comparison_config_file.write_text(
             json.dumps({
                 "comparator_type": "exact",
-            })
+            }),
         )
 
         labels_file = tmp_path / "labels.jsonl"
@@ -1103,8 +1114,7 @@ class TestIntegration:
             {"video": "short.mp4", "label": "cat"},
         ]
         with open(labels_file, "w") as f:
-            for label in labels:
-                f.write(json.dumps(label) + "\n")
+            f.writelines(json.dumps(label) + "\n" for label in labels)
 
         with (
             patch.object(AiPipelineConfig, "model_validate") as mock_validate,
@@ -1203,14 +1213,14 @@ class TestIntegration:
                 "reconciler": {
                     "reconciler_type": "majority",
                 },
-            })
+            }),
         )
 
         comparison_config_file = tmp_path / "comparison_config.json"
         comparison_config_file.write_text(
             json.dumps({
                 "comparator_type": "exact",
-            })
+            }),
         )
 
         labels_file = tmp_path / "labels.jsonl"
@@ -1218,8 +1228,7 @@ class TestIntegration:
             {"video": "test.mp4", "label": "otter"},
         ]
         with open(labels_file, "w") as f:
-            for label in labels:
-                f.write(json.dumps(label) + "\n")
+            f.writelines(json.dumps(label) + "\n" for label in labels)
 
         with (
             patch.object(AiPipelineConfig, "model_validate") as mock_validate,

@@ -14,7 +14,7 @@ from typing import Annotated
 import typer
 from pydantic import BaseModel
 
-from wildcamtools.lib.concat import concat_videos
+from wildcamtools.lib.concat import SegmentInfo, concat_videos
 from wildcamtools.lib.errors import (
     CannotCombineOpenWindowError,
     MotionMaskNotExistsError,
@@ -36,7 +36,10 @@ logger = logging.getLogger(__name__)
 
 
 def find_segments_for_framerange(
-    start_frame: int, end_frame: int, segments_dir: Path, is_segmenting: bool = True
+    start_frame: int,
+    end_frame: int,
+    segments_dir: Path,
+    is_segmenting: bool = True,
 ) -> tuple[Path, ...] | None:
     """Find segment files that overlap with the given frame range.
 
@@ -49,6 +52,7 @@ def find_segments_for_framerange(
 
     Returns:
         Tuple of segment file paths to merge, or None if not all segments are ready
+
     """
     logger.info("Finding segments for frames %d to %d", start_frame, end_frame)
 
@@ -112,6 +116,7 @@ class ClipMetadata(BaseModel):
         start_time: Start timestamp (for streams)
         end_time: End timestamp (for streams)
         motion_window: Original motion window that triggered the clip
+
     """
 
     start_frame: int
@@ -127,6 +132,7 @@ class OutputClipMetadata(BaseModel):
     Attributes:
         clip: Clip-specific metadata
         config: Configuration used for motion detection (for traceability)
+
     """
 
     clip: ClipMetadata
@@ -138,6 +144,7 @@ class WatcherManager:
     segments_dir: Path
     output_dir: Path
     hwaccel: str
+    debug_video_path: Path | None
     msg_queue: Queue
     state: WatcherManagerStateEnum
     motion_process: MotionProcessWrapper | None
@@ -154,11 +161,13 @@ class WatcherManager:
         segments_dir: Path,
         output_dir: Path,
         hwaccel: str = "",
+        debug_video_path: Path | None = None,
     ) -> None:
         self.config = config
         self.segments_dir = segments_dir
         self.output_dir = output_dir
         self.hwaccel = hwaccel
+        self.debug_video_path = debug_video_path
         self._is_stream = is_stream_url(config.rtsp_stream)
 
         self.msg_queue = Queue()
@@ -181,6 +190,7 @@ class WatcherManager:
             config=self.config,
             restart_on_exit=None,  # Auto-detect
             hwaccel=self.hwaccel,
+            debug_video_path=self.debug_video_path,
         )
         self._motion_process_completed = False
 
@@ -229,6 +239,7 @@ class WatcherManager:
                 config=self.config,
                 restart_on_exit=None,  # Auto-detect
                 hwaccel=self.hwaccel,
+                debug_video_path=self.debug_video_path,
             )
 
         # check and create segment process
@@ -237,7 +248,8 @@ class WatcherManager:
 
             if self.segment_process.returncode != 0:
                 logger.error(
-                    "Segmentation process terminated with error (returncode %d)", self.segment_process.returncode
+                    "Segmentation process terminated with error (returncode %d)",
+                    self.segment_process.returncode,
                 )
                 should_restart = False
 
@@ -272,15 +284,32 @@ class WatcherManager:
         """Convert seconds to frame count."""
         return int(seconds * fps)
 
+    def _build_segment_infos(self, to_merge: tuple[Path, ...]) -> list[SegmentInfo]:
+        """Build segment metadata for accurate trim calculation."""
+        segment_infos: list[SegmentInfo] = []
+        for seg_path in to_merge:
+            meta_path = SegmentMetadata.get_metadata_path(seg_path)
+            meta = SegmentMetadata.load(meta_path)
+            if meta:
+                segment_infos.append(
+                    SegmentInfo(
+                        path=seg_path,
+                        start_frame=meta.start_frame,
+                        end_frame=meta.end_frame,
+                        fps=meta.fps,
+                        duration=meta.duration,
+                        actual_frames=meta.actual_frames,
+                    )
+                )
+        return segment_infos
+
     def combine_segments(self, motion_window: MotionWindow) -> None:
         if motion_window.end_frame is None:
             raise CannotCombineOpenWindowError()
 
-        # Get FPS from the first available segment metadata or use default
-        fps = self._get_fps_from_segments()
-        if fps is None:
-            logger.warning("Could not determine FPS, using default 30.0")
-            fps = 30.0
+        # Use source FPS from motion window for offset calculations
+        # This ensures offsets are calculated in source video frame indices
+        fps = motion_window.source_fps
 
         # Convert offsets from seconds to frames for segment selection
         offset_start_frames = self._seconds_to_frames(self.config.offset_start, fps)
@@ -342,8 +371,25 @@ class WatcherManager:
         )
 
         output_file = self.output_dir / f"{output_base}.mp4"
-        logger.info("Joining %s segments into %s", len(to_merge), output_file)
-        concat_videos(to_merge, output_file)
+        logger.info(
+            "Joining %s segments into %s (trimming to frames %d-%d)",
+            len(to_merge),
+            output_file,
+            segment_start_frame,
+            segment_end_frame,
+        )
+
+        # Build segment metadata for accurate trim calculation
+        segment_infos = self._build_segment_infos(to_merge)
+
+        concat_videos(
+            to_merge,
+            output_file,
+            trim_start_frame=segment_start_frame,
+            trim_end_frame=segment_end_frame,
+            source_fps=fps,
+            segment_metadata=segment_infos,
+        )
 
         # also output a JSON summary
         with open(self.output_dir / f"{output_base}.json", "w") as json_out:
@@ -436,6 +482,7 @@ def generate_config_cmd(
 
     Args:
         output: Output file path (defaults to watch_config.json in current directory)
+
     """
     if output is None:
         output = Path("watch_config.json")
@@ -447,13 +494,22 @@ def generate_config_cmd(
 
 
 @app.command()
-def watch(
+def watch(  # noqa: C901
     config: Annotated[Path, typer.Argument(metavar="CONFIG", help="Path to JSON configuration file")],
     segments: Annotated[Path, typer.Argument(metavar="SEGMENTS", help="Directory for segment files")],
     output: Annotated[Path, typer.Argument(metavar="OUTPUT", help="Directory for output clips")],
     hwaccel: Annotated[
-        str, typer.Option(metavar="STR", envvar="WCT_HWACCEL", help="Hardware acceleration method")
+        str,
+        typer.Option(metavar="STR", envvar="WCT_HWACCEL", help="Hardware acceleration method"),
     ] = "",
+    debug_video: Annotated[
+        Path | None,
+        typer.Option(
+            metavar="PATH",
+            envvar="WCT_DEBUG_VIDEO",
+            help="Path to write debug video output (1:1 frames with overlays)",
+        ),
+    ] = None,
 ) -> None:
     """Watch a video stream and generate motion-detected clips.
 
@@ -466,6 +522,8 @@ def watch(
         segments: Directory for segment files (must exist)
         output: Directory for output clips (must exist)
         hwaccel: Hardware acceleration method (see https://trac.ffmpeg.org/wiki/HWAccelIntro)
+        debug_video: Optional path to write debug video output
+
     """
     if not config.exists():
         typer.secho(f"Error: Config file not found: {config}", err=True)
@@ -483,6 +541,12 @@ def watch(
     if not output.is_dir() or not output.exists():
         typer.secho(f"Error: Output directory does not exist: {output}", err=True)
         raise typer.Exit(code=1)
+
+    if debug_video:
+        debug_video = debug_video.resolve()
+        if not debug_video.parent.exists():
+            typer.secho(f"Error: Debug video parent directory does not exist: {debug_video.parent}", err=True)
+            raise typer.Exit(code=1)
 
     logger.info("Loading config from %s", config)
     watch_config = WatchConfig.from_json(config)
@@ -502,6 +566,7 @@ def watch(
         segments_dir=segments,
         output_dir=output,
         hwaccel=hwaccel,
+        debug_video_path=debug_video,
     )
     watcher.run()
 

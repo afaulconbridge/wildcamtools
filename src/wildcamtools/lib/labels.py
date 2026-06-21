@@ -30,7 +30,11 @@ def save_label(output: Path, video_name: str, label: str) -> None:
     labels[video_name] = label
 
     with tempfile.NamedTemporaryFile(
-        dir=str(output.resolve().parent), prefix=output.stem, delete=False, encoding="utf-8", mode="w"
+        dir=str(output.resolve().parent),
+        prefix=output.stem,
+        delete=False,
+        encoding="utf-8",
+        mode="w",
     ) as f:
         f.write("")
         temp_name = f.name

@@ -25,6 +25,7 @@ def sample_motion_window(sample_watch_config: WatchConfig) -> MotionWindow:
         transition_metrics=WatcherTransitionMetrics(),
         transition_window_metrics={},
         config=sample_watch_config,
+        source_fps=30.0,
     )
 
 
@@ -38,6 +39,7 @@ def test_output_clip_metadata_model(sample_watch_config: WatchConfig) -> None:
         transition_metrics=WatcherTransitionMetrics(),
         transition_window_metrics={},
         config=sample_watch_config,
+        source_fps=30.0,
     )
 
     # Test with timestamps (stream)
@@ -129,6 +131,7 @@ def test_output_clip_naming_uses_motion_window_frames(tmp_path: Path, sample_wat
         transition_metrics=WatcherTransitionMetrics(),
         transition_window_metrics={},
         config=sample_watch_config,
+        source_fps=30.0,
     )
 
     # Simulate offset calculation (10 seconds at 30 FPS = 300 frames)

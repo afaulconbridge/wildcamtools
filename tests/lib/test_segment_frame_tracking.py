@@ -212,6 +212,7 @@ def test_output_clip_metadata_model() -> None:
         transition_metrics=WatcherTransitionMetrics(),
         transition_window_metrics={},
         config=config,
+        source_fps=30.0,
     )
 
     # Test with timestamps (stream)

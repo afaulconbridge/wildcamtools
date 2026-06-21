@@ -15,7 +15,6 @@ logger = logging.getLogger(__name__)
 
 def handle_navigation(videos: list[str]) -> None:
     """Handle previous and skip buttons."""
-
     col1, col2 = st.columns(2)
     with col1:
         if st.button("Previous") and st.session_state.vid_idx > 0:
@@ -31,7 +30,6 @@ def handle_navigation(videos: list[str]) -> None:
 
 def save_and_next(output_path: Path, current_vid_name: str, label: str, videos: list[str]) -> None:
     """Save label and advance to next video."""
-
     if label:
         save_label(output_path, current_vid_name, label)
         st.session_state.labels[current_vid_name] = label

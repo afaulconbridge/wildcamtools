@@ -20,8 +20,7 @@ logger = logging.getLogger(__name__)
 
 
 class VideoSegmenter:
-    """
-    FrameSource that segments video input while emitting frames.
+    """FrameSource that segments video input while emitting frames.
 
     Uses two separate PyAV containers:
     - Container 1: Segment muxer that writes segment files to disk
@@ -30,7 +29,8 @@ class VideoSegmenter:
     This dual-container architecture allows decoding once while muxing
     to both outputs simultaneously.
 
-    Parameters:
+    Parameters
+    ----------
         input_: Path to input video file or RTSP URL
         segment_dir: Directory to write segment files
         segment_duration: Duration of each segment in seconds
@@ -38,6 +38,7 @@ class VideoSegmenter:
 
     TODO: Optimize to use single container with custom output callback
           to avoid maintaining two separate container instances.
+
     """
 
     input_: str | Path
@@ -94,9 +95,13 @@ class VideoSegmenter:
             msg = f"No video streams found in {self.input_}"
             raise ValueError(msg)
         self._video_stream = self._input_container.streams.video[0]
-        self._fps = float(self._video_stream.average_rate or self._video_stream.base_rate or 0.0)
+        self._fps = float(
+            self._video_stream.codec_context.framerate
+            or self._video_stream.average_rate
+            or self._video_stream.base_rate
+            or 0.0
+        )
         if self._fps <= 0:
-            logger.warning("Could not detect FPS from video stream, defaulting to 30.0")
             self._fps = 30.0
         return self
 
@@ -122,12 +127,20 @@ class VideoSegmenter:
 
             # Write metadata sidecar file
             if self._fps is not None:
+                actual_frames = self._frame_no - self._segment_start_frame
+                # Calculate duration from timestamps if available
+                duration = None
+                if self._segment_start_time is not None:
+                    end_time = datetime.now(UTC)
+                    duration = (end_time - self._segment_start_time).total_seconds()
                 metadata = SegmentMetadata(
                     start_frame=self._segment_start_frame,
                     end_frame=self._frame_no,
                     start_time=self._segment_start_time,
-                    end_time=datetime.now(UTC),
+                    end_time=end_time if self._segment_start_time is not None else None,
                     fps=self._fps,
+                    actual_frames=actual_frames,
+                    duration=duration,
                 )
                 metadata_path = SegmentMetadata.get_metadata_path(segment_path)
                 metadata.save(metadata_path)
@@ -234,8 +247,7 @@ class VideoSegmenter:
 
 
 class _PyAVSegmentProcess:
-    """
-    Popen-like wrapper for PyAV-based stream segmenter.
+    """Popen-like wrapper for PyAV-based stream segmenter.
 
     Runs segmentation in a background thread to mimic subprocess behavior.
     Uses stream copy (no re-encoding) for efficiency.
@@ -247,6 +259,7 @@ class _PyAVSegmentProcess:
         returncode: Exit code (0 for success, 1 for error, 2 for no segments, None for running)
         pid: Fake PID (thread identifier)
         restart_on_exit: Whether process should restart on successful completion
+
     """
 
     stdin = None
@@ -366,7 +379,10 @@ class _PyAVSegmentProcess:
 
             if output_container is None:
                 output_container, output_streams = self._create_output_container(
-                    video_stream, audio_stream, segment_index, segment_start_frame
+                    video_stream,
+                    audio_stream,
+                    segment_index,
+                    segment_start_frame,
                 )
 
             self._mux_packet(output_container, packet, output_streams)
@@ -392,7 +408,8 @@ class _PyAVSegmentProcess:
         return packet_time - segment_start_time >= self._duration
 
     def _get_streams(
-        self, input_container: av.container.InputContainer
+        self,
+        input_container: av.container.InputContainer,
     ) -> tuple[av.VideoStream, av.AudioStream | None]:
         """Extract video and audio streams from input container."""
         if not input_container.streams.video:
@@ -402,8 +419,10 @@ class _PyAVSegmentProcess:
         video_stream = input_container.streams.video[0]
         audio_stream = input_container.streams.audio[0] if input_container.streams.audio else None
 
-        # Detect FPS from video stream
-        self._fps = float(video_stream.average_rate or video_stream.base_rate or 0.0)
+        # Detect FPS from video stream (prefer codec framerate for accuracy)
+        self._fps = float(
+            video_stream.codec_context.framerate or video_stream.average_rate or video_stream.base_rate or 0.0
+        )
         if self._fps <= 0:
             logger.warning("Could not detect FPS from video stream, defaulting to 30.0")
             self._fps = 30.0
@@ -472,12 +491,17 @@ class _PyAVSegmentProcess:
 
             # Write metadata sidecar file
             segment_path = Path(container.name)
+            # Calculate actual_frames and duration from timestamps
+            actual_frames = end_frame - start_frame
+            duration = (end_time - start_time) if (start_time is not None and end_time is not None) else None
             metadata = SegmentMetadata(
                 start_frame=start_frame,
                 end_frame=end_frame,
                 start_time=datetime.fromtimestamp(start_time, tz=UTC) if start_time is not None else None,
                 end_time=datetime.fromtimestamp(end_time, tz=UTC) if end_time is not None else None,
                 fps=self._fps or 30.0,
+                actual_frames=actual_frames,
+                duration=duration,
             )
             metadata_path = SegmentMetadata.get_metadata_path(segment_path)
             metadata.save(metadata_path)
@@ -518,13 +542,13 @@ def create_segment_process(
     duration: float,
     restart_on_exit: bool | None = None,
 ) -> _PyAVSegmentProcess:
-    """
-    Create a segmenter process using PyAV (no subprocess).
+    """Create a segmenter process using PyAV (no subprocess).
 
     Uses stream copy (no re-encoding) for efficiency.
     Runs in a background thread to mimic subprocess behavior.
 
-    Parameters:
+    Parameters
+    ----------
         input_: Path to input video file or RTSP URL
         output: Directory to write segment files
         duration: Duration of each segment in seconds
@@ -534,9 +558,11 @@ def create_segment_process(
                         - Stream URLs (rtsp://, http://, etc.) → True
                         - File paths → False
 
-    Returns:
+    Returns
+    -------
         _PyAVSegmentProcess object with poll(), wait(), terminate() methods.
         The object has a `restart_on_exit` attribute indicating the configured behavior.
+
     """
     process = _PyAVSegmentProcess(
         input_=input_,

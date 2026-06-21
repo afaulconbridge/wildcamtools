@@ -41,7 +41,8 @@ class BatchWorkerResult(BaseModel):
 
 
 def _build_combined_output[R: BaseModel](
-    outcome: PipelineOutcome[R] | CombinedPipelineOutcome[R], config: AiPipelineConfig
+    outcome: PipelineOutcome[R] | CombinedPipelineOutcome[R],
+    config: AiPipelineConfig,
 ) -> BatchPipelineOutput[R]:
     return BatchPipelineOutput[R](config=config, outcome=outcome)
 
@@ -60,6 +61,7 @@ def _run_pipeline_worker(
 
     Returns:
         BatchWorkerResult with processing details
+
     """
     video_path = Path(video_path_str)
     output_path = Path(output_path_str)
@@ -108,6 +110,7 @@ def discover_video_files(video_dir: Path, recursive: bool = True) -> list[Path]:
 
     Returns:
         List of video file paths sorted by path
+
     """
     patterns = ["*.mp4", "*.MP4"]
     video_files: list[Path] = []
@@ -132,6 +135,7 @@ def compute_output_path(video_path: Path, video_dir: Path, output_dir: Path) -> 
 
     Returns:
         Path to the output JSON file
+
     """
     try:
         relative_path = video_path.relative_to(video_dir)
@@ -164,6 +168,7 @@ def run_batch_pipeline(
 
     Returns:
         List of BatchWorkerResult objects
+
     """
     # Filter out videos that already have output files
     pending_videos: list[tuple[Path, Path]] = []

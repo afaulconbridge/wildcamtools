@@ -6,9 +6,7 @@ from pydantic import BaseModel
 
 
 class PerformanceMetrics(BaseModel):
-    """
-    To store performance metrics of a program execution.
-    """
+    """To store performance metrics of a program execution."""
 
     # Execution wall time in seconds (float)
     time_wall: float

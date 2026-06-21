@@ -199,16 +199,15 @@ class MockVerifiedLlm(AbstractLlm):
                 verified=self.verification_verified,
             )
             return result
-        else:
-            self.last_prompt = message
-            result = RichResult(
-                is_animal_present=self.initial_species not in ("unknown", "no animal"),
-                is_animal_unknown=self.initial_species == "unknown",
-                defining_features="test features",
-                species_name=self.initial_species,
-                confidence=ConfidenceLevel.HIGH,
-            )
-            return result
+        self.last_prompt = message
+        result = RichResult(
+            is_animal_present=self.initial_species not in ("unknown", "no animal"),
+            is_animal_unknown=self.initial_species == "unknown",
+            defining_features="test features",
+            species_name=self.initial_species,
+            confidence=ConfidenceLevel.HIGH,
+        )
+        return result
 
 
 class TestFpsRescalingFrameSelector:
@@ -644,7 +643,7 @@ class TestExtractedFrames:
         """Test frame_ids with multiple batches."""
         batch1 = ExtractedBatch(selected_frames=[ExtractedFrame(path=Path(f"f{i}.jpg"), frame_no=i) for i in range(3)])
         batch2 = ExtractedBatch(
-            selected_frames=[ExtractedFrame(path=Path(f"f{i}.jpg"), frame_no=i + 10) for i in range(2)]
+            selected_frames=[ExtractedFrame(path=Path(f"f{i}.jpg"), frame_no=i + 10) for i in range(2)],
         )
         frames = ExtractedFrames(batches=[batch1, batch2])
         assert frames.frame_ids == [[0, 1, 2], [10, 11]]
@@ -818,10 +817,12 @@ class TestPipelineOutcome:
         )
         stats = VideoStats(fps=30.0, frame_count=100, x=1920, y=1080, colourspace=Colourspace.RGB)
         batch1 = RichResultBatchResult(
-            selected_frames=[ExtractedFrame(path=Path("f1.jpg"), frame_no=1)], result=result1
+            selected_frames=[ExtractedFrame(path=Path("f1.jpg"), frame_no=1)],
+            result=result1,
         )
         batch2 = RichResultBatchResult(
-            selected_frames=[ExtractedFrame(path=Path("f2.jpg"), frame_no=2)], result=result2
+            selected_frames=[ExtractedFrame(path=Path("f2.jpg"), frame_no=2)],
+            result=result2,
         )
         original = RichResultPipelineOutcome(result=result1, stats=stats, batches=[batch1, batch2])
 
@@ -1158,11 +1159,11 @@ class TestAICroppedFrameImageExtractor:
                                 right=0.8,
                                 top=0.2,
                                 bottom=0.8,
-                            )
+                            ),
                         ],
-                    )
-                ]
-            )
+                    ),
+                ],
+            ),
         )
         aicropfinder = AICropFinder(analyser=mock_llm, expansion=0.25)
         extractor = AICroppedFrameImageExtractor(aicropfinder=aicropfinder)
@@ -1190,11 +1191,11 @@ class TestAICroppedFrameImageExtractor:
                                 right=0.8,
                                 top=0.2,
                                 bottom=0.8,
-                            )
+                            ),
                         ],
-                    )
-                ]
-            )
+                    ),
+                ],
+            ),
         )
         aicropfinder = AICropFinder(analyser=mock_llm, expansion=0.0)
         extractor = AICroppedFrameImageExtractor(aicropfinder=aicropfinder, resolution=(320, 240))
@@ -1226,9 +1227,9 @@ class TestAICroppedFrameImageExtractor:
                             )
                             for i in range(len(sample_frames))
                         ],
-                    )
-                ]
-            )
+                    ),
+                ],
+            ),
         )
         aicropfinder = AICropFinder(analyser=mock_llm, expansion=0.0)
         resolution = (320, 240)
@@ -1263,9 +1264,9 @@ class TestAICroppedFrameImageExtractor:
                             )
                             for i in range(10)
                         ],
-                    )
-                ]
-            )
+                    ),
+                ],
+            ),
         )
         aicropfinder = AICropFinder(analyser=mock_llm, expansion=0.0)
         extractor = AICroppedFrameImageExtractor(aicropfinder=aicropfinder)
@@ -1296,9 +1297,9 @@ class TestAICroppedFrameImageExtractor:
                             )
                             for i in range(len(sample_frames))
                         ],
-                    )
-                ]
-            )
+                    ),
+                ],
+            ),
         )
         aicropfinder = AICropFinder(analyser=mock_llm, expansion=0.0)
         extractor = AICroppedFrameImageExtractor(aicropfinder=aicropfinder)
@@ -1330,9 +1331,9 @@ class TestAICroppedFrameImageExtractor:
                             )
                             for i in range(75)
                         ],
-                    )
-                ]
-            )
+                    ),
+                ],
+            ),
         )
         aicropfinder = AICropFinder(analyser=mock_llm, expansion=0.0)
         frames = []
@@ -1371,9 +1372,9 @@ class TestAICroppedFrameImageExtractor:
                             )
                             for i in range(len(sample_frames))
                         ],
-                    )
-                ]
-            )
+                    ),
+                ],
+            ),
         )
         aicropfinder = AICropFinder(analyser=mock_llm, expansion=0.0)
         resolution = (320, 240)
@@ -1420,9 +1421,9 @@ class TestAICroppedFrameImageExtractor:
                             )
                             for i in range(len(sample_frames))
                         ],
-                    )
-                ]
-            )
+                    ),
+                ],
+            ),
         )
         aicropfinder = AICropFinder(analyser=mock_llm, expansion=0.0)
         extractor = AICroppedFrameImageExtractor(aicropfinder=aicropfinder)
@@ -1717,10 +1718,10 @@ class TestLlmImageBatchQuery:
             prompt="Test prompt",
         )
         batch1 = ExtractedBatch(
-            selected_frames=[ExtractedFrame(path=p, frame_no=i) for i, p in enumerate(sample_image_paths)]
+            selected_frames=[ExtractedFrame(path=p, frame_no=i) for i, p in enumerate(sample_image_paths)],
         )
         batch2 = ExtractedBatch(
-            selected_frames=[ExtractedFrame(path=p, frame_no=i) for i, p in enumerate(sample_image_paths)]
+            selected_frames=[ExtractedFrame(path=p, frame_no=i) for i, p in enumerate(sample_image_paths)],
         )
         extracted_frames = ExtractedFrames(batches=[batch1, batch2])
         enriched_frames = query.query_image_batches(extracted_frames)
@@ -1742,7 +1743,7 @@ class TestLlmImageBatchQuery:
         batches = []
         for _ in range(3):
             batch = ExtractedBatch(
-                selected_frames=[ExtractedFrame(path=p, frame_no=i) for i, p in enumerate(sample_image_paths)]
+                selected_frames=[ExtractedFrame(path=p, frame_no=i) for i, p in enumerate(sample_image_paths)],
             )
             batches.append(batch)
         extracted_frames = ExtractedFrames(batches=batches)
@@ -1765,7 +1766,7 @@ class TestLlmImageBatchQuery:
         batches = []
         for _ in range(batch_count):
             batch = ExtractedBatch(
-                selected_frames=[ExtractedFrame(path=p, frame_no=i) for i, p in enumerate(sample_image_paths)]
+                selected_frames=[ExtractedFrame(path=p, frame_no=i) for i, p in enumerate(sample_image_paths)],
             )
             batches.append(batch)
         extracted_frames = ExtractedFrames(batches=batches)

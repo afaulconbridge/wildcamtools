@@ -141,7 +141,6 @@ class TestFindSegmentsForFramerange:
 
     def test_find_segments_for_framerange_basic(self, setup_segments_dir: Path) -> None:
         """Test finding segments for a frame range."""
-
         # Range 100-200 overlaps with segment 1 (0-150) and segment 2 (151-300)
         result = find_segments_for_framerange(100, 200, setup_segments_dir)
         assert result is not None
@@ -151,28 +150,24 @@ class TestFindSegmentsForFramerange:
 
     def test_find_segments_spans_multiple_files(self, setup_segments_dir: Path) -> None:
         """Test finding segments that span multiple files."""
-
         result = find_segments_for_framerange(100, 350, setup_segments_dir)
         assert result is not None
         assert len(result) == 3
 
     def test_find_segments_no_overlap(self, setup_segments_dir: Path) -> None:
         """Test finding segments with no overlap."""
-
         result = find_segments_for_framerange(500, 600, setup_segments_dir)
         assert result is not None
         assert len(result) == 0
 
     def test_find_segments_incomplete_range(self, setup_segments_dir: Path) -> None:
         """Test finding segments when range extends beyond available segments."""
-
         # Request range that extends beyond last segment
         result = find_segments_for_framerange(400, 500, setup_segments_dir)
         assert result is None  # Should wait for more segments
 
     def test_find_segments_no_metadata_files(self, tmp_path: Path) -> None:
         """Test finding segments when no metadata files exist."""
-
         segments_dir = tmp_path / "segments"
         segments_dir.mkdir()
 
@@ -181,7 +176,6 @@ class TestFindSegmentsForFramerange:
 
     def test_find_segments_missing_segment_file(self, tmp_path: Path) -> None:
         """Test finding segments when segment file is missing."""
-
         segments_dir = tmp_path / "segments"
         segments_dir.mkdir()
 
@@ -200,7 +194,6 @@ class TestFindSegmentsForFramerange:
 
     def test_find_segments_exact_boundary(self, setup_segments_dir: Path) -> None:
         """Test finding segments at exact boundaries."""
-
         # Exact start of first segment
         result = find_segments_for_framerange(0, 50, setup_segments_dir)
         assert result is not None
@@ -213,7 +206,6 @@ class TestFindSegmentsForFramerange:
 
     def test_find_segments_single_frame(self, setup_segments_dir: Path) -> None:
         """Test finding segment for a single frame."""
-
         result = find_segments_for_framerange(200, 200, setup_segments_dir)
         assert result is not None
         assert len(result) == 1

@@ -167,7 +167,7 @@ class TestRunBatchCommand:
                     llm=LlmConfig(backend=Backend.OLLAMA, model="test"),
                 ),
                 reconciler=ReconcilerConfig(),
-            ).model_dump_json()
+            ).model_dump_json(),
         )
         video_dir = tmp_path / "videos"
         output_dir = tmp_path / "results"
@@ -194,7 +194,7 @@ class TestRunBatchCommand:
                     llm=LlmConfig(backend=Backend.OLLAMA, model="test"),
                 ),
                 reconciler=ReconcilerConfig(),
-            ).model_dump_json()
+            ).model_dump_json(),
         )
         video_dir = tmp_path / "videos"
         video_dir.mkdir()
@@ -222,7 +222,7 @@ class TestRunBatchCommand:
                     llm=LlmConfig(backend=Backend.OLLAMA, model="test"),
                 ),
                 reconciler=ReconcilerConfig(),
-            ).model_dump_json()
+            ).model_dump_json(),
         )
         video_dir = tmp_path / "videos"
         video_dir.mkdir()
@@ -250,7 +250,7 @@ class TestRunBatchCommand:
                     llm=LlmConfig(backend=Backend.OLLAMA, model="test"),
                 ),
                 reconciler=ReconcilerConfig(),
-            ).model_dump_json()
+            ).model_dump_json(),
         )
         video_dir = tmp_path / "videos"
         video_dir.mkdir()
@@ -286,7 +286,7 @@ class TestRunBatchCommand:
                     llm=LlmConfig(backend=Backend.OLLAMA, model="test"),
                 ),
                 reconciler=ReconcilerConfig(),
-            ).model_dump_json()
+            ).model_dump_json(),
         )
         video_dir = tmp_path / "videos"
         video_dir.mkdir()
@@ -452,7 +452,7 @@ class TestRunPipelineWorkerDispatch:
                         confidence=ConfidenceLevel.HIGH,
                     ),
                     description=BatchDescription(description="A badger forages."),
-                )
+                ),
             ],
         )
         mock_pipeline = MagicMock()

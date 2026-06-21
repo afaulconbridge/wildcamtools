@@ -27,6 +27,7 @@ class VideoStats(BaseModel):
         shape (tuple[int, int, int]): Shape of the video frames as (height, width, channels)
         nbytes (int): Total bytes required to store one frame
         frame_duration (int): Duration of a single frame in milliseconds
+
     """
 
     # special pydantic configs
@@ -58,8 +59,7 @@ class VideoStats(BaseModel):
 
     @property
     def frame_duration(self) -> int:
-        """
-        Return the duration of a single video frame in milliseconds
+        """Return the duration of a single video frame in milliseconds
 
         Note: this rounds down
         """
@@ -67,14 +67,15 @@ class VideoStats(BaseModel):
 
     @property
     def duration_in_sconds(self) -> float:
-        """
-        Return the total duration of the video in seconds
-        """
+        """Return the total duration of the video in seconds"""
         return self.frame_count / self.fps
 
 
 def get_video_stats(filename: str | Path) -> VideoStats:
     """Retrieves metadata about a video file.
+
+    Uses PyAV for reliable FPS detection, as OpenCV's CAP_PROP_FPS can return
+    incorrect values for certain video codecs.
 
     Args:
         filename (str | Path): Path to the video file
@@ -84,16 +85,40 @@ def get_video_stats(filename: str | Path) -> VideoStats:
 
     Raises:
         RuntimeError: If unable to read frames from the video
+
     """
+    import av
+
+    # Use PyAV for reliable FPS and frame count
+    container = None
     video_capture = None
     try:
+        container = av.open(str(filename))
+        video_stream = container.streams.video[0]
+
+        # Get FPS from codec's base rate (real frame rate)
+        # This is more reliable for frame number calculations than average_rate
+        # which accounts for variable frame rate playback
+        if video_stream.codec_context.framerate:
+            fps = float(video_stream.codec_context.framerate)
+        elif video_stream.average_rate:
+            fps = float(video_stream.average_rate)
+        elif video_stream.guessed_rate:
+            fps = float(video_stream.guessed_rate)
+        else:
+            fps = 30.0  # Fallback
+
+        # Get frame count from stream (prefer frames from codec, then duration-based)
+        if video_stream.frames:
+            frame_count = video_stream.frames
+        elif video_stream.duration is not None and video_stream.time_base:
+            duration_seconds = float(video_stream.duration * video_stream.time_base)
+            frame_count = int(duration_seconds * fps)
+        else:
+            frame_count = 0
+
+        # OpenCV for frame dimensions (more reliable for actual pixel data)
         video_capture = cv2.VideoCapture(str(filename), cv2.CAP_ANY)
-        fps = float(video_capture.get(cv2.CAP_PROP_FPS))
-        frame_count = int(video_capture.get(cv2.CAP_PROP_FRAME_COUNT)) - 1
-        # frame details are more reliable than capture properties
-        # x = cv2.CAP_PROP_FRAME_WIDTH
-        # y = cv2.CAP_PROP_FRAME_HEIGHT
-        # bw = cv2.CAP_PROP_MONOCHROME
         (success, frame) = video_capture.read()
         if not success:
             msg = f"Unable to read frame from {filename}"
@@ -114,3 +139,5 @@ def get_video_stats(filename: str | Path) -> VideoStats:
         if video_capture:
             video_capture.release()
             video_capture = None
+        if container:
+            container.close()

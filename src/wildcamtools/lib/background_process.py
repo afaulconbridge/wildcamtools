@@ -12,11 +12,10 @@ from wildcamtools.lib.errors import (
 
 
 class BackgroundProcess:
-    """
-    Usage:
-        with BackgroundProcess(['myserver', '--flag'], cwd='/path', ready_check=lambda: port_open(8000)):
-            # process is running here
-            do_work()
+    """Usage:
+    with BackgroundProcess(['myserver', '--flag'], cwd='/path', ready_check=lambda: port_open(8000)):
+        # process is running here
+        do_work()
     """
 
     cmd: list[str]

@@ -33,7 +33,9 @@ class TestOllamaLlmSystemMessage:
 
     @patch("wildcamtools.lib.ai.llm.ollama.ollama_lib.Client")
     def test_message_with_schema_includes_system_message(
-        self, mock_client_class: MagicMock, sample_image: Path
+        self,
+        mock_client_class: MagicMock,
+        sample_image: Path,
     ) -> None:
         mock_client = MagicMock()
         mock_client.chat.return_value = MagicMock()
@@ -148,7 +150,10 @@ class TestOllamaLlmSystemMessage:
     @pytest.mark.parametrize("image_count", [0, 1, 3, 5])
     @patch("wildcamtools.lib.ai.llm.ollama.ollama_lib.Client")
     def test_message_with_schema_various_image_counts(
-        self, mock_client_class: MagicMock, tmp_path: Path, image_count: int
+        self,
+        mock_client_class: MagicMock,
+        tmp_path: Path,
+        image_count: int,
     ) -> None:
         mock_client = MagicMock()
         mock_client.chat.return_value = MagicMock()
@@ -183,7 +188,10 @@ class TestOllamaLlmSystemMessage:
 
     @patch("wildcamtools.lib.ai.llm.ollama.ollama_lib.Client")
     def test_system_message_logged_at_debug_level(
-        self, mock_client_class: MagicMock, sample_image: Path, caplog: pytest.LogCaptureFixture
+        self,
+        mock_client_class: MagicMock,
+        sample_image: Path,
+        caplog: pytest.LogCaptureFixture,
     ) -> None:
 
         mock_client = MagicMock()

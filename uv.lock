@@ -1275,14 +1275,14 @@ wheels = [
 
 [[package]]
 name = "scipy-stubs"
-version = "1.17.1.4"
+version = "1.18.0.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "optype", extra = ["numpy"] },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/d1/75/d944a11fca64aa84fbb4bfcf613b758319c6103cb30a304a0e9727009d62/scipy_stubs-1.17.1.4.tar.gz", hash = "sha256:cae00c5207aa62ceb4bcadea202d9fbbf002e958f9e4de981720436b8d5c1802", size = 396980, upload-time = "2026-04-13T11:46:54.528Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/a0/c6/c4c80bd13c0eec99121922c50cd1c72600672307b28e4ba67f636d6b298d/scipy_stubs-1.18.0.1.tar.gz", hash = "sha256:761cb35106200c90a37034d3c8120d3899d673de1e5879d3a2ac1d6816c62327", size = 410862, upload-time = "2026-07-12T21:09:29.993Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/92/f8/334aa5a7a482ea89cb14d92f6a4d9ffa1e193e733144d4d14c7ffcb33583/scipy_stubs-1.17.1.4-py3-none-any.whl", hash = "sha256:e6e5c390fb864745bc3d5f591de81f5cb4f84403857d4f660acb5b6339956f5b", size = 604752, upload-time = "2026-04-13T11:46:53.135Z" },
+    { url = "https://files.pythonhosted.org/packages/b1/0c/78404528783677077f072288724ff8ef8381bbc219b110e3147e60361b6d/scipy_stubs-1.18.0.1-py3-none-any.whl", hash = "sha256:704408c5f03a33924c9fed6dc9e25926dc331ed508d52f1beece0188525cebad", size = 616217, upload-time = "2026-07-12T21:09:28.45Z" },
 ]
 
 [[package]]
@@ -1643,7 +1643,7 @@ requires-dist = [
     { name = "psutil", specifier = ">=7.1.3" },
     { name = "pydantic", specifier = ">=2.13.4" },
     { name = "scikit-image", specifier = ">=0.26.0" },
-    { name = "scipy-stubs", specifier = ">=1.17.1.4" },
+    { name = "scipy-stubs", specifier = ">=1.18.0.1" },
     { name = "sqlmodel", specifier = ">=0.0.22" },
     { name = "streamlit", specifier = ">=1.56.0" },
     { name = "typed-ffmpeg", specifier = ">=4.1" },

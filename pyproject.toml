@@ -31,7 +31,7 @@ dependencies = [
   "typer-config>=1.4.3",
   "types-psutil>=7.2.2.20260518",
   "typed-ffmpeg>=4.1",
-  "sqlmodel>=0.0.22",
+  "sqlmodel>=0.0.39",
   "alembic>=1.14.0",
 ]
 [dependency-groups]

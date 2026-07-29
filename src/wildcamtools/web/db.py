@@ -87,7 +87,7 @@ def _display_config_summary(config: dict[str, Any]) -> None:
         if "frame_extractor" in config:
             fe = config["frame_extractor"]
             st.json({
-                "frame_extractor": {"extractor_type": fe.get("extractor_type"), "resolution": fe.get("resolution")}
+                "frame_extractor": {"extractor_type": fe.get("extractor_type"), "resolution": fe.get("resolution")},
             })
     with col2:
         if "llm" in config:
@@ -311,8 +311,7 @@ def _render_browse_filters(
 
 def _render_browse_pagination(total: int) -> int:
     max_page = max(0, (total - 1) // PAGE_SIZE) if total > 0 else 0
-    if st.session_state.browse_page > max_page:
-        st.session_state.browse_page = max_page
+    st.session_state.browse_page = min(st.session_state.browse_page, max_page)
     page = st.session_state.browse_page
 
     nav_l, nav_m, nav_r = st.columns([1, 2, 1])

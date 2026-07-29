@@ -52,7 +52,11 @@ def run(
 
 
 def _validate_run_evaluate_inputs(
-    config: Path, labels: Path, video_dir: Path | None, max_workers: int | None, comparison_config: Path
+    config: Path,
+    labels: Path,
+    video_dir: Path | None,
+    max_workers: int | None,
+    comparison_config: Path,
 ) -> None:
     """Validate inputs for run_evaluate command."""
     if not config.exists():
@@ -88,11 +92,13 @@ def _validate_run_evaluate_inputs(
 def run_evaluate(
     config: Annotated[Path, typer.Argument(metavar="CONFIG", help="Path to JSON configuration file")],
     comparison_config_path: Annotated[
-        Path, typer.Argument(metavar="COMPARISON_CONFIG", help="JSON config for label comparison")
+        Path,
+        typer.Argument(metavar="COMPARISON_CONFIG", help="JSON config for label comparison"),
     ],
     labels: Annotated[Path, typer.Argument(metavar="LABELS", help="Path to JSONL labels file")],
     video_dir: Annotated[
-        Path | None, typer.Option("-v", "--video-dir", help="Video directory (defaults to labels parent)")
+        Path | None,
+        typer.Option("-v", "--video-dir", help="Video directory (defaults to labels parent)"),
     ] = None,
     max_workers: Annotated[int | None, typer.Option("-w", "--max-workers", help="Maximum worker processes")] = None,
     output: Annotated[
@@ -186,7 +192,8 @@ def run_batch(
     video_dir: Annotated[Path, typer.Argument(metavar="VIDEO_DIR", help="Directory containing video files")],
     output_dir: Annotated[Path, typer.Argument(metavar="OUTPUT_DIR", help="Directory for JSON output files")],
     max_workers: Annotated[
-        int | None, typer.Option("-w", "--max-workers", help="Maximum worker processes (default: CPU count)")
+        int | None,
+        typer.Option("-w", "--max-workers", help="Maximum worker processes (default: CPU count)"),
     ] = None,
     recursive: Annotated[bool, typer.Option("-r", "--recursive", help="Search recursively for video files")] = True,
     overwrite: Annotated[bool, typer.Option("--overwrite", help="Overwrite existing output files")] = False,
@@ -201,6 +208,7 @@ def run_batch(
 
     Example:
         wildcamtools ai run-batch config.json wildlife/ results/ --max-workers 4
+
     """
     _validate_run_batch_inputs(config, video_dir, output_dir, max_workers)
 

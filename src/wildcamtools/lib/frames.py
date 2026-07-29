@@ -692,7 +692,7 @@ def create_frames(
                 motion_handler=motion_handler,
                 expansion=frame_creation.crop_pan.expansion,
                 inertia=frame_creation.crop_pan.inertia,
-            )
+            ),
         )
 
     if frame_creation.similarity_minimum is not None:
@@ -705,7 +705,7 @@ def create_frames(
                 x=frame_creation.x,
                 y=frame_creation.y,
                 fps=frame_creation.fps,
-            )
+            ),
         )
 
     if frame_creation.tiling is not None:
@@ -714,7 +714,7 @@ def create_frames(
                 cols=frame_creation.tiling.cols,
                 rows=frame_creation.tiling.rows,
                 overlap=frame_creation.tiling.overlap,
-            )
+            ),
         )
 
     handlers.append(FrameImageWriter(frame_creation.tmpdir))
@@ -742,7 +742,7 @@ class FrameImageRecreator:
 
     def __next__(self) -> Frame:
         if self.i >= len(self.raw_images):
-            raise StopIteration()
+            raise StopIteration
 
         raw = cv2.imread(str(self.raw_images[self.i]))
         if raw is None:

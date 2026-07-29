@@ -86,6 +86,7 @@ class FrameSelectorConfig(BaseModel):
 
         Raises:
             NotImplementedError: If the selector_type is not supported.
+
         """
         match self.selector_type:
             case FrameSelectorType.FPS_RESCALING:
@@ -169,6 +170,7 @@ class FrameExtractorConfig(BaseModel):
 
         Raises:
             ValueError: If analyser_llm is not provided for AI_CROPPED extractor type.
+
         """
         match self.extractor_type:
             case FrameExtractorType.RESCALED:
@@ -177,7 +179,7 @@ class FrameExtractorConfig(BaseModel):
                 if analyser_llm is None:
                     if self.analyser is None:
                         raise ValueError(
-                            "analyser_llm must be provided or configured in analyser for AI_CROPPED extractor"
+                            "analyser_llm must be provided or configured in analyser for AI_CROPPED extractor",
                         )
                     analyser_llm = self.analyser.create_llm()
                 aicropfinder = AICropFinder(analyser=analyser_llm, expansion=self.crop_expansion)
@@ -202,7 +204,7 @@ class LlmConfig(BaseModel):
     backend: Backend = Backend.OLLAMA
     model: Annotated[str, Field(strict=True, min_length=1, description="Model name/identifier")]
     url: Annotated[AnyHttpUrl, Field(description="Base URL for the LLM service")] = AnyHttpUrl(
-        "http://localhost:8080/v1"
+        "http://localhost:8080/v1",
     )
     api_key: SecretStr | None = None
 
@@ -223,6 +225,7 @@ class LlmConfig(BaseModel):
 
         Returns:
             AbstractLlm: The configured LLM instance.
+
         """
         return create_analyser(
             backend=self.backend,
@@ -269,7 +272,7 @@ class ImageBatchQueryConfig(BaseModel):
         if self.query_type in (ImageBatchQueryType.LLM, ImageBatchQueryType.VERIFIED) and not self.prompt:
             raise ValueError(
                 f"'prompt' is required when query_type is '{self.query_type.value}'. "
-                "Provide a non-empty 'prompt' in the query config."
+                "Provide a non-empty 'prompt' in the query config.",
             )
         return self
 
@@ -282,6 +285,7 @@ class ImageBatchQueryConfig(BaseModel):
 
         Returns:
             The configured image batch query instance.
+
         """
         llm = self.llm.create_llm()
         match self.query_type:
@@ -335,6 +339,7 @@ class ReconcilerConfig(BaseModel):
 
         Raises:
             NotImplementedError: If the reconciler_type is not supported.
+
         """
         match self.reconciler_type:
             case ReconcilerType.MAJORITY:
@@ -347,7 +352,7 @@ class ReconcilerConfig(BaseModel):
                 else:
                     raise ValueError(
                         "An LLM is required for the description reconciler. "
-                        "Provide one via 'llm' in the reconciler config or as a fallback."
+                        "Provide one via 'llm' in the reconciler config or as a fallback.",
                     )
                 return LlmDescriptionReconciler(
                     llm=reconciler_llm,
@@ -395,8 +400,8 @@ class AiPipelineConfig(BaseModel):
                     "llm": {"backend": "ollama", "model": "gemma4:31b-cloud"},
                     "description_prompt": "Describe what is happening in these frames.",
                 },
-            }
-        }
+            },
+        },
     )
 
     frame_selector: FrameSelectorConfig = Field(default_factory=FrameSelectorConfig)

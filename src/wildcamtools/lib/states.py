@@ -11,6 +11,7 @@ import numpy as np
 from pydantic import BaseModel
 
 from wildcamtools.lib import Frame, FrameHandler
+from wildcamtools.lib.debug_video import DebugVideoOverlay, DebugVideoWriter
 from wildcamtools.lib.frames import Rescaler
 from wildcamtools.lib.motion import MogMotion
 from wildcamtools.lib.stats import VideoStats, get_video_stats
@@ -85,8 +86,7 @@ class StateTransitionWindowMetrics(BaseModel):
 
 
 class MotionWindow(BaseModel):
-    """
-    Represents a motion detection window with frame and time boundaries.
+    """Represents a motion detection window with frame and time boundaries.
 
     Note: ``start_frame``/``end_frame`` are in **source video indices** (native
     FPS, e.g., 30 fps), not post-filtering indices. When using Rescaler with
@@ -108,6 +108,8 @@ class MotionWindow(BaseModel):
         transition_metrics: State machine transition thresholds used
         transition_window_metrics: Per-state motion statistics during the window
         config: Configuration used for motion detection (for traceability)
+        source_fps: Native FPS of the source video (for offset calculations)
+
     """
 
     start_frame: int
@@ -117,11 +119,11 @@ class MotionWindow(BaseModel):
     transition_metrics: WatcherTransitionMetrics
     transition_window_metrics: dict[WatcherStateEnum, StateTransitionWindowMetrics]
     config: WatchConfig
+    source_fps: float
 
 
 class Watcher(FrameHandler):
-    """
-    ```mermaid
+    """```mermaid
     stateDiagram-v2
         [*] --> preparing %% initializing background history
         preparing --> green %% fully initialized and ready
@@ -300,9 +302,9 @@ def enqueue_motion_windows(  # noqa: C901
     queue: Queue,
     config: WatchConfig,
     hwaccel: str = "",
+    debug_video_path: Path | None = None,
 ) -> None:
-    """
-    Extract motion windows from video stream.
+    """Extract motion windows from video stream.
 
     ``start_frame``/``end_frame`` on the returned ``MotionWindow`` objects use
     source video indices (native FPS), not post-filtering indices. When using
@@ -319,108 +321,9 @@ def enqueue_motion_windows(  # noqa: C901
         queue: Queue to put MotionWindow instances into
         config: WatchConfig with motion detection parameters
         hwaccel: Hardware acceleration method (deployment-specific)
+        debug_video_path: Optional path for debug video output
+
     """
-
-    def _find_motion_times(source: str, stats: VideoStats, watcher: Watcher) -> Generator[MotionWindow]:
-        start_frame: int | None = None
-        start_time: datetime | None = None
-        prev_state: WatcherStateEnum | None = None
-        last_frame_no: int | None = None
-        logger.debug(
-            "Reading %s at %sx%s@%s (%s)",
-            source,
-            stats.x,
-            stats.y,
-            config.motion_detection.fps,
-            config.motion_detection.scale,
-        )
-        rescaler = Rescaler(
-            stats,
-            int(stats.x * config.motion_detection.scale),
-            int(stats.y * config.motion_detection.scale),
-            config.motion_detection.fps,
-        )
-        with VideoReader(source, hwaccel=hwaccel if hwaccel else None) as video_input:
-            for frame in video_input:
-                frame = rescaler.handle(frame)
-                if not frame.filter_keep:
-                    continue
-                # If a new motion window is about to start (GREEN -> AMBER/RED),
-                # reset the watcher's per-window metrics before processing the
-                # entry frame. This scopes the metrics to just the new window
-                # and gives exact min/max/mean/count (no lifetime accumulation
-                # or approximation).
-                if start_frame is None and start_time is None and prev_state == WatcherStateEnum.GREEN:
-                    watcher.transition_window_metrics = {}
-                frame = watcher.handle(frame)
-                last_frame_no = frame.frame_no
-                # Start tracking when transitioning from GREEN to any motion state (AMBER or RED)
-                # This handles both normal transitions (GREEN->AMBER) and zero-duration transitions (GREEN->RED)
-                if start_frame is None and start_time is None:
-                    if watcher.state in (
-                        WatcherStateEnum.AMBER,
-                        WatcherStateEnum.RED,
-                    ):
-                        start_frame = frame.frame_no
-                        start_time = datetime.now(UTC)
-                # End tracking when returning to GREEN from any motion state
-                # Only yield windows that reached RED state (discard GREEN->AMBER->GREEN)
-                elif (
-                    start_frame is not None
-                    and start_time is not None
-                    and watcher.state == WatcherStateEnum.GREEN
-                    and prev_state
-                    in (
-                        WatcherStateEnum.AMBER,
-                        WatcherStateEnum.RED,
-                        WatcherStateEnum.RED_AMBER,
-                    )
-                ):
-                    if not _should_yield_motion_window(watcher):
-                        logger.debug(
-                            "Discarding motion window %d-%d: never reached RED state",
-                            start_frame,
-                            last_frame_no,
-                        )
-                        start_frame = None
-                        start_time = None
-                        continue
-                    end_frame = frame.frame_no
-                    end_time = datetime.now(UTC)
-                    yield MotionWindow(
-                        start_frame=start_frame,
-                        start_time=start_time,
-                        end_frame=end_frame,
-                        end_time=end_time,
-                        transition_metrics=watcher.transition_metrics,
-                        transition_window_metrics=dict(watcher.transition_window_metrics),
-                        config=config,
-                    )
-                    start_frame = None
-                    start_time = None
-
-                prev_state = watcher.state
-
-            # Yield any pending window if video ended during motion
-            # Only yield if the window reached RED state
-            if start_frame is not None and start_time is not None and last_frame_no is not None:
-                if _should_yield_motion_window(watcher):
-                    yield MotionWindow(
-                        start_frame=start_frame,
-                        start_time=start_time,
-                        end_frame=last_frame_no,
-                        end_time=datetime.now(UTC),
-                        transition_metrics=watcher.transition_metrics,
-                        transition_window_metrics=dict(watcher.transition_window_metrics),
-                        config=config,
-                    )
-                else:
-                    logger.debug(
-                        "Discarding pending motion window %d-%d: never reached RED state",
-                        start_frame,
-                        last_frame_no,
-                    )
-
     stats = get_video_stats(rtsp_stream)
     processed_mask = _load_and_resize_mask(
         mask_path=config.motion_mask,
@@ -439,6 +342,136 @@ def enqueue_motion_windows(  # noqa: C901
         ),
         transition_metrics=config.transition_metrics.to_transition_metrics(),
     )
+
+    debug_overlay: DebugVideoOverlay | None = None
+    debug_writer: DebugVideoWriter | None = None
+    if debug_video_path is not None:
+        debug_writer = DebugVideoWriter(
+            output_path=debug_video_path,
+            width=stats.x,
+            height=stats.y,
+            fps=config.motion_detection.fps,
+        )
+        debug_writer.__enter__()
+        debug_overlay = DebugVideoOverlay(
+            watcher=watcher,
+            motion_handler=watcher.motion,
+        )
+        logger.info("Debug video output enabled: %s (full resolution %dx%d)", debug_video_path, stats.x, stats.y)
+
+    def _find_motion_times(  # noqa: C901
+        source: str,
+        stats: VideoStats,
+        watcher: Watcher,
+    ) -> Generator[MotionWindow]:
+        start_frame: int | None = None
+        start_time: datetime | None = None
+        prev_state: WatcherStateEnum | None = None
+        last_frame_no: int | None = None
+        logger.debug(
+            "Reading %s at %sx%s@%s (%s)",
+            source,
+            stats.x,
+            stats.y,
+            config.motion_detection.fps,
+            config.motion_detection.scale,
+        )
+        rescaler = Rescaler(
+            stats,
+            int(stats.x * config.motion_detection.scale),
+            int(stats.y * config.motion_detection.scale),
+            config.motion_detection.fps,
+        )
+        try:
+            with VideoReader(source, hwaccel=hwaccel or None) as video_input:
+                for frame in video_input:
+                    frame = rescaler.handle(frame)
+                    if not frame.filter_keep:
+                        continue
+                    # If a new motion window is about to start (GREEN -> AMBER/RED),
+                    # reset the watcher's per-window metrics before processing the
+                    # entry frame. This scopes the metrics to just the new window
+                    # and gives exact min/max/mean/count (no lifetime accumulation
+                    # or approximation).
+                    if start_frame is None and start_time is None and prev_state == WatcherStateEnum.GREEN:
+                        watcher.transition_window_metrics = {}
+                    frame = watcher.handle(frame)
+                    if debug_writer is not None and debug_overlay is not None:
+                        frame = debug_overlay.handle(frame)
+                        debug_writer.handle(frame)
+                    last_frame_no = frame.frame_no
+                    # Start tracking when transitioning from GREEN to any motion state (AMBER or RED)
+                    # This handles both normal transitions (GREEN->AMBER) and zero-duration transitions (GREEN->RED)
+                    if start_frame is None and start_time is None:
+                        if watcher.state in (
+                            WatcherStateEnum.AMBER,
+                            WatcherStateEnum.RED,
+                        ):
+                            start_frame = frame.frame_no
+                            start_time = datetime.now(UTC)
+                    # End tracking when returning to GREEN from any motion state
+                    # Only yield windows that reached RED state (discard GREEN->AMBER->GREEN)
+                    elif (
+                        start_frame is not None
+                        and start_time is not None
+                        and watcher.state == WatcherStateEnum.GREEN
+                        and prev_state
+                        in (
+                            WatcherStateEnum.AMBER,
+                            WatcherStateEnum.RED,
+                            WatcherStateEnum.RED_AMBER,
+                        )
+                    ):
+                        if not _should_yield_motion_window(watcher):
+                            logger.debug(
+                                "Discarding motion window %d-%d: never reached RED state",
+                                start_frame,
+                                last_frame_no,
+                            )
+                            start_frame = None
+                            start_time = None
+                            continue
+                        end_frame = frame.frame_no
+                        end_time = datetime.now(UTC)
+                        yield MotionWindow(
+                            start_frame=start_frame,
+                            start_time=start_time,
+                            end_frame=end_frame,
+                            end_time=end_time,
+                            transition_metrics=watcher.transition_metrics,
+                            transition_window_metrics=dict(watcher.transition_window_metrics),
+                            config=config,
+                            source_fps=stats.fps,
+                        )
+                        start_frame = None
+                        start_time = None
+
+                    prev_state = watcher.state
+
+                # Yield any pending window if video ended during motion
+                # Only yield if the window reached RED state
+                if start_frame is not None and start_time is not None and last_frame_no is not None:
+                    if _should_yield_motion_window(watcher):
+                        yield MotionWindow(
+                            start_frame=start_frame,
+                            start_time=start_time,
+                            end_frame=last_frame_no,
+                            end_time=datetime.now(UTC),
+                            transition_metrics=watcher.transition_metrics,
+                            transition_window_metrics=dict(watcher.transition_window_metrics),
+                            config=config,
+                            source_fps=stats.fps,
+                        )
+                    else:
+                        logger.debug(
+                            "Discarding pending motion window %d-%d: never reached RED state",
+                            start_frame,
+                            last_frame_no,
+                        )
+        finally:
+            if debug_writer is not None:
+                debug_writer.__exit__(None, None, None)
+
     for motion in _find_motion_times(rtsp_stream, stats, watcher):
         queue.put(motion)
 
@@ -449,6 +482,7 @@ def create_motion_process(
     config: WatchConfig,
     restart_on_exit: bool | None = None,
     hwaccel: str = "",
+    debug_video_path: Path | None = None,
 ) -> MotionProcessWrapper:
     """Spawn a motion-detection process.
 
@@ -464,9 +498,11 @@ def create_motion_process(
         config: WatchConfig with motion detection parameters
         restart_on_exit: Whether to restart the process on exit (auto-detected if None)
         hwaccel: Hardware acceleration method (deployment-specific)
+        debug_video_path: Optional path to write debug video output
 
     Returns:
         MotionProcessWrapper instance
+
     """
     motion_process = Process(
         target=enqueue_motion_windows,
@@ -475,6 +511,7 @@ def create_motion_process(
             "queue": msg_queue,
             "config": config,
             "hwaccel": hwaccel,
+            "debug_video_path": debug_video_path,
         },
         daemon=True,
         name="wildcamtools-motion",

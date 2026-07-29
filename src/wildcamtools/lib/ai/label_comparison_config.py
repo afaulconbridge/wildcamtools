@@ -42,6 +42,7 @@ class LabelComparisonConfig(BaseModel):
             "cache_enabled": true
         }
         ```
+
     """
 
     comparator_type: LabelComparisonType = LabelComparisonType.EXACT
@@ -75,6 +76,7 @@ class LabelComparisonConfig(BaseModel):
         Raises:
             ValueError: If comparator_type is 'llm' but no LLM config is provided.
             NotImplementedError: If the comparator_type is not supported.
+
         """
         match self.comparator_type:
             case LabelComparisonType.EXACT:
@@ -84,7 +86,7 @@ class LabelComparisonConfig(BaseModel):
                 if self.llm is None:
                     raise ValueError(
                         "LLM configuration is required when comparator_type is 'llm'. "
-                        "Please provide 'llm' configuration in the label comparison config."
+                        "Please provide 'llm' configuration in the label comparison config.",
                     )
 
                 llm_instance = self.llm.create_llm()

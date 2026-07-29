@@ -48,7 +48,6 @@ def test_states(video_path: str) -> None:
 
 def test_create_motion_process_restart_on_exit_auto_detect_file(video_path: Path) -> None:
     """Test that file paths auto-detect as restart_on_exit=False."""
-
     msg_queue: Queue = Queue()
     config = WatchConfig(rtsp_stream=str(video_path))
 
@@ -66,7 +65,6 @@ def test_create_motion_process_restart_on_exit_auto_detect_file(video_path: Path
 
 def test_create_motion_process_restart_on_exit_auto_detect_rtsp() -> None:
     """Test that RTSP URLs auto-detect as restart_on_exit=True."""
-
     msg_queue: Queue = Queue()
     config = WatchConfig(rtsp_stream="rtsp://localhost:8554/stream")
 
@@ -84,7 +82,6 @@ def test_create_motion_process_restart_on_exit_auto_detect_rtsp() -> None:
 
 def test_create_motion_process_restart_on_exit_explicit_override() -> None:
     """Test explicit restart_on_exit override."""
-
     msg_queue: Queue = Queue()
     config = WatchConfig(rtsp_stream="samples/synth/synth_0.0100_1.000.mp4")
 
@@ -107,7 +104,6 @@ def test_motion_window_tracks_amber_to_green() -> None:
     This is a regression test for the bug where windows were only tracked during
     RED state, causing fragmentation when the state machine oscillated rapidly.
     """
-
     watcher = Watcher(
         motion=MogMotion(history=10, threshold=16, detect_shadows=False, kernel_size=0.005),
         transition_metrics=WatcherTransitionMetrics(

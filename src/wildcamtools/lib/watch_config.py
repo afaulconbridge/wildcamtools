@@ -19,6 +19,7 @@ class MotionDetectionConfig(BaseModel):
         scale: Frame scale factor (< 1.0)
         fps: Target frames per second (>= 1.0)
         segment_duration: Segment duration in seconds
+
     """
 
     history: Annotated[float, Field(strict=True, ge=0.0, description="MOG2 history in seconds")] = 10.0
@@ -47,6 +48,7 @@ class WatcherTransitionMetricsConfig(BaseModel):
         red_to_red_amber_proportion_max: Maximum motion proportion to transition RED -> RED_AMBER
         red_amber_to_red_proportion_min: Minimum motion proportion to transition RED_AMBER -> RED
         red_amber_to_green_duration: Duration in RED_AMBER state before transitioning to GREEN
+
     """
 
     preparing_duration: Annotated[float, Field(strict=True, ge=0.0)] = 10.0
@@ -114,6 +116,7 @@ class WatchConfig(BaseModel):
             }
         }
         ```
+
     """
 
     model_config = ConfigDict(
@@ -140,8 +143,8 @@ class WatchConfig(BaseModel):
                     "red_amber_to_red_proportion_min": 0.01,
                     "red_amber_to_green_duration": 5.0,
                 },
-            }
-        }
+            },
+        },
     )
 
     rtsp_stream: Annotated[str, Field(min_length=1, description="RTSP URL or file path to process")]
@@ -164,6 +167,7 @@ class WatchConfig(BaseModel):
 
         Raises:
             ValueError: If an environment variable is not set.
+
         """
 
         def replacer(match: re.Match[str]) -> str:
@@ -207,6 +211,7 @@ class WatchConfig(BaseModel):
         Raises:
             FileNotFoundError: If the config file does not exist.
             pydantic.ValidationError: If the config file contains invalid data.
+
         """
         content = path.read_text()
         return cls.model_validate_json(content)
@@ -217,6 +222,7 @@ class WatchConfig(BaseModel):
         Args:
             path: Path to the JSON configuration file.
             indent: JSON indentation level.
+
         """
         json_str = self.model_dump_json(indent=indent)
         path.write_text(json_str)
@@ -229,5 +235,6 @@ class WatchConfig(BaseModel):
 
         Returns:
             Frame count for MOG2 history (minimum 1).
+
         """
         return max(1, round(self.motion_detection.history * self.motion_detection.fps))

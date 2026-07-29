@@ -74,7 +74,8 @@ class VerificationResult(BaseModel):
 
 class RichResult(BaseModel):
     is_animal_present: Annotated[
-        bool, Field(description="Flag if any animal is visible in these images.", examples=["true", "false"])
+        bool,
+        Field(description="Flag if any animal is visible in these images.", examples=["true", "false"]),
     ]
     is_animal_unknown: Annotated[
         bool,

@@ -406,7 +406,13 @@ class TestFrameTiling:
     def test_get_tile_returns_none_for_invalid_coordinates(self):
         raw = np.zeros((100, 200, 3), dtype=np.uint8)
         frame = Frame(
-            raw=raw, frame_no=1, tiles=[raw], tiling_cols=1, tiling_rows=1, tiling_width=200, tiling_height=100
+            raw=raw,
+            frame_no=1,
+            tiles=[raw],
+            tiling_cols=1,
+            tiling_rows=1,
+            tiling_width=200,
+            tiling_height=100,
         )
 
         assert frame.get_tile(-1, 0) is None
@@ -422,7 +428,13 @@ class TestFrameTiling:
         tiles = [tile1, tile2]
 
         frame = Frame(
-            raw=raw, frame_no=1, tiles=tiles, tiling_cols=2, tiling_rows=1, tiling_width=100, tiling_height=50
+            raw=raw,
+            frame_no=1,
+            tiles=tiles,
+            tiling_cols=2,
+            tiling_rows=1,
+            tiling_width=100,
+            tiling_height=50,
         )
 
         assert np.array_equal(frame.get_tile(0, 0), tile1)

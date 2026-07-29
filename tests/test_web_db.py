@@ -379,7 +379,7 @@ def test_list_runs_for_video_eager_loads_batches(db_engine, sample_pipeline_conf
                 species_name="Red Fox",
                 confidence=ConfidenceLevel.HIGH,
             ),
-        )
+        ),
     ]
     stats = VideoStats(fps=30.0, frame_count=10, x=1280, y=720, colourspace=Colourspace.RGB)
     outcome = PipelineOutcome(

@@ -26,6 +26,7 @@ def time_pipeline_execution(
 
     Raises:
         Exception: Any exception from pipeline execution is propagated
+
     """
     start_time = time.time()
     pipeline = pipeline_config.create_pipeline()
@@ -51,6 +52,7 @@ def run_parallel_worker_pool(
 
     Returns:
         List of results from worker_fn (excludes failed tasks)
+
     """
     ctx = multiprocessing.get_context("spawn")
     results: list[Any] = []
@@ -97,6 +99,7 @@ def run_parallel_worker_pool_with_labels(
 
     Returns:
         List of (label, result) tuples (excludes failed tasks)
+
     """
     ctx = multiprocessing.get_context("spawn")
     results: list[tuple[Any, Any]] = []
@@ -144,6 +147,7 @@ def validate_evaluation_paths(
     Raises:
         FileNotFoundError: If a required path doesn't exist
         ValueError: If a path is not the correct type (file vs directory)
+
     """
     if not config_path.exists():
         raise FileNotFoundError(f"Config file not found: {config_path}")

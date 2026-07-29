@@ -100,7 +100,10 @@ class TestRunCommand:
         assert result.exit_code != 0
 
     def test_run_success_with_mocked_pipeline(
-        self, sample_config_file: Path, sample_video_file: Path, tmp_path: Path
+        self,
+        sample_config_file: Path,
+        sample_video_file: Path,
+        tmp_path: Path,
     ) -> None:
         from wildcamtools.lib.ai import AiPipelineConfig, PipelineOutcome
         from wildcamtools.lib.ai.types import ConfidenceLevel, RichResult
@@ -170,7 +173,10 @@ class TestRunCommand:
 
 class TestRunCommandIntegration:
     def test_run_config_with_env_var(
-        self, tmp_path: Path, sample_video_file: Path, monkeypatch: pytest.MonkeyPatch
+        self,
+        tmp_path: Path,
+        sample_video_file: Path,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         monkeypatch.setenv("TEST_API_KEY", "secret-key")
 
@@ -215,7 +221,10 @@ class TestRunCommandIntegration:
 
     @pytest.mark.parametrize("resolution", [[640, 360], [1280, 720], [320, 240]])
     def test_run_with_different_resolutions(
-        self, resolution: list[int], tmp_path: Path, sample_video_file: Path
+        self,
+        resolution: list[int],
+        tmp_path: Path,
+        sample_video_file: Path,
     ) -> None:
         config = {
             "frame_extractor": {
@@ -298,29 +307,34 @@ class TestRunEvaluateCommand:
         ]
         labels_file = tmp_path / "labels.jsonl"
         with open(labels_file, "w") as f:
-            for label in labels:
-                f.write(json.dumps(label) + "\n")
+            f.writelines(json.dumps(label) + "\n" for label in labels)
         return labels_file
 
     def test_run_evaluate_missing_config(self, sample_comparison_config_file: Path, sample_labels_file: Path) -> None:
         result = runner.invoke(
-            ai_app, ["run-evaluate", "nonexistent.json", str(sample_comparison_config_file), str(sample_labels_file)]
+            ai_app,
+            ["run-evaluate", "nonexistent.json", str(sample_comparison_config_file), str(sample_labels_file)],
         )
         assert result.exit_code == 1
         assert "Error: Config file not found" in result.stderr or "Error: Config file not found" in result.stdout
 
     def test_run_evaluate_missing_labels(self, sample_config_file: Path, sample_comparison_config_file: Path) -> None:
         result = runner.invoke(
-            ai_app, ["run-evaluate", str(sample_config_file), str(sample_comparison_config_file), "nonexistent.jsonl"]
+            ai_app,
+            ["run-evaluate", str(sample_config_file), str(sample_comparison_config_file), "nonexistent.jsonl"],
         )
         assert result.exit_code == 1
         assert "Error: Labels file not found" in result.stderr or "Error: Labels file not found" in result.stdout
 
     def test_run_evaluate_config_not_file(
-        self, tmp_path: Path, sample_comparison_config_file: Path, sample_labels_file: Path
+        self,
+        tmp_path: Path,
+        sample_comparison_config_file: Path,
+        sample_labels_file: Path,
     ) -> None:
         result = runner.invoke(
-            ai_app, ["run-evaluate", str(tmp_path), str(sample_comparison_config_file), str(sample_labels_file)]
+            ai_app,
+            ["run-evaluate", str(tmp_path), str(sample_comparison_config_file), str(sample_labels_file)],
         )
         assert result.exit_code == 1
         assert (
@@ -328,10 +342,14 @@ class TestRunEvaluateCommand:
         )
 
     def test_run_evaluate_labels_not_file(
-        self, tmp_path: Path, sample_config_file: Path, sample_comparison_config_file: Path
+        self,
+        tmp_path: Path,
+        sample_config_file: Path,
+        sample_comparison_config_file: Path,
     ) -> None:
         result = runner.invoke(
-            ai_app, ["run-evaluate", str(sample_config_file), str(sample_comparison_config_file), str(tmp_path)]
+            ai_app,
+            ["run-evaluate", str(sample_config_file), str(sample_comparison_config_file), str(tmp_path)],
         )
         assert result.exit_code == 1
         assert (
@@ -339,7 +357,10 @@ class TestRunEvaluateCommand:
         )
 
     def test_run_evaluate_video_dir_not_found(
-        self, sample_config_file: Path, sample_comparison_config_file: Path, sample_labels_file: Path
+        self,
+        sample_config_file: Path,
+        sample_comparison_config_file: Path,
+        sample_labels_file: Path,
     ) -> None:
         result = runner.invoke(
             ai_app,
@@ -358,7 +379,10 @@ class TestRunEvaluateCommand:
         )
 
     def test_run_evaluate_video_dir_not_directory(
-        self, sample_config_file: Path, sample_comparison_config_file: Path, sample_labels_file: Path
+        self,
+        sample_config_file: Path,
+        sample_comparison_config_file: Path,
+        sample_labels_file: Path,
     ) -> None:
         result = runner.invoke(
             ai_app,
@@ -378,7 +402,10 @@ class TestRunEvaluateCommand:
         )
 
     def test_run_evaluate_invalid_max_workers(
-        self, sample_config_file: Path, sample_comparison_config_file: Path, sample_labels_file: Path
+        self,
+        sample_config_file: Path,
+        sample_comparison_config_file: Path,
+        sample_labels_file: Path,
     ) -> None:
         result = runner.invoke(
             ai_app,

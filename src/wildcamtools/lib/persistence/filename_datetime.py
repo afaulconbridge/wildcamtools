@@ -28,6 +28,7 @@ def infer_recorded_at(filename: str, fmt: str | None) -> datetime | None:
     Returns:
         The parsed :class:`datetime`, or ``None`` if ``fmt`` is falsy or the
         basename does not start with a string matching the pattern.
+
     """
     if not fmt:
         return None

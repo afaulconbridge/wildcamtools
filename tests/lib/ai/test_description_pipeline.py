@@ -111,14 +111,14 @@ class TestDescriptionImageBatchQuery:
         mock_llm = MockDescriptionLlm(next_description="desc 1")
         query = DescriptionImageBatchQuery(llm=mock_llm)
         batch_a = ExtractedBatch(
-            selected_frames=[ExtractedFrame(path=p, frame_no=i) for i, p in enumerate(sample_image_paths)]
+            selected_frames=[ExtractedFrame(path=p, frame_no=i) for i, p in enumerate(sample_image_paths)],
         )
         batch_b = ExtractedBatch(
-            selected_frames=[ExtractedFrame(path=p, frame_no=i) for i, p in enumerate(sample_image_paths)]
+            selected_frames=[ExtractedFrame(path=p, frame_no=i) for i, p in enumerate(sample_image_paths)],
         )
 
         enriched: ExtractedFramesWithResults[BatchDescription] = query.query_image_batches(
-            ExtractedFrames(batches=[batch_a, batch_b])
+            ExtractedFrames(batches=[batch_a, batch_b]),
         )
         assert len(enriched.batches) == 2
         assert all(b.result is not None for b in enriched.batches)

@@ -28,6 +28,7 @@ class AbstractLabelComparator(ABC):
 
         Returns:
             Classification if a special case is detected, None otherwise.
+
         """
         result_lower = result.lower()
         label_lower = label.lower()
@@ -38,8 +39,7 @@ class AbstractLabelComparator(ABC):
         if result_lower in ABSENCE_MARKERS:
             if label_lower in ABSENCE_MARKERS:
                 return ResultClassification.CORRECT
-            else:
-                return ResultClassification.INCORRECT
+            return ResultClassification.INCORRECT
 
         if result_lower == label_lower:
             return ResultClassification.CORRECT
@@ -57,6 +57,7 @@ class AbstractLabelComparator(ABC):
         Returns:
             The classification type (correct, incorrect, unknown).
             The correctness can be inferred from the classification value.
+
         """
         ...
 
@@ -80,8 +81,7 @@ class ExactLabelComparator(AbstractLabelComparator):
         if not result.is_animal_present:
             if label.lower() in ABSENCE_MARKERS:
                 return ResultClassification.CORRECT
-            else:
-                return ResultClassification.INCORRECT
+            return ResultClassification.INCORRECT
 
         special_case = self._check_special_cases(result.species_name, label)
         if special_case is not None:
@@ -100,11 +100,13 @@ class LLMLabelComparator(AbstractLabelComparator):
 
     Uses an LLM to determine if a result semantically matches a label.
     The rule is: result can be a subset/specific instance of label, but not vice versa.
+
     Examples:
         - "domestic cat" vs "cat" → True (specific instance)
         - "Moorhen" vs "bird" → True (specific instance)
         - "cat" vs "domestic cat" → False (too general)
         - "animal" vs "cat" → False (too general)
+
     """
 
     _cache: dict[tuple[str, str], ResultClassification] | None
@@ -144,8 +146,7 @@ class LLMLabelComparator(AbstractLabelComparator):
         if not result.is_animal_present:
             if label_lower in ABSENCE_MARKERS:
                 return ResultClassification.CORRECT
-            else:
-                return ResultClassification.INCORRECT
+            return ResultClassification.INCORRECT
 
         special_case = self._check_special_cases(result_lower, label_lower)
         if special_case is not None:

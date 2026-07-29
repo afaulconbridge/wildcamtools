@@ -145,6 +145,7 @@ def save_pipeline_run(
 
     Returns:
         The created PipelineRun entity
+
     """
     video_stat = _get_or_create_video_stat(session, outcome.stats)
     _get_or_create_video(session, str(video_path), video_stat, recorded_at=recorded_at)
@@ -314,21 +315,21 @@ def count_animal_status(
 
     present = int(
         session.exec(
-            select(func.count(base.c.video_filename)).select_from(base).where(base.c.is_animal_present.is_(True))
+            select(func.count(base.c.video_filename)).select_from(base).where(base.c.is_animal_present.is_(True)),
         ).scalar()
-        or 0
+        or 0,
     )
     absent = int(
         session.exec(
-            select(func.count(base.c.video_filename)).select_from(base).where(base.c.is_animal_present.is_(False))
+            select(func.count(base.c.video_filename)).select_from(base).where(base.c.is_animal_present.is_(False)),
         ).scalar()
-        or 0
+        or 0,
     )
     unknown = int(
         session.exec(
-            select(func.count(base.c.video_filename)).select_from(base).where(base.c.is_animal_unknown.is_(True))
+            select(func.count(base.c.video_filename)).select_from(base).where(base.c.is_animal_unknown.is_(True)),
         ).scalar()
-        or 0
+        or 0,
     )
     return (present, absent, unknown)
 
@@ -359,7 +360,8 @@ def _filtered_classification_subquery(
     outer query.
     """
     stmt: Any = select(PipelineRun, ClassificationResult).join(
-        ClassificationResult, PipelineRun.final_result_id == ClassificationResult.id
+        ClassificationResult,
+        PipelineRun.final_result_id == ClassificationResult.id,
     )
     if confidences:
         stmt = stmt.where(ClassificationResult.confidence.in_(confidences))  # type: ignore[attr-defined]
@@ -452,14 +454,14 @@ def aggregate_statistics(
     species_rows = session.exec(
         select(base.c.species_name, func.count(base.c.video_filename))
         .group_by(base.c.species_name)
-        .order_by(desc(func.count(base.c.video_filename)))
+        .order_by(desc(func.count(base.c.video_filename))),
     ).all()
     species_counts = {name: int(count) for name, count in species_rows}
 
     confidence_rows = session.exec(
         select(base.c.confidence, func.count(base.c.video_filename))
         .group_by(base.c.confidence)
-        .order_by(desc(func.count(base.c.video_filename)))
+        .order_by(desc(func.count(base.c.video_filename))),
     ).all()
     confidence_counts = {level: int(count) for level, count in confidence_rows}
 

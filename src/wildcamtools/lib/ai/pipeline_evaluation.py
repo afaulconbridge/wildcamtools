@@ -158,7 +158,7 @@ def _run_worker_pool(
                 processing_time_seconds=worker_result.processing_time_seconds,
                 frame_ids=worker_result.frame_ids,
                 stats=worker_result.outcome.stats.model_dump(),
-            )
+            ),
         )
 
     return results
@@ -186,6 +186,7 @@ def evaluate_ai_pipeline(
     Raises:
         FileNotFoundError: If config_path, labels_path, or comparison_config_path doesn't exist.
         ValueError: If config_path, labels_path, or comparison_config_path is not a file.
+
     """
     validate_evaluation_paths(config_path, labels_path, video_dir, comparison_config_path)
 

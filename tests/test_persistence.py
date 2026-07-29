@@ -220,7 +220,10 @@ def test_get_pipeline_runs_by_video(db_engine, sample_video_stats, sample_rich_r
 
 
 def test_classification_result_unique_constraint(
-    db_engine, sample_video_stats, sample_rich_result, sample_pipeline_config
+    db_engine,
+    sample_video_stats,
+    sample_rich_result,
+    sample_pipeline_config,
 ):
     """Test that the unique constraint on ClassificationResult works correctly."""
     outcome = PipelineOutcome(
@@ -303,7 +306,10 @@ def test_video_recorded_at_persisted(db_engine, sample_video_stats, sample_rich_
 
 
 def test_video_recorded_at_does_not_overwrite_existing(
-    db_engine, sample_video_stats, sample_rich_result, sample_pipeline_config
+    db_engine,
+    sample_video_stats,
+    sample_rich_result,
+    sample_pipeline_config,
 ) -> None:
     """A second import must not clobber a previously-set recorded_at."""
     outcome = PipelineOutcome(
@@ -329,7 +335,10 @@ def test_video_recorded_at_does_not_overwrite_existing(
 
 
 def test_video_recorded_at_default_none(
-    db_engine, sample_video_stats, sample_rich_result, sample_pipeline_config
+    db_engine,
+    sample_video_stats,
+    sample_rich_result,
+    sample_pipeline_config,
 ) -> None:
     """Without a recorded_at argument the column should remain None."""
     outcome = PipelineOutcome(

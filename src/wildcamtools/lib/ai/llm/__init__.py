@@ -23,6 +23,7 @@ def create_analyser(
 
     Raises:
         NotImplementedError: If the backend is not supported.
+
     """
     match backend:
         case Backend.LLAMACPP:

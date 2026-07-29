@@ -16,6 +16,9 @@ class SegmentMetadata(BaseModel):
         start_time: Timestamp of first frame (optional)
         end_time: Timestamp of last frame (optional)
         fps: Frames per second for this segment
+        actual_frames: Actual frame count from ffprobe (optional)
+        duration: Actual duration in seconds (optional)
+
     """
 
     start_frame: int
@@ -23,6 +26,8 @@ class SegmentMetadata(BaseModel):
     start_time: datetime | None = None
     end_time: datetime | None = None
     fps: float
+    actual_frames: int | None = None
+    duration: float | None = None
 
     def to_dict(self) -> dict[str, object]:
         """Convert to dictionary with ISO format timestamps."""
@@ -42,6 +47,7 @@ class SegmentMetadata(BaseModel):
 
         Returns:
             SegmentMetadata object or None if file doesn't exist or is invalid
+
         """
         if not path.exists():
             return None
@@ -64,6 +70,7 @@ class SegmentMetadata(BaseModel):
 
         Args:
             path: Path to write the .meta.json file
+
         """
         with open(path, "w") as f:
             json.dump(self.to_dict(), f, indent=2)
@@ -77,6 +84,7 @@ class SegmentMetadata(BaseModel):
 
         Returns:
             Path to the corresponding .meta.json file
+
         """
         return segment_path.with_suffix(segment_path.suffix + ".meta.json")
 
@@ -89,6 +97,7 @@ class SegmentMetadata(BaseModel):
 
         Returns:
             Path to the corresponding segment video file
+
         """
         if not metadata_path.name.endswith(".meta.json"):
             raise ValueError(f"Invalid metadata path: {metadata_path}")

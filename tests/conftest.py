@@ -38,7 +38,7 @@ def fixture_video_frame_generator(video_path: Path) -> Generator[Callable[[], Ge
         with VideoReader(video_path) as video_source:
             yield from video_source
 
-    yield internal_generator
+    return internal_generator
 
 
 @pytest.fixture(name="rtsp_server", scope="session")

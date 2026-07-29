@@ -14,9 +14,7 @@ logger = logging.getLogger(__name__)
 
 
 def socket_check(host: str = "127.0.0.1", port: int = 8554, timeout: float = 1.0) -> bool:
-    """
-    This is a lightweight readiness check for a server being up.
-    """
+    """This is a lightweight readiness check for a server being up."""
     try:
         with socket.create_connection((host, port), timeout=timeout):
             return True
